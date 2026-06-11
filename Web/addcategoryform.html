@@ -1,0 +1,22 @@
+
+  <!-- Primary Page Layout
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+%%ERROR_MESSAGE%%
+
+    <div class="container">
+        <section class="header">
+            <h2 class="title">LocalRadio</h2>
+            <h3 class="title">Add New Category</h3>
+
+            <form class="editfavorite" id="editfavorite" onsubmit="event.preventDefault(); return addCategoryRecord(this);" method="POST">
+                
+                <label for="category_name">New Category Name:</label>
+                <input class="twelve columns value-prop" type="text" id="category_name" name="category_name" value="" placeholder="New Category Name">
+                
+                <input id="add-category-button" class="twelve columns button button-primary" type="submit" value="Add New Category">
+            
+            </form>
+
+        </section>
+    </div>
+

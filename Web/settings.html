@@ -1,0 +1,32 @@
+
+
+  <!-- Primary Page Layout
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+%%ERROR_MESSAGE%%
+
+    <div class="container">
+        <section class="header">
+            <h2 class="title">Settings</h2>
+            <h3 class="title">AAC Streaming</h3>
+            <form class="wbfm-tuner-form" id="wbfm-tuner-form" onsubmit="event.preventDefault(); return applyAACSettings(this);" method="POST">
+
+                <label for="bitrate_select">Bitrate:</label>
+                <select class="twelve columns value-prop" id="bitrate_select" name="bitrate_select">
+                    %%AAC_BITRATE_SELECT%%
+                </select>
+
+                <br>
+                
+                <br>&nbsp;
+                <br>
+
+                <input class="twelve columns button button-primary" type="button" value="Save Changes and Restart" onclick="event.preventDefault(); return applyAACSettings(this);">
+            </form>
+            <br>&nbsp;
+            <br>
+            Restarting will stop current audio stream.
+        </section>
+
+        
+    </div>
+

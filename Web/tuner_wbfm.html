@@ -1,0 +1,92 @@
+
+  
+  <script>
+    // modify values declared in localradio.js for FM broadcast range
+    frequency_min = 87500000;   // 87.5 MHz
+    frequency_max = 107900000;  // 107.9 MHz
+  </script>
+
+  <!-- Primary Page Layout
+  –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+%%ERROR_MESSAGE%%
+
+    <div class="container">
+        <section class="header">
+            <h2 class="title">LocalRadio</h2>
+            <h3 class="title" id="listen_title">Wide-band FM Tuner</h3>
+
+            <form class="wbfm-tuner-form" id="wbfm-tuner-form" onsubmit="event.preventDefault(); return insertNewFrequencyRecord(this);" method="POST">
+        
+                <label for="station_name">Station Name:</label>
+                <input class="twelve columns value-prop" type="text" id="station_name" name="station_name" value="" placeholder="Station Name">
+
+                <label for="tuner">FM Frequency:</label>
+                <section class="tuner">
+
+                    <div class="tuner-digits">
+                        <span id="XXXX-MHz" class="tuner-digit tuner-digit-hidden">0</span>
+                        <span id="XXX-MHz" class="tuner-digit" onclick="tunerDigitClicked(this);" title="Tuner Digit Hundreds MegaHertz">0</span>
+                        <span id="XX-MHz" class="tuner-digit" onclick="tunerDigitClicked(this);" title="Tuner Digit Tens MegaHertz">8</span>
+                        <span id="X-MHz" class="tuner-digit" onclick="tunerDigitClicked(this);" title="Tuner Digit MegaHertz">7</span>
+                        <span id="decimal-MHz" class="tuner-text">.</span>
+                        <span id="X-KHz" class="tuner-digit" onclick="tunerDigitClicked(this);">9</span>
+                        <span id="XX-KHz" class="tuner-digit tuner-digit-hidden" title="Tuner Digit Hundreds KiloHertz">0</span>
+                        <span id="XXX-KHz" class="tuner-digit tuner-digit-hidden">0</span>
+                        <span id="XXXX-KHz" class="tuner-digit tuner-digit-hidden">0</span>
+                        <span id="XXXXX-KHz" class="tuner-digit tuner-digit-hidden">0</span>
+                        <span id="XXXXXX-KHz" class="tuner-digit tuner-digit-hidden">0</span>
+                        <span id="MHz-label" class="tuner-text">&nbsp;MHz</span>
+                    </div>
+                    
+                <input type="hidden" id="frequency" name="frequency" value="87900000">
+                </section>
+
+                <span style="display: inline;">
+                
+                    <button id="down_button" name="down_button" type="button" class="frequency-button" onclick="frequencyDownButtonClicked(self);" title="Decrease selected tuner digit">-</button>
+                    <button id="up_button" name="up_button" type="button" class="frequency-button" onclick="frequencyUpButtonClicked(self);" title="Increase selected tuner digit">+</button>
+                    
+                </span>
+                
+                &nbsp;<br>
+                &nbsp;<br>
+            
+                <label for="tuner_gain">Tuner Gain:</label>
+                <select class="twelve columns value-prop" id="tuner_gain" name="tuner_gain" title='Set the Tuner Gain to a larger value to increase the signal amplification, or a smaller value to decrease it.  Adjust the Tuner Gain and Bandwidth to get the best signal.'>
+                    <option value="12.5">12.5</option>
+                    <option value="25.4">25.4</option>
+                    <option value="49.6" selected="">49.6</option>
+                </select>
+
+                <label for="sample_rate">Sample Rate:</label>
+                <select class="twelve columns value-prop" id="sample_rate" name="sample_rate" title='The Sample Rate is usually set to 170000 or 85000 for FM radio stations.'>
+                    <option value="85000">85000</option>
+                    <option value="170000" selected="">170000</option>
+                </select>
+                
+                <label for="stereo_flag">Stereo (for 170K sample rate):</label>
+                <select class="twelve columns value-prop" id="stereo_flag" name="stereo_flag" title='FM stereo is available for strong signals with a sample rate > 106K'>
+                    <option value="0" selected="">Off</option>
+                    <option value="1">On</option>
+                </select>
+                
+                %%CATEGORY_SELECT%%
+
+                <br>&nbsp;
+                <br>&nbsp;
+                <br>
+
+                <input class="twelve columns button button-primary" type="button" value="Listen" onclick="var tunerDigits=getElementById('tuner-digits'); frequencyListenButtonClicked();" title="Click the Listen button to tune the RTL-SDR radio to the frequency shown above.  You may also need to click on the Play button in the audio controls below.">
+                
+                <br>&nbsp;
+                <br>&nbsp;
+                <br>
+            
+                <input class="twelve columns button button-primary" type="submit" value="Add New Favorite Frequency">
+                
+            </form>
+
+        </select>
+
+    </div>
+

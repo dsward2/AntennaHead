@@ -1,0 +1,5 @@
+framework module librtlsdr {
+    umbrella header "rtl-sdr.h"
+    export *
+    module * { export * }
+}

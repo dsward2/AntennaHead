@@ -1,32 +1,36 @@
-//
-//  AntennaHeadApp.swift
-//  AntennaHead
-//
-//  Created by Douglas Ward on 6/1/26.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct AntennaHeadApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    init() {
+        _ = AppDatabase.shared
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
+        .commands {
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .windowArrangement) {
+                FCCSearchWindowCommand()
+            }
+        }
+
+        Window("FCC Station Search", id: "fcc-search") {
+            FCCSearchView()
+        }
+        .defaultSize(width: 480, height: 560)
+    }
+}
+
+struct FCCSearchWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("FCC Station Search") {
+            openWindow(id: "fcc-search")
+        }
+        .keyboardShortcut("f", modifiers: [.command, .shift])
     }
 }
