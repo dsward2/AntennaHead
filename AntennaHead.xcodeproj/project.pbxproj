@@ -8,26 +8,24 @@
 
 /* Begin PBXBuildFile section */
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
+		0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB66C2FECE41D00BA711A /* PCMPassthrough */; };
+		0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; };
+		0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
 		0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0ECF511B2FD92707006943DA /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51272FDA8FF5006943DA /* GRDB */; };
+		0ECF58D62FDB7F7F006943DA /* libusb-1.0.0.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */; };
+		0ECF58D82FDB8040006943DA /* libusb-1.0.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
 		AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */; };
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
-		AA000018AA000018AA000018 /* rtl_convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000017AA000017AA000017 /* rtl_convenience.c */; };
 		AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */ = {isa = PBXBuildFile; fileRef = AA00000BAA00000BAA00000B /* rtl_fm_localradio */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AA000018AA000018AA000018 /* rtl_convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000017AA000017AA000017 /* rtl_convenience.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		AA000014AA000014AA000014 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 0EF469AE2FCE8911001510D3 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = AA000004AA000004AA000004;
-			remoteInfo = rtl_fm_localradio;
-		};
 		0EF469C62FCE8913001510D3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 0EF469AE2FCE8911001510D3 /* Project object */;
@@ -42,6 +40,13 @@
 			remoteGlobalIDString = 0EF469B52FCE8911001510D3;
 			remoteInfo = AntennaHead;
 		};
+		AA000014AA000014AA000014 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0EF469AE2FCE8911001510D3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA000004AA000004AA000004;
+			remoteInfo = rtl_fm_localradio;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -53,21 +58,37 @@
 			files = (
 				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
+				0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0ECF58D72FDB8021006943DA /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				0ECF58D82FDB8040006943DA /* libusb-1.0.0.dylib in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
+		0EAEB66E2FECE50300BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMPassthrough; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMPassthrough"; sourceTree = "<absolute>"; };
+		0EAEB66F2FECE50B00BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMPassthrough; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMPassthrough"; sourceTree = "<absolute>"; };
+		0EAEB6702FECE80100BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = PCMPassthrough; sourceTree = "<group>"; };
 		0ECF511B2FD92707006943DA /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
+		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
+		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0EF469C52FCE8913001510D3 /* AntennaHeadTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AntennaHeadTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0EF469CF2FCE8913001510D3 /* AntennaHeadUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AntennaHeadUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA00000BAA00000BAA00000B /* rtl_fm_localradio */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = rtl_fm_localradio; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = rtl_fm_localradio.m; sourceTree = "<group>"; };
 		AA00000DAA00000DAA00000D /* convenience.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = convenience.c; sourceTree = "<group>"; };
 		AA000017AA000017AA000017 /* rtl_convenience.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = rtl_convenience.c; sourceTree = "<group>"; };
-		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		0EF469C52FCE8913001510D3 /* AntennaHeadTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AntennaHeadTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		0EF469CF2FCE8913001510D3 /* AntennaHeadUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AntennaHeadUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -95,7 +116,9 @@
 			files = (
 				0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */,
 				0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */,
+				0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */,
 				0ECF51072FD87EB4006943DA /* X509 in Frameworks */,
+				0ECF58D62FDB7F7F006943DA /* libusb-1.0.0.dylib in Frameworks */,
 				0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */,
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 			);
@@ -128,33 +151,18 @@
 		0ECF510F2FD914EB006943DA /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
 				0ECF511B2FD92707006943DA /* LiveAudioServer */,
+				0EAEB6702FECE80100BA711A /* PCMPassthrough */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		AA000015AA000015AA000015 /* rtl_fm_localradio_src */ = {
-			isa = PBXGroup;
-			children = (
-				AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */,
-				AA000016AA000016AA000016 /* convenience */,
-			);
-			name = rtl_fm_localradio_src;
-			path = rtl_fm_localradio_src;
-			sourceTree = "<group>";
-		};
-		AA000016AA000016AA000016 /* convenience */ = {
-			isa = PBXGroup;
-			children = (
-				AA00000DAA00000DAA00000D /* convenience.c */,
-				AA000017AA000017AA000017 /* rtl_convenience.c */,
-			);
-			path = convenience;
 			sourceTree = "<group>";
 		};
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
+				0EAEB66E2FECE50300BA711A /* PCMPassthrough */,
+				0EAEB66F2FECE50B00BA711A /* PCMPassthrough */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
 				0EA8DC4A2FD666B300D79877 /* Web */,
 				AA000015AA000015AA000015 /* rtl_fm_localradio_src */,
@@ -176,6 +184,24 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		AA000015AA000015AA000015 /* rtl_fm_localradio_src */ = {
+			isa = PBXGroup;
+			children = (
+				AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */,
+				AA000016AA000016AA000016 /* convenience */,
+			);
+			path = rtl_fm_localradio_src;
+			sourceTree = "<group>";
+		};
+		AA000016AA000016AA000016 /* convenience */ = {
+			isa = PBXGroup;
+			children = (
+				AA00000DAA00000DAA00000D /* convenience.c */,
+				AA000017AA000017AA000017 /* rtl_convenience.c */,
+			);
+			path = convenience;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -188,6 +214,7 @@
 				0EF469B42FCE8911001510D3 /* Resources */,
 				0ECF51142FD91FC7006943DA /* CopyFiles */,
 				0ECF511D2FD946E9006943DA /* Run Script - Fix LiveAudioServer Helper rpath */,
+				0ECF58D72FDB8021006943DA /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -205,6 +232,7 @@
 				0ECF51152FD92305006943DA /* LiveAudioServer */,
 				0ECF51272FDA8FF5006943DA /* GRDB */,
 				AA000002AA000002AA000002 /* librtlsdr */,
+				0EAEB66C2FECE41D00BA711A /* PCMPassthrough */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -233,22 +261,6 @@
 			productReference = 0EF469C52FCE8913001510D3 /* AntennaHeadTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		AA000004AA000004AA000004 /* rtl_fm_localradio */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = AA000007AA000007AA000007 /* Build configuration list for PBXNativeTarget "rtl_fm_localradio" */;
-			buildPhases = (
-				AA000008AA000008AA000008 /* Sources */,
-				AA000009AA000009AA000009 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = rtl_fm_localradio;
-			productName = rtl_fm_localradio;
-			productReference = AA00000BAA00000BAA00000B /* rtl_fm_localradio */;
-			productType = "com.apple.product-type.tool";
-		};
 		0EF469CE2FCE8913001510D3 /* AntennaHeadUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0EF469DF2FCE8913001510D3 /* Build configuration list for PBXNativeTarget "AntennaHeadUITests" */;
@@ -271,6 +283,23 @@
 			productName = AntennaHeadUITests;
 			productReference = 0EF469CF2FCE8913001510D3 /* AntennaHeadUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		AA000004AA000004AA000004 /* rtl_fm_localradio */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA000007AA000007AA000007 /* Build configuration list for PBXNativeTarget "rtl_fm_localradio" */;
+			buildPhases = (
+				AA000008AA000008AA000008 /* Sources */,
+				AA000009AA000009AA000009 /* Frameworks */,
+				0ECF58DA2FDC92D1006943DA /* run install_name_tool */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = rtl_fm_localradio;
+			productName = rtl_fm_localradio;
+			productReference = AA00000BAA00000BAA00000B /* rtl_fm_localradio */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -312,6 +341,7 @@
 				0ECF51052FD87EB4006943DA /* XCRemoteSwiftPackageReference "swift-certificates" */,
 				0ECF51262FDA8FF5006943DA /* XCRemoteSwiftPackageReference "GRDB" */,
 				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */,
+				0EAEB66B2FECE41D00BA711A /* XCLocalSwiftPackageReference "Packages/PCMPassthrough" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -331,6 +361,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */,
 				0EA8DC4B2FD666B300D79877 /* Web in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -372,19 +403,27 @@
 			shellPath = /bin/sh;
 			shellScript = "HELPER=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Helpers/LiveAudioServer\"\nSTAMP=\"${SCRIPT_OUTPUT_FILE_0}\"\nif [ -f \"$HELPER\" ]; then\n    if ! otool -l \"$HELPER\" | grep -q \"@executable_path/../Frameworks\"; then\n        install_name_tool -add_rpath \"@executable_path/../Frameworks\" \"$HELPER\"\n        codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" \"$HELPER\"\n    fi\nfi\nmkdir -p \"$(dirname \"$STAMP\")\"\ntouch \"$STAMP\"\n";
 		};
+		0ECF58DA2FDC92D1006943DA /* run install_name_tool */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "run install_name_tool";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Must be positioned after Link Binary With Libraries, and before code-signing\nBIN=\"${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}\"\n   install_name_tool -change \\\n       /opt/local/lib/libusb-1.0.0.dylib \\\n       @rpath/libusb-1.0.0.dylib \\\n       \"$BIN\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		AA000008AA000008AA000008 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */,
-				AA00000FAA00000FAA00000F /* convenience.c in Sources */,
-				AA000018AA000018AA000018 /* rtl_convenience.c in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		0EF469B22FCE8911001510D3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -406,14 +445,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA000008AA000008AA000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */,
+				AA00000FAA00000FAA00000F /* convenience.c in Sources */,
+				AA000018AA000018AA000018 /* rtl_convenience.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		AA000013AA000013AA000013 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = AA000004AA000004AA000004 /* rtl_fm_localradio */;
-			targetProxy = AA000014AA000014AA000014 /* PBXContainerItemProxy */;
-		};
 		0ECF51132FD91F92006943DA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			productRef = 0ECF51122FD91F92006943DA /* LiveAudioServer */;
@@ -427,6 +471,11 @@
 			isa = PBXTargetDependency;
 			target = 0EF469B52FCE8911001510D3 /* AntennaHead */;
 			targetProxy = 0EF469D02FCE8913001510D3 /* PBXContainerItemProxy */;
+		};
+		AA000013AA000013AA000013 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA000004AA000004AA000004 /* rtl_fm_localradio */;
+			targetProxy = AA000014AA000014AA000014 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -484,6 +533,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -542,6 +592,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -566,20 +617,21 @@
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
-				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"@executable_path/../Frameworks",
+					"$(PROJECT_DIR)",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dsward.AntennaHead;
@@ -609,20 +661,21 @@
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
-				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"@executable_path/../Frameworks",
+					"$(PROJECT_DIR)",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dsward.AntennaHead;
@@ -733,7 +786,7 @@
 					"$(inherited)",
 					"$(SRCROOT)/rtl_fm_localradio_src/include",
 					"$(SRCROOT)/rtl_fm_localradio_src",
-					/opt/local/include/libusb-1.0,
+					"/opt/local/include/libusb-1.0",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				OTHER_LDFLAGS = (
@@ -744,7 +797,7 @@
 					CoreAudio,
 					"-framework",
 					CoreFoundation,
-					/opt/local/lib/libusb-1.0.dylib,
+					"/opt/local/lib/libusb-1.0.dylib",
 					"-F$(SRCROOT)/librtlsdr.xcframework/macos-arm64",
 					"-framework",
 					librtlsdr,
@@ -760,6 +813,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ARCHS = arm64;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = MMFBWVS455;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -772,7 +826,7 @@
 					"$(inherited)",
 					"$(SRCROOT)/rtl_fm_localradio_src/include",
 					"$(SRCROOT)/rtl_fm_localradio_src",
-					/opt/local/include/libusb-1.0,
+					"/opt/local/include/libusb-1.0",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				OTHER_LDFLAGS = (
@@ -783,7 +837,7 @@
 					CoreAudio,
 					"-framework",
 					CoreFoundation,
-					/opt/local/lib/libusb-1.0.dylib,
+					"/opt/local/lib/libusb-1.0.dylib",
 					"-F$(SRCROOT)/librtlsdr.xcframework/macos-arm64",
 					"-framework",
 					librtlsdr,
@@ -825,15 +879,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA000007AA000007AA000007 /* Build configuration list for PBXNativeTarget "rtl_fm_localradio" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA000005AA000005AA000005 /* Debug */,
-				AA000006AA000006AA000006 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		0EF469DF2FCE8913001510D3 /* Build configuration list for PBXNativeTarget "AntennaHeadUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -843,17 +888,25 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AA000007AA000007AA000007 /* Build configuration list for PBXNativeTarget "rtl_fm_localradio" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA000005AA000005AA000005 /* Debug */,
+				AA000006AA000006AA000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/dsward2/antennahead-librtlsdr";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		0EAEB66B2FECE41D00BA711A /* XCLocalSwiftPackageReference "Packages/PCMPassthrough" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PCMPassthrough;
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		0ECF51022FD87DC8006943DA /* XCRemoteSwiftPackageReference "LiveAudioServer" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dsward2/LiveAudioServer";
@@ -878,13 +931,20 @@
 				minimumVersion = 6.29.3;
 			};
 		};
+		AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/dsward2/antennahead-librtlsdr";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA000002AA000002AA000002 /* librtlsdr */ = {
+		0EAEB66C2FECE41D00BA711A /* PCMPassthrough */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */;
-			productName = librtlsdr;
+			productName = PCMPassthrough;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -910,6 +970,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0ECF51262FDA8FF5006943DA /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		AA000002AA000002AA000002 /* librtlsdr */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */;
+			productName = librtlsdr;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

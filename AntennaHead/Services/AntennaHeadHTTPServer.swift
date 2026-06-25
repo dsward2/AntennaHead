@@ -14,15 +14,15 @@ final class AntennaHeadHTTPServer {
 
     private var httpListener: NWListener?
     private var httpsListener: NWListener?
-    private let queue = DispatchQueue(label: "com.dsward.AntennaHead.HTTPServer", qos: .userInitiated)
+    nonisolated private let queue = DispatchQueue(label: "com.dsward.AntennaHead.HTTPServer", qos: .userInitiated)
 
-    func start(tlsIdentity: sec_identity_t? = nil) {
+    func start(tlsIdentity: sec_identity_t? = nil, auth: HTTPAuthCredentials.Credentials? = nil) {
         stop()
         do {
-            httpListener = try makeListener(port: httpPort, tlsIdentity: nil)
+            httpListener = try makeListener(port: httpPort, tlsIdentity: nil, auth: auth)
             httpListener?.start(queue: queue)
             if let tlsIdentity {
-                httpsListener = try makeListener(port: httpsPort, tlsIdentity: tlsIdentity)
+                httpsListener = try makeListener(port: httpsPort, tlsIdentity: tlsIdentity, auth: auth)
                 httpsListener?.start(queue: queue)
                 httpsEnabled = true
             }
@@ -42,7 +42,7 @@ final class AntennaHeadHTTPServer {
         httpsEnabled = false
     }
 
-    private func makeListener(port: UInt16, tlsIdentity: sec_identity_t?) throws -> NWListener {
+    private func makeListener(port: UInt16, tlsIdentity: sec_identity_t?, auth: HTTPAuthCredentials.Credentials?) throws -> NWListener {
         let tcp = NWProtocolTCP.Options()
         let params: NWParameters
         if let tlsIdentity {
@@ -56,17 +56,17 @@ final class AntennaHeadHTTPServer {
         params.allowLocalEndpointReuse = true
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         listener.newConnectionHandler = { [weak self] connection in
-            self?.handle(connection)
+            self?.handle(connection, auth: auth)
         }
         return listener
     }
 
-    private func handle(_ connection: NWConnection) {
+    nonisolated private func handle(_ connection: NWConnection, auth: HTTPAuthCredentials.Credentials?) {
         connection.start(queue: queue)
-        receive(on: connection, accumulator: Data())
+        receive(on: connection, accumulator: Data(), auth: auth)
     }
 
-    private func receive(on connection: NWConnection, accumulator: Data) {
+    nonisolated private func receive(on connection: NWConnection, accumulator: Data, auth: HTTPAuthCredentials.Credentials?) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             var buffer = accumulator
@@ -75,7 +75,7 @@ final class AntennaHeadHTTPServer {
             }
 
             if let request = self.parseRequest(buffer) {
-                let response = self.route(request)
+                let response = self.route(request, auth: auth)
                 self.send(response, on: connection)
                 return
             }
@@ -85,11 +85,11 @@ final class AntennaHeadHTTPServer {
                 return
             }
 
-            self.receive(on: connection, accumulator: buffer)
+            self.receive(on: connection, accumulator: buffer, auth: auth)
         }
     }
 
-    private func send(_ response: HTTPResponse, on connection: NWConnection) {
+    nonisolated private func send(_ response: HTTPResponse, on connection: NWConnection) {
         var headers = response.headers
         headers["Content-Length"] = String(response.body.count)
         headers["Connection"] = "close"
@@ -122,7 +122,7 @@ final class AntennaHeadHTTPServer {
                                            body: Data("Not Found".utf8))
     }
 
-    private func parseRequest(_ data: Data) -> HTTPRequest? {
+    nonisolated private func parseRequest(_ data: Data) -> HTTPRequest? {
         guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         guard let headerString = String(data: data[..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
         var lines = headerString.components(separatedBy: "\r\n")
@@ -141,28 +141,159 @@ final class AntennaHeadHTTPServer {
 
     // MARK: Routing
 
-    private func route(_ request: HTTPRequest) -> HTTPResponse {
-        let path = pathWithoutQuery(request.path)
-        if path == "/" {
-            return staticFile(at: "index.html") ?? .notFound
+    nonisolated private func route(_ request: HTTPRequest, auth: HTTPAuthCredentials.Credentials?) -> HTTPResponse {
+        if let auth, !verifyBasicAuth(headerValue: request.headers["authorization"], user: auth.user, password: auth.password) {
+            return unauthorizedResponse(realm: auth.realm)
         }
+        let path = pathWithoutQuery(request.path)
         if path == "/status.json" {
             return HTTPResponse(status: 200, reason: "OK",
                                 headers: ["Content-Type": "application/json"],
                                 body: Data(#"{"status":"ok"}"#.utf8))
         }
-        let relative = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let relative: String
+        if path == "/" {
+            relative = "index.html"
+        } else {
+            relative = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        }
+        if relative.hasSuffix(".html"),
+           let dynamic = renderDynamicHTML(relativePath: relative) {
+            return dynamic
+        }
         return staticFile(at: relative) ?? .notFound
     }
 
-    private func pathWithoutQuery(_ path: String) -> String {
+    // MARK: HTTP Basic auth
+
+    nonisolated private func verifyBasicAuth(headerValue: String?, user: String, password: String) -> Bool {
+        guard let headerValue else { return false }
+        let prefix = "Basic "
+        guard headerValue.hasPrefix(prefix) else { return false }
+        let token = String(headerValue.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespaces)
+        guard let decoded = Data(base64Encoded: token),
+              let decodedString = String(data: decoded, encoding: .utf8),
+              let colon = decodedString.firstIndex(of: ":") else {
+            return false
+        }
+        let suppliedUser = String(decodedString[..<colon])
+        let suppliedPassword = String(decodedString[decodedString.index(after: colon)...])
+        let userOK = constantTimeEqual(Array(suppliedUser.utf8), Array(user.utf8))
+        let passwordOK = constantTimeEqual(Array(suppliedPassword.utf8), Array(password.utf8))
+        return userOK && passwordOK
+    }
+
+    nonisolated private func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        if a.count != b.count { return false }
+        var diff: UInt8 = 0
+        for i in 0..<a.count {
+            diff |= a[i] ^ b[i]
+        }
+        return diff == 0
+    }
+
+    nonisolated private func sanitizedRealm(_ realm: String) -> String {
+        var out = ""
+        out.reserveCapacity(realm.count)
+        for scalar in realm.unicodeScalars {
+            switch scalar {
+            case "\"", "\\", "\r", "\n":
+                continue
+            default:
+                out.unicodeScalars.append(scalar)
+            }
+        }
+        return out.isEmpty ? HTTPAuthCredentials.defaultRealm : out
+    }
+
+    nonisolated private func unauthorizedResponse(realm: String) -> HTTPResponse {
+        let safeRealm = sanitizedRealm(realm)
+        return HTTPResponse(
+            status: 401,
+            reason: "Unauthorized",
+            headers: [
+                "Content-Type": "text/plain; charset=utf-8",
+                "WWW-Authenticate": "Basic realm=\"\(safeRealm)\", charset=\"UTF-8\""
+            ],
+            body: Data("Authentication required".utf8)
+        )
+    }
+
+    nonisolated private func pathWithoutQuery(_ path: String) -> String {
         if let q = path.firstIndex(of: "?") { return String(path[..<q]) }
         return path
     }
 
+    // MARK: Dynamic HTML
+
+    nonisolated private func renderDynamicHTML(relativePath: String) -> HTTPResponse? {
+        guard !relativePath.isEmpty,
+              let webRoot = Bundle.main.url(forResource: "Web", withExtension: nil) else {
+            return nil
+        }
+        let fileURL = webRoot.appendingPathComponent(relativePath).standardizedFileURL
+        let rootPath = webRoot.standardizedFileURL.path
+        guard fileURL.path.hasPrefix(rootPath),
+              var html = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return nil
+        }
+        for (key, value) in replacements(forRelativePath: relativePath) {
+            html = html.replacingOccurrences(of: "%%\(key)%%", with: value)
+        }
+        return HTTPResponse(status: 200, reason: "OK",
+                            headers: ["Content-Type": "text/html; charset=utf-8"],
+                            body: Data(html.utf8))
+    }
+
+    nonisolated private func replacements(forRelativePath relativePath: String) -> [String: String] {
+        var dict = globalReplacements()
+        switch relativePath {
+        case "index2.html":
+            dict["FAVORITES_ICON"]  = loadSVG(named: "favorites")
+            dict["CATEGORIES_ICON"] = loadSVG(named: "categories")
+            dict["TUNER_ICON"]      = loadSVG(named: "tuner")
+            dict["DEVICE_ICON"]     = loadSVG(named: "devices")
+            dict["GEAR_ICON"]       = loadSVG(named: "gear")
+            dict["INFO_ICON"]       = loadSVG(named: "info")
+        default:
+            break
+        }
+        return dict
+    }
+
+    // Tokens shared across every dynamic page. Extend as pages migrate from
+    // LocalRadio (e.g. NAV_BAR, COMPUTER_NAME, device-health messages).
+    nonisolated private func globalReplacements() -> [String: String] {
+        ["ERROR_MESSAGE": ""]
+    }
+
+    nonisolated private func loadSVG(named name: String) -> String {
+        guard let webRoot = Bundle.main.url(forResource: "Web", withExtension: nil) else {
+            return ""
+        }
+        let url = webRoot
+            .appendingPathComponent("images")
+            .appendingPathComponent("\(name).svg")
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            return ""
+        }
+        return stripXMLDeclaration(raw)
+    }
+
+    nonisolated private func stripXMLDeclaration(_ svg: String) -> String {
+        let trimmed = svg.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("<?xml"),
+              let end = trimmed.range(of: "?>") else {
+            return trimmed
+        }
+        return String(trimmed[end.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: Static file serving
 
-    private func staticFile(at relativePath: String) -> HTTPResponse? {
+    nonisolated private func staticFile(at relativePath: String) -> HTTPResponse? {
         guard !relativePath.isEmpty,
               let webRoot = Bundle.main.url(forResource: "Web", withExtension: nil) else {
             return nil
@@ -179,7 +310,7 @@ final class AntennaHeadHTTPServer {
                             body: data)
     }
 
-    private func mimeType(forExtension ext: String) -> String {
+    nonisolated private func mimeType(forExtension ext: String) -> String {
         switch ext {
         case "html", "htm": return "text/html; charset=utf-8"
         case "css": return "text/css; charset=utf-8"

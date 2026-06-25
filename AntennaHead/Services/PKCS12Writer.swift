@@ -1,5 +1,6 @@
 import Foundation
 import Crypto
+import CommonCrypto
 
 /// Builds a minimal RFC 7292 (PKCS#12) PFX from a DER-encoded X.509 certificate
 /// and a PKCS#8-encoded private key. The contents are stored as plain `data`
@@ -11,9 +12,19 @@ import Crypto
 enum PKCS12Writer {
 
     static func build(certDER: [UInt8], keyPKCS8: [UInt8], password: String) -> [UInt8] {
-        // Build SafeContents = SEQUENCE OF SafeBag { certBag, keyBag }
-        let certSafeBag = makeCertBag(certDER: certDER)
-        let keySafeBag = makeKeyBag(keyPKCS8: keyPKCS8)
+        // SecPKCS12Import only emits a `kSecImportItemIdentity` entry when the
+        // cert SafeBag and key SafeBag share a `localKeyID` bag attribute.
+        // SHA-1 of the cert DER is a stable, conventional identifier.
+        let localKeyId = sha1(certDER)
+        let keyEncryptionSalt = randomBytes(8)
+        let keyEncryptionIterations = 2048
+        // Build SafeContents = SEQUENCE OF SafeBag { certBag, shroudedKeyBag }
+        let certSafeBag = makeCertBag(certDER: certDER, localKeyId: localKeyId)
+        let keySafeBag = makeShroudedKeyBag(keyPKCS8: keyPKCS8,
+                                            password: password,
+                                            salt: keyEncryptionSalt,
+                                            iterations: keyEncryptionIterations,
+                                            localKeyId: localKeyId)
         let safeContentsBody = certSafeBag + keySafeBag
         let safeContentsDER = tlv(tag: 0x30, content: safeContentsBody)
 
@@ -47,7 +58,7 @@ enum PKCS12Writer {
 
     // MARK: - PKCS#12 structures
 
-    private static func makeCertBag(certDER: [UInt8]) -> [UInt8] {
+    private static func makeCertBag(certDER: [UInt8], localKeyId: [UInt8]) -> [UInt8] {
         // CertBag = SEQUENCE { OID x509Cert, [0] EXPLICIT OCTET STRING(certDER) }
         var certBagBody: [UInt8] = []
         certBagBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 9, 22, 1])) // id-x509Certificate
@@ -55,19 +66,92 @@ enum PKCS12Writer {
         certBagBody.append(contentsOf: tlv(tag: 0xA0, content: octet))
         let certBag = tlv(tag: 0x30, content: certBagBody)
 
-        // SafeBag = SEQUENCE { OID id-certBag, [0] EXPLICIT CertBag }
+        // SafeBag = SEQUENCE { OID id-certBag, [0] EXPLICIT CertBag, bagAttributes }
         var safeBagBody: [UInt8] = []
         safeBagBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 12, 10, 1, 3])) // id-certBag
         safeBagBody.append(contentsOf: tlv(tag: 0xA0, content: certBag))
+        safeBagBody.append(contentsOf: makeLocalKeyIdAttributes(localKeyId: localKeyId))
         return tlv(tag: 0x30, content: safeBagBody)
     }
 
-    private static func makeKeyBag(keyPKCS8: [UInt8]) -> [UInt8] {
-        // SafeBag = SEQUENCE { OID id-keyBag, [0] EXPLICIT PrivateKeyInfo }
+    /// Builds a `pkcs8ShroudedKeyBag` SafeBag containing the PKCS#8
+    /// PrivateKeyInfo encrypted with `pbeWithSHAAnd3-KeyTripleDES-CBC`.
+    /// `SecPKCS12Import` rejects plain (unencrypted) `keyBag` form, so this is
+    /// the only way to get the parser to surface a usable identity.
+    private static func makeShroudedKeyBag(keyPKCS8: [UInt8],
+                                           password: String,
+                                           salt: [UInt8],
+                                           iterations: Int,
+                                           localKeyId: [UInt8]) -> [UInt8] {
+        let cipherKey = pkcs12PBKDF(password: password, salt: salt,
+                                    iterations: iterations, id: 1, keyLength: 24)
+        let iv = pkcs12PBKDF(password: password, salt: salt,
+                             iterations: iterations, id: 2, keyLength: 8)
+        let ciphertext = tripleDESCBCEncrypt(plaintext: keyPKCS8, key: cipherKey, iv: iv)
+
+        // PBE params: SEQUENCE { salt OCTET STRING, iterations INTEGER }
+        var pbeParamsBody: [UInt8] = []
+        pbeParamsBody.append(contentsOf: tlv(tag: 0x04, content: salt))
+        pbeParamsBody.append(contentsOf: tlv(tag: 0x02, content: encodeInteger(iterations)))
+        let pbeParams = tlv(tag: 0x30, content: pbeParamsBody)
+
+        // AlgorithmIdentifier: SEQUENCE { OID pbeWithSHAAnd3-KeyTripleDES-CBC, pbeParams }
+        var algIdBody: [UInt8] = []
+        algIdBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 12, 1, 3]))
+        algIdBody.append(contentsOf: pbeParams)
+        let algId = tlv(tag: 0x30, content: algIdBody)
+
+        // EncryptedPrivateKeyInfo: SEQUENCE { AlgorithmIdentifier, OCTET STRING encryptedData }
+        var encryptedPKIBody: [UInt8] = []
+        encryptedPKIBody.append(contentsOf: algId)
+        encryptedPKIBody.append(contentsOf: tlv(tag: 0x04, content: ciphertext))
+        let encryptedPKI = tlv(tag: 0x30, content: encryptedPKIBody)
+
+        // SafeBag: SEQUENCE { OID id-pkcs8ShroudedKeyBag, [0] EXPLICIT EncryptedPrivateKeyInfo, bagAttributes }
         var safeBagBody: [UInt8] = []
-        safeBagBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 12, 10, 1, 1])) // id-keyBag
-        safeBagBody.append(contentsOf: tlv(tag: 0xA0, content: keyPKCS8))
+        safeBagBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 12, 10, 1, 2])) // id-pkcs8ShroudedKeyBag
+        safeBagBody.append(contentsOf: tlv(tag: 0xA0, content: encryptedPKI))
+        safeBagBody.append(contentsOf: makeLocalKeyIdAttributes(localKeyId: localKeyId))
         return tlv(tag: 0x30, content: safeBagBody)
+    }
+
+    private static func tripleDESCBCEncrypt(plaintext: [UInt8], key: [UInt8], iv: [UInt8]) -> [UInt8] {
+        let bufferSize = plaintext.count + kCCBlockSize3DES
+        var output = [UInt8](repeating: 0, count: bufferSize)
+        var bytesEncrypted = 0
+        let result = key.withUnsafeBufferPointer { keyPtr -> CCCryptorStatus in
+            iv.withUnsafeBufferPointer { ivPtr in
+                plaintext.withUnsafeBufferPointer { dataPtr in
+                    output.withUnsafeMutableBufferPointer { outPtr in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt),
+                            CCAlgorithm(kCCAlgorithm3DES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyPtr.baseAddress, key.count,
+                            ivPtr.baseAddress,
+                            dataPtr.baseAddress, plaintext.count,
+                            outPtr.baseAddress, bufferSize,
+                            &bytesEncrypted
+                        )
+                    }
+                }
+            }
+        }
+        guard result == kCCSuccess else { return [] }
+        return Array(output.prefix(bytesEncrypted))
+    }
+
+    /// Builds the `bagAttributes SET OF PKCS12Attribute` portion of a SafeBag
+    /// containing a single `localKeyID` (OID 1.2.840.113549.1.9.21) attribute.
+    private static func makeLocalKeyIdAttributes(localKeyId: [UInt8]) -> [UInt8] {
+        // PKCS12Attribute = SEQUENCE { OID localKeyId, SET { OCTET STRING(value) } }
+        var attrBody: [UInt8] = []
+        attrBody.append(contentsOf: oid([1, 2, 840, 113549, 1, 9, 21])) // localKeyID
+        let valueOctet = tlv(tag: 0x04, content: localKeyId)
+        attrBody.append(contentsOf: tlv(tag: 0x31, content: valueOctet)) // SET of attrValues
+        let attribute = tlv(tag: 0x30, content: attrBody)
+        // bagAttributes SET OF PKCS12Attribute
+        return tlv(tag: 0x31, content: attribute)
     }
 
     private static func makeDataContentInfo(payload: [UInt8]) -> [UInt8] {

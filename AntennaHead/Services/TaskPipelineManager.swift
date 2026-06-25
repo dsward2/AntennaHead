@@ -109,7 +109,8 @@ final class TaskPipelineManager {
             } else {
                 item.process?.standardOutput = FileHandle.nullDevice
             }
-            item.process?.standardError = FileHandle.nullDevice
+            //item.process?.standardError = FileHandle.nullDevice
+            item.process?.standardError = FileHandle.standardError   // TODO: disable after testing
         }
     }
 
@@ -130,7 +131,9 @@ final class TaskPipelineManager {
             let running = item.process?.isRunning ?? false
             if !running {
                 let exitStatus: Int32
-                if let proc = item.process, !proc.isRunning, proc.processIdentifier != 0 {
+                if let cached = item.lastTerminationStatus {
+                    exitStatus = cached
+                } else if let proc = item.process, !proc.isRunning, proc.processIdentifier != 0 {
                     exitStatus = proc.terminationStatus
                 } else {
                     exitStatus = -1

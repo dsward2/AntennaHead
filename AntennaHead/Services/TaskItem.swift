@@ -21,6 +21,8 @@ final class TaskItem {
     private(set) var argsArray: [String] = []
     private(set) var process: Process?
     private(set) var stderrPipe: Pipe?
+    private(set) var lastTerminationStatus: Int32?
+    private(set) var lastTerminationReason: Process.TerminationReason?
 
     init(path: String, functionName: String) {
         self.path = path
@@ -46,6 +48,9 @@ final class TaskItem {
     }
 
     func createTask() {
+        lastTerminationStatus = nil
+        lastTerminationReason = nil
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = argsArray
@@ -53,10 +58,12 @@ final class TaskItem {
         task.terminationHandler = { [weak self] terminated in
             let pid = terminated.processIdentifier
             let status = terminated.terminationStatus
-            let reason = terminated.terminationReason.rawValue
+            let reason = terminated.terminationReason
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                print("TaskItem PID=\(pid) - \(self.path) terminationHandler status=\(status) reason=\(reason)")
+                print("TaskItem PID=\(pid) - \(self.path) terminationHandler status=\(status) reason=\(reason.rawValue)")
+                self.lastTerminationStatus = status
+                self.lastTerminationReason = reason
                 self.process = nil
             }
         }

@@ -3,19 +3,25 @@ import UniformTypeIdentifiers
 
 struct TLSSettingsView: View {
     @Bindable var tlsManager: TLSCertificateManager
+    @Bindable var authCredentials: HTTPAuthCredentials
 
     @State private var statusMessage: String = ""
     @State private var isError: Bool = false
     @State private var exportURL: URL?
     @State private var exportPassword: String?
     @State private var showImporter: Bool = false
+    @State private var userCertPassword: String = ""
+
+    @State private var authUsername: String = ""
+    @State private var authPassword: String = ""
+    @State private var authRealm: String = HTTPAuthCredentials.defaultRealm
 
     var body: some View {
         Form {
             Section("Certificate") {
                 LabeledContent("Status") {
                     Text(tlsManager.identity == nil ? "Not loaded" : "Loaded")
-                        .foregroundStyle(tlsManager.identity == nil ? .secondary : .green)
+                        .foregroundStyle(tlsManager.identity == nil ? Color.secondary : Color.green)
                 }
                 Button("Load / Generate Self-Signed Certificate") {
                     runResult {
@@ -65,11 +71,82 @@ struct TLSSettingsView: View {
             }
 
             Section("User-Supplied Certificate") {
-                Text("Override the auto-generated cert with a `.p12` file you provide.")
+                Text("Override the auto-generated cert with a `.p12` file you provide. Leave the password blank for an unprotected file.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                SecureField("PKCS#12 Password", text: $userCertPassword)
                 Button("Choose .p12 File…") {
                     showImporter = true
+                }
+                Button("Verify Auto-Generated .p12 Round-Trip") {
+                    runResult {
+                        let exported = try tlsManager.exportedIdentity()
+                        _ = try tlsManager.loadUserCertificate(p12Path: exported.url.path,
+                                                               password: exported.password)
+                        return "Round-trip OK: \(exported.url.path)"
+                    }
+                }
+                .help("Loads the auto-generated .p12 back through SecPKCS12Import using the exported password. Confirms the file is consumable by LiveAudioServer.")
+                Button("Diagnose Exported .p12") {
+                    runResult {
+                        try tlsManager.diagnosePKCS12()
+                    }
+                }
+                .help("Reports the structure of items SecPKCS12Import sees in the exported .p12.")
+            }
+
+            Section("HTTP Authentication") {
+                Text("These credentials protect the AntennaHead web UI and are forwarded to the LiveAudioServer subprocess. Browsers cache credentials per port, so you may be prompted again the first time you visit each server; subsequent visits will be silent.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Require HTTP authentication", isOn: Binding(
+                    get: { authCredentials.isEnabled },
+                    set: { newValue in
+                        if newValue {
+                            authCredentials.isEnabled = true
+                        } else {
+                            authCredentials.disable()
+                            authUsername = ""
+                            authPassword = ""
+                            statusMessage = "HTTP authentication disabled."
+                            isError = false
+                        }
+                    }
+                ))
+
+                if authCredentials.isEnabled {
+                    TextField("Username", text: $authUsername)
+                        .textContentType(.username)
+                        .disableAutocorrection(true)
+                    SecureField("Password", text: $authPassword)
+                    TextField("Realm", text: $authRealm)
+                        .disableAutocorrection(true)
+                    Button("Apply Credentials") {
+                        runResult {
+                            try authCredentials.save(user: authUsername,
+                                                     password: authPassword,
+                                                     realm: authRealm)
+                            authPassword = ""
+                            return "HTTP authentication updated."
+                        }
+                    }
+                    if let current = authCredentials.current {
+                        LabeledContent("Active user") {
+                            Text(current.user)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                        LabeledContent("Active realm") {
+                            Text(current.realm)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    } else {
+                        Text("No credentials saved yet — enter a username, password, and realm above and tap Apply.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -83,14 +160,23 @@ struct TLSSettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("TLS / Security")
+        .onAppear {
+            if let current = authCredentials.current {
+                authUsername = current.user
+                authRealm = current.realm
+            } else if authRealm.isEmpty {
+                authRealm = HTTPAuthCredentials.defaultRealm
+            }
+        }
         .fileImporter(isPresented: $showImporter,
                       allowedContentTypes: [.x509Certificate, .data]) { result in
             switch result {
             case .success(let url):
                 let didStartAccess = url.startAccessingSecurityScopedResource()
                 defer { if didStartAccess { url.stopAccessingSecurityScopedResource() } }
+                let password = userCertPassword.isEmpty ? nil : userCertPassword
                 runResult {
-                    _ = try tlsManager.loadUserCertificate(p12Path: url.path, password: nil)
+                    _ = try tlsManager.loadUserCertificate(p12Path: url.path, password: password)
                     return "Loaded user certificate from \(url.path)"
                 }
             case .failure(let error):

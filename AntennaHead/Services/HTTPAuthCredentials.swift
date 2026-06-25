@@ -34,9 +34,9 @@ final class HTTPAuthCredentials {
     /// Single source of truth for the realm string advertised by both the
     /// AntennaHead HTTP server and the LiveAudioServer subprocess. Matching
     /// realm strings let browsers reuse cached credentials across origins.
-    static let defaultRealm = "AntennaHead"
+    nonisolated static let defaultRealm = "AntennaHead"
 
-    static let didChangeNotification = Notification.Name("AntennaHeadAuthCredentialsChanged")
+    nonisolated static let didChangeNotification = Notification.Name("AntennaHeadAuthCredentialsChanged")
 
     private static let enabledKey = "AntennaHead.httpAuth.enabled"
     private static let usernameKey = "AntennaHead.httpAuth.username"

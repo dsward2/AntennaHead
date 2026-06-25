@@ -1,0 +1,13 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+*.profraw
+
+# macOS
+.DS_Store
