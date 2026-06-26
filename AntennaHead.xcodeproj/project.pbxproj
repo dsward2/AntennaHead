@@ -11,6 +11,7 @@
 		0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB66C2FECE41D00BA711A /* PCMPassthrough */; };
 		0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; };
 		0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -56,6 +57,7 @@
 			dstPath = Contents/Helpers;
 			dstSubfolderSpec = 1;
 			files = (
+				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
 				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
 				0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */,
@@ -77,9 +79,9 @@
 
 /* Begin PBXFileReference section */
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
-		0EAEB66E2FECE50300BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMPassthrough; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMPassthrough"; sourceTree = "<absolute>"; };
 		0EAEB66F2FECE50B00BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMPassthrough; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMPassthrough"; sourceTree = "<absolute>"; };
-		0EAEB6702FECE80100BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = PCMPassthrough; sourceTree = "<group>"; };
+		0EAEB6702FECE80100BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = text; path = PCMPassthrough; sourceTree = BUILT_PRODUCTS_DIR; };
+		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
 		0ECF511B2FD92707006943DA /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
 		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -151,6 +153,7 @@
 		0ECF510F2FD914EB006943DA /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0EAEB6772FED562F00BA711A /* sox */,
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
 				0ECF511B2FD92707006943DA /* LiveAudioServer */,
 				0EAEB6702FECE80100BA711A /* PCMPassthrough */,
@@ -161,7 +164,6 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
-				0EAEB66E2FECE50300BA711A /* PCMPassthrough */,
 				0EAEB66F2FECE50B00BA711A /* PCMPassthrough */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
 				0EA8DC4A2FD666B300D79877 /* Web */,
