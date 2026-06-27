@@ -19,6 +19,7 @@ final class TaskItem {
     let functionName: String
     var path: String
     private(set) var argsArray: [String] = []
+    private(set) var environmentOverrides: [String: String] = [:]
     private(set) var process: Process?
     private(set) var stderrPipe: Pipe?
     private(set) var lastTerminationStatus: Int32?
@@ -35,6 +36,14 @@ final class TaskItem {
 
     func addArgument<T: Numeric>(_ number: T) {
         argsArray.append("\(number)")
+    }
+
+    func setEnvironment(_ key: String, value: String) {
+        environmentOverrides[key] = value
+    }
+
+    func setEnvironment(_ overrides: [String: String]) {
+        environmentOverrides.merge(overrides) { _, new in new }
     }
 
     func quotedPath() -> String {
@@ -54,6 +63,11 @@ final class TaskItem {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = argsArray
+        if !environmentOverrides.isEmpty {
+            var env = ProcessInfo.processInfo.environment
+            env.merge(environmentOverrides) { _, new in new }
+            task.environment = env
+        }
 
         task.terminationHandler = { [weak self] terminated in
             let pid = terminated.processIdentifier

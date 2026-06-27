@@ -52,6 +52,25 @@ final class TaskPipelineManager {
         return TaskItem(path: pathToExecutable, functionName: functionName)
     }
 
+    /// Bundled SoX audio tool, embedded in Contents/Helpers alongside the other pipeline helpers.
+    static var soxExecutableURL: URL {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sox")
+    }
+
+    /// Resolves the bundled `sox` executable path, throwing if it is missing from the app bundle.
+    func soxExecutablePath() throws -> String {
+        let path = Self.soxExecutableURL.path
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            throw PipelineError.executableNotFound("sox")
+        }
+        return path
+    }
+
+    /// Creates a `TaskItem` for the bundled `sox` tool, ready to receive arguments and be added to the pipeline.
+    func makeSoxTaskItem(functionName: String = "sox") throws -> TaskItem {
+        return makeTaskItem(pathToExecutable: try soxExecutablePath(), functionName: functionName)
+    }
+
     func add(_ taskItem: TaskItem) {
         taskItems.append(taskItem)
     }
