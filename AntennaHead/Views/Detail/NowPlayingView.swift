@@ -3,6 +3,7 @@ import SwiftUI
 struct NowPlayingView: View {
     var frequency: Frequency?
     var audioServer: LiveAudioServerClient
+    var sdrController: SDRController
 
     var body: some View {
         if let frequency {
@@ -12,7 +13,9 @@ struct NowPlayingView: View {
                 SignalMeterView()
                     .padding()
                 Divider()
-                PlaybackControlsView(frequency: frequency, audioServer: audioServer)
+                PlaybackControlsView(frequency: frequency,
+                                     audioServer: audioServer,
+                                     sdrController: sdrController)
                     .padding()
                 Divider()
                 StreamStatusView(audioServer: audioServer)
@@ -56,7 +59,13 @@ struct StationHeaderView: View {
 struct PlaybackControlsView: View {
     var frequency: Frequency
     var audioServer: LiveAudioServerClient
-    @State private var isPlaying = false
+    var sdrController: SDRController
+    @State private var actionError: String?
+
+    /// This station is live when the SDR pipeline is tuned to its record id.
+    private var isPlaying: Bool {
+        frequency.id != nil && sdrController.activeFrequencyID == frequency.id
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -64,7 +73,7 @@ struct PlaybackControlsView: View {
             HStack(spacing: 24) {
                 Button(isPlaying ? "Stop" : "Play",
                        systemImage: isPlaying ? "stop.fill" : "play.fill") {
-                    isPlaying.toggle()
+                    togglePlayback()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -74,6 +83,25 @@ struct PlaybackControlsView: View {
                 Button("Record", systemImage: "record.circle") {}
                     .buttonStyle(.bordered)
                     .disabled(!isPlaying)
+            }
+            if let message = actionError ?? sdrController.lastError.map({ "\($0)" }) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func togglePlayback() {
+        actionError = nil
+        if isPlaying {
+            sdrController.terminateTasks()
+        } else if let id = frequency.id {
+            do {
+                try sdrController.startTasksForFrequency(id: id)
+            } catch {
+                actionError = "\(error)"
             }
         }
     }

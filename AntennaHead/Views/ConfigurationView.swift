@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct ConfigurationView: View {
+    var sdrController: SDRController
+    var audioServer: LiveAudioServerClient
+
     @State private var selectedCategory: Category?
     @State private var selectedStation: Frequency?
     @State private var refreshID = UUID()
@@ -11,7 +14,9 @@ struct ConfigurationView: View {
         } content: {
             StationListView(category: selectedCategory, selectedStation: $selectedStation, refreshID: $refreshID)
         } detail: {
-            DeviceSettingsDetailView()
+            NowPlayingView(frequency: selectedStation,
+                           audioServer: audioServer,
+                           sdrController: sdrController)
         }
     }
 }

@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+/// Manages the LiveAudioServer (LAS) helper process.
+///
+/// LAS runs **continuously and decoupled** from the radio pipeline: it listens
+/// for raw PCM on a UDP input port and holds the client's HTTP audio connection
+/// alive (playing filler/silence) whenever no audio is arriving. The radio
+/// pipeline built by `SDRController`/`TaskPipelineManager` ends in a UDP sender
+/// that targets `udpInputPort`, so the pipeline can be torn down and rebuilt on
+/// retune without ever dropping a listener.
 @MainActor
 @Observable
 final class LiveAudioServerProcessManager {
@@ -28,20 +36,29 @@ final class LiveAudioServerProcessManager {
 
     private static let executablePathKey = "AntennaHead.liveAudioServer.executablePath"
 
-    /// Default tuning used until station selection is wired up (database work).
-    /// rtl_fm produces mono PCM, so LiveAudioServer is started with --channels 1.
-    private static let defaultFrequencyHz = 89_100_000
-    private static let defaultModulation = "fm"
+    /// PCM format LAS expects on its UDP input. Must match the pipeline's
+    /// terminal format (rtl_fm -> sox normalize -> PCMUDPSender): S16LE mono 48k.
     private static let audioSampleRate = 48_000
+    private static let audioChannels = 1
+
+    /// HTTP port LiveAudioServer listens on for its web UI (LAS default).
+    let httpPort = 8080
+
+    /// UDP port LAS listens on for incoming PCM. `SDRController` points its
+    /// PCMUDPSender stage at this port.
+    static let defaultUDPInputPort: UInt16 = 6020
+    let udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort
 
     private(set) var isRunning = false
     private(set) var lastError: Error?
 
     /// The LiveAudioServer (streaming/HTTP) process.
     private var serverProcess: Process?
-    /// The rtl_fm radio source feeding the server's stdin.
-    private var sourceProcess: Process?
     private var userInitiatedStop = false
+
+    /// Auth/TLS captured at last start so `restart()` can reapply them.
+    private var currentAuth: HTTPAuthCredentials.Credentials?
+    private var currentTLS: TLSConfig?
 
     var executableURL: URL {
         get {
@@ -57,33 +74,33 @@ final class LiveAudioServerProcessManager {
         }
     }
 
-    /// rtl_fm radio source helper, embedded alongside LiveAudioServer.
-    private var sourceExecutableURL: URL {
-        Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Helpers/rtl_fm_localradio")
-    }
-
+    /// Starts (or restarts) LiveAudioServer. Called at app launch and whenever
+    /// auth/TLS settings change. The radio pipeline is managed separately by
+    /// `SDRController`, which never restarts LAS — so listeners survive retunes.
     func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
         stop()
 
+        currentAuth = auth
+        currentTLS = tls
+
         let serverURL = executableURL
-        let sourceURL = sourceExecutableURL
-        let fm = FileManager.default
-        guard fm.isExecutableFile(atPath: serverURL.path) else {
+        guard FileManager.default.isExecutableFile(atPath: serverURL.path) else {
             lastError = LASError.executableMissing(serverURL.path)
             print("LiveAudioServerProcessManager: executable missing at \(serverURL.path)")
             return
         }
-        guard fm.isExecutableFile(atPath: sourceURL.path) else {
-            lastError = LASError.executableMissing(sourceURL.path)
-            print("LiveAudioServerProcessManager: radio source missing at \(sourceURL.path)")
-            return
-        }
 
-        // LiveAudioServer reads mono PCM from stdin to match rtl_fm's output.
+        // Persistent UDP-input server: read mono PCM datagrams, emit silence
+        // filler while idle so the client connection never drops on retune.
+        // --exit-with-parent makes LAS reap itself if the app dies/crashes
+        // (otherwise it orphans holding its HTTP port).
         var serverArgs: [String] = [
+            "--udp-input-port", "\(udpInputPort)",
+            "--keep-alive",
+            "--filler-mode", "silence",
+            "--exit-with-parent",
             "--rate", "\(Self.audioSampleRate)",
-            "--channels", "1"
+            "--channels", "\(Self.audioChannels)"
         ]
         if let tls {
             serverArgs.append(contentsOf: ["--tls-identity", tls.identityPath,
@@ -98,29 +115,10 @@ final class LiveAudioServerProcessManager {
             ])
         }
 
-        // rtl_fm radio source: tune, demodulate, emit PCM on stdout.
-        let sourceArgs: [String] = [
-            "-f", "\(Self.defaultFrequencyHz)",
-            "-M", Self.defaultModulation,
-            "-s", "200000",
-            "-r", "\(Self.audioSampleRate)",
-            "-"
-        ]
-
-        // Pipe rtl_fm stdout -> LiveAudioServer stdin.
-        let audioPipe = Pipe()
-
-        let source = Process()
-        source.executableURL = sourceURL
-        source.arguments = sourceArgs
-        source.standardInput = FileHandle.nullDevice
-        source.standardOutput = audioPipe
-        source.standardError = FileHandle.standardError
-
         let server = Process()
         server.executableURL = serverURL
         server.arguments = serverArgs
-        server.standardInput = audioPipe
+        server.standardInput = FileHandle.nullDevice
         server.standardOutput = FileHandle.nullDevice
         server.standardError = FileHandle.standardError
 
@@ -139,11 +137,6 @@ final class LiveAudioServerProcessManager {
                 self.userInitiatedStop = false
                 self.isRunning = false
                 self.serverProcess = nil
-                // If the server dies on its own, tear the radio source down too.
-                if let src = self.sourceProcess, src.isRunning {
-                    src.terminate()
-                }
-                self.sourceProcess = nil
                 if !wasUserInitiated {
                     print("LiveAudioServerProcessManager: server exited unexpectedly with status \(terminated.terminationStatus)")
                 }
@@ -151,37 +144,28 @@ final class LiveAudioServerProcessManager {
         }
 
         do {
-            try source.run()
             try server.run()
-            self.sourceProcess = source
             self.serverProcess = server
             self.isRunning = true
             self.lastError = nil
         } catch {
             self.lastError = LASError.launchFailed("\(error)")
             print("LiveAudioServerProcessManager: \(error)")
-            if source.isRunning { source.terminate() }
             if server.isRunning { server.terminate() }
-            self.sourceProcess = nil
             self.serverProcess = nil
             self.isRunning = false
         }
     }
 
     func stop() {
-        let running = (serverProcess?.isRunning ?? false) || (sourceProcess?.isRunning ?? false)
-        guard running else {
+        guard serverProcess?.isRunning ?? false else {
             serverProcess = nil
-            sourceProcess = nil
             isRunning = false
             return
         }
         userInitiatedStop = true
-        // Stop the source first so the server sees stdin EOF and can flush.
-        terminate(sourceProcess)
         terminate(serverProcess)
         serverProcess = nil
-        sourceProcess = nil
         isRunning = false
     }
 
@@ -199,6 +183,7 @@ final class LiveAudioServerProcessManager {
     }
 
     func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
+        stop()
         start(auth: auth, tls: tls)
     }
 }

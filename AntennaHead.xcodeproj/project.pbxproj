@@ -12,6 +12,8 @@
 		0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; };
 		0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8652FF2326F00BA711A /* PCMUDPSender in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB8642FF2326F00BA711A /* PCMUDPSender */; };
+		0EAEB86A2FF233EC00BA711A /* PCMUDPSender in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8692FF233EC00BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -60,6 +62,7 @@
 				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
 				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
+				0EAEB86A2FF233EC00BA711A /* PCMUDPSender in CopyFiles */,
 				0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -82,6 +85,9 @@
 		0EAEB66F2FECE50B00BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMPassthrough; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMPassthrough"; sourceTree = "<absolute>"; };
 		0EAEB6702FECE80100BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = text; path = PCMPassthrough; sourceTree = BUILT_PRODUCTS_DIR; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
+		0EAEB8602FF22E9F00BA711A /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Package.swift; path = Packages/PCMUDPSender/Package.swift; sourceTree = "<group>"; };
+		0EAEB8622FF22EF900BA711A /* PCMUDPSender */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMUDPSender; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMUDPSender"; sourceTree = "<absolute>"; };
+		0EAEB8692FF233EC00BA711A /* PCMUDPSender */ = {isa = PBXFileReference; lastKnownFileType = text; path = PCMUDPSender; sourceTree = BUILT_PRODUCTS_DIR; };
 		0ECF511B2FD92707006943DA /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
 		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -122,6 +128,7 @@
 				0ECF51072FD87EB4006943DA /* X509 in Frameworks */,
 				0ECF58D62FDB7F7F006943DA /* libusb-1.0.0.dylib in Frameworks */,
 				0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */,
+				0EAEB8652FF2326F00BA711A /* PCMUDPSender in Frameworks */,
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -156,6 +163,7 @@
 				0EAEB6772FED562F00BA711A /* sox */,
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
 				0ECF511B2FD92707006943DA /* LiveAudioServer */,
+				0EAEB8692FF233EC00BA711A /* PCMUDPSender */,
 				0EAEB6702FECE80100BA711A /* PCMPassthrough */,
 			);
 			name = Frameworks;
@@ -164,6 +172,8 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
+				0EAEB8602FF22E9F00BA711A /* Package.swift */,
+				0EAEB8622FF22EF900BA711A /* PCMUDPSender */,
 				0EAEB66F2FECE50B00BA711A /* PCMPassthrough */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
 				0EA8DC4A2FD666B300D79877 /* Web */,
@@ -235,6 +245,7 @@
 				0ECF51272FDA8FF5006943DA /* GRDB */,
 				AA000002AA000002AA000002 /* librtlsdr */,
 				0EAEB66C2FECE41D00BA711A /* PCMPassthrough */,
+				0EAEB8642FF2326F00BA711A /* PCMUDPSender */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -344,6 +355,7 @@
 				0ECF51262FDA8FF5006943DA /* XCRemoteSwiftPackageReference "GRDB" */,
 				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */,
 				0EAEB66B2FECE41D00BA711A /* XCLocalSwiftPackageReference "Packages/PCMPassthrough" */,
+				0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -906,6 +918,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/PCMPassthrough;
 		};
+		0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PCMUDPSender;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -947,6 +963,11 @@
 		0EAEB66C2FECE41D00BA711A /* PCMPassthrough */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PCMPassthrough;
+		};
+		0EAEB8642FF2326F00BA711A /* PCMUDPSender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */;
+			productName = PCMUDPSender;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;
