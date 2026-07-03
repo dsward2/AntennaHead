@@ -1,83 +1,193 @@
 import SwiftUI
 
+/// FCC FM-station database search, ported from LocalRadio's FCC Search window:
+/// enter a 5-digit ZIP code and radius, search the FCC FM Query service, then
+/// Listen to a result or add it to Favorites (with a replace/add/cancel prompt
+/// when a favorite already exists for that frequency).
 struct FCCSearchView: View {
+    /// Posted when the Listen button is clicked; ContentView owns the
+    /// SDRController and starts the tune. userInfo: frequencyHz, sampleRate,
+    /// tunerGain (the FCC window is a separate scene without the controller).
+    static let listenNotification = Notification.Name("FCCSearchView.listen")
+
     @State private var zipCode = ""
-    @State private var radiusMiles = 25.0
-    @State private var results: [FCCStation] = []
+    @State private var radius = 50
+    @State private var radiusUnits: RadiusUnits = .miles
+    @State private var sampleRate = 170_000
+    @State private var tunerGain = 49.6
+
+    @State private var results: [FCCStationRecord] = []
+    @State private var selection: FCCStationRecord.ID?
     @State private var isSearching = false
+    @State private var errorMessage: String?
+    @State private var showingReplaceAlert = false
+
+    private enum RadiusUnits: String, CaseIterable {
+        case miles, km
+    }
+
+    private var selectedStation: FCCStationRecord? {
+        results.first { $0.id == selection }
+    }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
             Form {
-                Section("Search Parameters") {
-                    TextField("ZIP Code", text: $zipCode)
+                Section("Search With 5-Digit ZIP Code") {
+                    TextField("ZIP Code:", text: $zipCode)
                         .textContentType(.postalCode)
-                    HStack {
-                        Text("Radius")
-                        Slider(value: $radiusMiles, in: 5...100, step: 5)
-                        Text("\(Int(radiusMiles)) mi")
-                            .monospacedDigit()
-                            .frame(width: 40)
+                    LabeledContent("Radius:") {
+                        TextField("Radius", value: $radius, format: .number.grouping(.never))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 60)
+                        Picker("Units", selection: $radiusUnits) {
+                            ForEach(RadiusUnits.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 90)
+                    }
+                    Picker("Sample Rate:", selection: $sampleRate) {
+                        Text("85000").tag(85_000)
+                        Text("170000").tag(170_000)
+                    }
+                    Picker("Tuner Gain:", selection: $tunerGain) {
+                        Text("12.5").tag(12.5)
+                        Text("25.4").tag(25.4)
+                        Text("49.6").tag(49.6)
                     }
                 }
                 Section {
-                    Button("Search FCC Database") {
-                        Task { await search() }
-                    }
-                    .disabled(zipCode.count < 5 || isSearching)
-                }
-                if !results.isEmpty {
-                    Section("Results (\(results.count))") {
-                        ForEach(results) { station in
-                            FCCStationRowView(station: station)
+                    HStack {
+                        Button("Search") {
+                            Task { await search() }
+                        }
+                        .disabled(zipCode.count != 5 || isSearching)
+                        if isSearching {
+                            ProgressView().controlSize(.small)
+                        }
+                        if let errorMessage {
+                            Text(errorMessage).foregroundStyle(.red)
                         }
                     }
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("FCC Station Search")
+            .frame(height: 230)
+
+            Table(results, selection: $selection) {
+                TableColumn("Frequency") { Text($0.frequencyText).monospacedDigit() }
+                    .width(min: 70, ideal: 80)
+                TableColumn("Station", value: \.callSign)
+                    .width(min: 60, ideal: 80)
+                TableColumn("Location") { Text("\($0.city), \($0.state) - \($0.licensee)") }
+                TableColumn("Distance") { station in
+                    Text(radiusUnits == .miles ? "\(station.distanceMiles) mi" : "\(station.distanceKm) km")
+                        .monospacedDigit()
+                }
+                .width(min: 60, ideal: 70)
+                TableColumn("Direction", value: \.compassDirection)
+                    .width(min: 60, ideal: 70)
+                TableColumn("ERP", value: \.erp)
+                    .width(min: 60, ideal: 80)
+            }
+
+            Divider()
+
+            HStack {
+                Button("Add to Favorites") { addToFavoritesTapped() }
+                    .disabled(selectedStation == nil)
+                Spacer()
+                Button("Listen") { listen() }
+                    .disabled(selectedStation == nil)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding()
         }
-        .frame(minWidth: 420, minHeight: 480)
+        .navigationTitle("FCC Database Search")
+        .frame(minWidth: 640, minHeight: 520)
+        .alert("Existing record found for this frequency", isPresented: $showingReplaceAlert) {
+            Button("Replace Existing Record") { saveFavorite(replacingExisting: true) }
+            Button("Add New Record") { saveFavorite(replacingExisting: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can replace the existing frequency record, or add a new record "
+                 + "with the same frequency, or cancel this operation.")
+        }
     }
 
     private func search() async {
+        errorMessage = nil
+        guard let zip = Int(zipCode), (10_000...99_999).contains(zip) else {
+            errorMessage = "Enter a 5-digit ZIP code."
+            return
+        }
+        guard let coordinate = FCCSearch.coordinate(forZIPCode: zip) else {
+            errorMessage = FCCSearch.SearchError.unknownZIPCode.localizedDescription
+            return
+        }
+        // The fmq service takes kilometers.
+        let radiusKm = radiusUnits == .miles ? Int(Double(radius) * 1.60934) : radius
+
         isSearching = true
         defer { isSearching = false }
-        // FCC API integration will go here
-        results = FCCStation.placeholders
-    }
-}
-
-struct FCCStationRowView: View {
-    var station: FCCStation
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(station.callSign).font(.headline)
-                Text(station.city).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(station.formattedFrequency)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Button("Add", systemImage: "plus.circle") {}
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+        do {
+            results = try await FCCSearch.search(latitude: coordinate.lat,
+                                                 longitude: coordinate.lon,
+                                                 radiusKm: radiusKm)
+            selection = nil
+            if results.isEmpty { errorMessage = "No FM stations found." }
+        } catch {
+            results = []
+            errorMessage = error.localizedDescription
         }
     }
-}
 
-struct FCCStation: Identifiable {
-    let id = UUID()
-    var callSign: String
-    var frequency: Double
-    var city: String
+    /// Tunes the radio to the selected station (via ContentView, which owns
+    /// the SDRController).
+    private func listen() {
+        guard let station = selectedStation, station.frequencyHz > 0 else { return }
+        NotificationCenter.default.post(name: Self.listenNotification, object: nil, userInfo: [
+            "frequencyHz": station.frequencyHz,
+            "sampleRate": sampleRate,
+            "tunerGain": tunerGain
+        ])
+    }
 
-    var formattedFrequency: String { String(format: "%.1f MHz", frequency) }
+    private func addToFavoritesTapped() {
+        guard let station = selectedStation, station.frequencyHz > 0 else { return }
+        let existing = (try? SQLiteController.shared.frequencyRecord(forFrequency: station.frequencyHz)) ?? nil
+        if existing != nil {
+            showingReplaceAlert = true
+        } else {
+            saveFavorite(replacingExisting: false)
+        }
+    }
 
-    static let placeholders: [FCCStation] = [
-        FCCStation(callSign: "WBEZ", frequency: 91.5, city: "Chicago, IL"),
-        FCCStation(callSign: "WXRT", frequency: 93.1, city: "Chicago, IL"),
-    ]
+    /// Inserts (or updates) a favorite from the selected search result, using
+    /// LocalRadio's FM-broadcast defaults for the pipeline fields.
+    private func saveFavorite(replacingExisting: Bool) {
+        guard let station = selectedStation, station.frequencyHz > 0 else { return }
+
+        var record: Frequency
+        if replacingExisting,
+           let existing = (try? SQLiteController.shared.frequencyRecord(forFrequency: station.frequencyHz)) ?? nil {
+            record = existing
+        } else {
+            record = Frequency.prototype()
+        }
+
+        record.stationName = "\(station.callSign) - \(station.city)"
+        record.frequency = station.frequencyHz
+        record.sampleRate = sampleRate
+        record.tunerGain = tunerGain
+        record.audioOutputFilter = "vol 1 deemph dither -s"
+        record.oversampling = sampleRate > 85_000 ? 2 : 4
+
+        if record.id != nil {
+            try? SQLiteController.shared.updateFrequencyRecord(record)
+        } else {
+            _ = try? SQLiteController.shared.insertFrequencyRecord(&record)
+        }
+    }
 }

@@ -12,8 +12,14 @@ struct AntennaHeadApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .windowArrangement) {
+            // Port of LocalRadio's Commands menu. (Show Custom Tasks Window is
+            // intentionally absent — custom tasks live in the web UI here.)
+            CommandMenu("Commands") {
                 FCCSearchWindowCommand()
+                Button("Reload Web View") {
+                    NotificationCenter.default.post(name: WebRadioView.reloadNotification, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: .command)
             }
         }
 

@@ -203,6 +203,233 @@ function setScanSampleRateInput(newSampleRate)
 
 
 
+// ---- Structured custom-task pipeline editor ----
+// Markup here must mirror customTaskStageHTML() in AntennaHeadHTTPServer.swift.
+
+function ctEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+function customTaskArgRowHTML(v) {
+  return "<div class='task-arg-row'><input class='task-arg' type='text' value='" + ctEsc(v) + "' style='width:80%;'> "
+    + "<input class='button' type='button' value='-' onclick='removeCustomTaskArgument(this);'></div>";
+}
+
+function customTaskStageHTML(path, args) {
+  if (!args || args.length === 0) { args = ['']; }
+  var rows = '';
+  for (var i = 0; i < args.length; i++) { rows += customTaskArgRowHTML(args[i]); }
+  return "<div class='task-stage' style='border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:10px;'>"
+    + "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
+    + "<label>Executable path</label>"
+    + "<input class='task-path u-full-width' type='text' value='" + ctEsc(path) + "' placeholder='/path/to/tool'>"
+    + "<label>Arguments</label><div class='task-args'>" + rows + "</div>"
+    + "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
+    + "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
+    + "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'>"
+    + "</div>";
+}
+
+function addCustomTaskStage() {
+  var c = document.getElementById('task-stages');
+  if (c) { c.insertAdjacentHTML('beforeend', customTaskStageHTML('', [''])); }
+  buildCustomTaskPipelineOverview();
+}
+
+function removeCustomTaskStage(btn) {
+  var st = btn.closest('.task-stage');
+  if (st) { st.parentNode.removeChild(st); }
+  buildCustomTaskPipelineOverview();
+}
+
+// Inserts an empty stage directly above this one, so a new intermediate stage
+// can be added anywhere in the pipeline (Add Stage only appends at the end).
+function insertCustomTaskStageAbove(btn) {
+  var st = btn.closest('.task-stage');
+  if (st) { st.insertAdjacentHTML('beforebegin', customTaskStageHTML('', [''])); }
+  buildCustomTaskPipelineOverview();
+}
+
+function addCustomTaskArgument(btn) {
+  var st = btn.closest('.task-stage');
+  if (!st) { return; }
+  var args = st.querySelector('.task-args');
+  if (args) { args.insertAdjacentHTML('beforeend', customTaskArgRowHTML('')); }
+}
+
+function removeCustomTaskArgument(btn) {
+  var row = btn.closest('.task-arg-row');
+  if (row) { row.parentNode.removeChild(row); }
+}
+
+
+// ---- Custom-task pipeline graphical overview (index) ----
+// Mirrors the SwiftUI Status view's SVG flow diagram. Acts as an index to the
+// stage editors below: clicking a node scrolls to that stage. Rebuilt whenever
+// a stage is added, removed, or its executable path is edited.
+
+function ctStageName(path) {
+  var p = String(path == null ? '' : path).trim();
+  if (p.length === 0) { return '(empty)'; }
+  var parts = p.split('/');
+  var name = parts[parts.length - 1] || p;
+  if (name.length > 18) { name = name.slice(0, 17) + '…'; }
+  return name;
+}
+
+function buildCustomTaskPipelineOverview() {
+  var host = document.getElementById('pipeline-overview-graphic');
+  if (!host) { return; }
+  var stageEls = document.querySelectorAll('#task-stages .task-stage');
+  var names = [];
+  for (var i = 0; i < stageEls.length; i++) {
+    // Give each stage a stable anchor id so nodes can scroll to it.
+    stageEls[i].id = 'task-stage-' + i;
+    var pathEl = stageEls[i].querySelector('.task-path');
+    names.push(ctStageName(pathEl ? pathEl.value : ''));
+  }
+  if (!names.length) {
+    host.innerHTML = "<p class='ct-idle'>No pipeline stages yet — add a stage below.</p>";
+    return;
+  }
+  var NW = 150, NH = 54, GAP = 46, PADX = 12, TOP = 22, BOT = 12;
+  var W = PADX * 2 + names.length * NW + (names.length - 1) * GAP;
+  var H = TOP + NH + BOT;
+  var p = "<svg viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "' xmlns='http://www.w3.org/2000/svg'>";
+  p += "<defs><marker id='ctah' markerWidth='9' markerHeight='9' refX='7' refY='3' orient='auto'><path d='M0,0 L7,3 L0,6 Z' class='ct-arrowhead'/></marker></defs>";
+  for (var j = 0; j < names.length; j++) {
+    var x = PADX + j * (NW + GAP);
+    var y = TOP;
+    var midY = y + NH / 2;
+    if (j > 0) {
+      var x1 = x - GAP, x2 = x;
+      p += "<line x1='" + x1 + "' y1='" + midY + "' x2='" + (x2 - 3) + "' y2='" + midY + "' class='ct-arrow' marker-end='url(#ctah)'/>";
+      p += "<text x='" + ((x1 + x2) / 2) + "' y='" + (midY - 6) + "' class='ct-link-label' text-anchor='middle'>pipe</text>";
+    }
+    p += "<g class='ct-pnode' onclick='scrollToCustomTaskStage(" + j + ");'>";
+    p += "<rect x='" + x + "' y='" + y + "' width='" + NW + "' height='" + NH + "' rx='10' class='ct-node'/>";
+    p += "<text x='" + (x + 14) + "' y='" + (y + 22) + "' class='ct-node-index'>Stage " + (j + 1) + "</text>";
+    p += "<text x='" + (x + 14) + "' y='" + (y + 42) + "' class='ct-node-name'>" + ctEsc(names[j]) + "</text>";
+    p += "</g>";
+  }
+  p += "</svg>";
+  host.innerHTML = p;
+}
+
+function scrollToCustomTaskStage(i) {
+  var el = document.getElementById('task-stage-' + i);
+  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  return false;
+}
+
+function scrollToPipelineOverview() {
+  var el = document.getElementById('pipeline-overview');
+  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  return false;
+}
+
+// Called by loadContent() after the Edit Custom Task fragment is injected.
+// (Inline <script> in the fragment won't run, since it's set via innerHTML.)
+function initCustomTaskEditor() {
+  var stages = document.getElementById('task-stages');
+  if (stages) {
+    // Delegated listener: refresh the overview names as paths are typed.
+    stages.addEventListener('input', function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains('task-path')) {
+        buildCustomTaskPipelineOverview();
+      }
+    });
+  }
+  buildCustomTaskPipelineOverview();
+}
+
+function buildCustomTaskJSON() {
+  var tasks = [];
+  var stages = document.querySelectorAll('#task-stages .task-stage');
+  for (var i = 0; i < stages.length; i++) {
+    var pathEl = stages[i].querySelector('.task-path');
+    var path = pathEl ? pathEl.value.trim() : '';
+    if (path.length === 0) { continue; }
+    var args = [];
+    var argEls = stages[i].querySelectorAll('.task-arg');
+    for (var j = 0; j < argEls.length; j++) {
+      if (argEls[j].value.length > 0) { args.push(argEls[j].value); }
+    }
+    tasks.push({ path: path, arguments: args });
+  }
+  return JSON.stringify({ tasks: tasks });
+}
+
+
+function storeCustomTaskRecord (form) {
+  var hidden = document.getElementById('task_json_hidden');
+  if (hidden) { hidden.value = buildCustomTaskJSON(); }
+
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+  sendHTTPPostRequest("custom_task", baseUrl + "storecustomtask.html", jsonData, 1, false, true);
+
+  return false;
+}
+
+
+// Listen button on the Edit Custom Task page. The server builds the pipeline
+// from the stored record, so save the current edits first, then start listening
+// (same request customTaskListenButtonClicked sends from the Devices page).
+function editCustomTaskListenButtonClicked (form, taskID) {
+  var hidden = document.getElementById('task_json_hidden');
+  if (hidden) { hidden.value = buildCustomTaskJSON(); }
+
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+  var storeRequest = new XMLHttpRequest();
+  storeRequest.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      // Edits saved — now start the custom-task pipeline.
+      var listenData = JSON.stringify([{ name: "custom_task_select", value: String(taskID) }]);
+      var listenRequest = new XMLHttpRequest();
+      listenRequest.open("POST", baseUrl + "customtasklistenbuttonclicked.html", true);
+      listenRequest.send(listenData);
+
+      // handle the audio tag with the new source
+      window.top.postMessage("startaudio", "*");
+    }
+  };
+  storeRequest.open("POST", baseUrl + "storecustomtask.html", true);
+  storeRequest.send(jsonData);
+
+  return false;
+}
+
+
+function deleteCustomTaskRecord (form) {
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+  var taskName = form.task_name ? form.task_name.value : "";
+  if (confirm("Delete \"" + taskName + "\" custom task?") != true) {
+    return false;
+  }
+
+  sendHTTPPostRequest("custom_task", baseUrl + "deletecustomtask.html", jsonData, 1, false, false);
+
+  return false;
+}
+
+
 function sendHTTPPostRequest (table, url, jsonData, backCount, validateData, showAlert) {
     var validationResult = "OK";
     if (validateData == true)
@@ -745,7 +972,14 @@ function frequencyListenButtonClicked()
         stereo_flag = tunerGainSelectedOption.value;
     }
 
-    var tuningArray = {frequency:frequency, sample_rate: sample_rate, tuner_gain: tuner_gain, stereo_flag: stereo_flag};
+    // Modulation is page-specific (WBFM/narrowband = fm, AM/aviation = am).
+    // Inline <script> can't run (pages are injected via innerHTML), so each
+    // tuner page carries a hidden #tuner_modulation element we read here.
+    var modulation = 'fm';
+    var modulationElem = document.getElementById('tuner_modulation');
+    if (modulationElem !== null) { modulation = modulationElem.value; }
+
+    var tuningArray = {frequency:frequency, sample_rate: sample_rate, tuner_gain: tuner_gain, stereo_flag: stereo_flag, modulation: modulation};
 
     var jsonData = JSON.stringify(tuningArray);
 
@@ -769,6 +1003,42 @@ function frequencyListenButtonClicked()
     window.top.postMessage("startaudio", "*");
 
     //console.log("postMessage startaudio");
+}
+
+
+// Listen for the Advanced tuner form, which has plain named fields (no
+// tuner-digit widget). Reads the form's values and posts the same JSON object
+// the frequencylistenbuttonclicked.html route expects.
+function advancedListenButtonClicked(form)
+{
+    var fieldValue = function(name) {
+        var element = form.elements[name];
+        return element ? element.value : '';
+    };
+    var tuningArray = {
+        frequency: fieldValue('frequency'),
+        sample_rate: fieldValue('sample_rate'),
+        tuner_gain: fieldValue('tuner_gain'),
+        stereo_flag: fieldValue('stereo_flag'),
+        modulation: fieldValue('modulation')
+    };
+    var jsonData = JSON.stringify(tuningArray);
+
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+        }
+    };
+    xhttp.open("POST", baseUrl + "frequencylistenbuttonclicked.html", true);
+    xhttp.send(jsonData);
+
+    window.top.postMessage("startaudio", "*");
+
+    return false;
 }
 
 

@@ -1752,6 +1752,30 @@ static void * status_thread_fn(void *arg)
 
 
 
+// Parent-death watchdog: rtl_fm holds the RTL-SDR USB device, so if the
+// launching app exits (clean quit OR crash/SIGKILL) we must exit promptly to
+// release it. The normal teardown is a SIGPIPE cascade from the downstream
+// PCMUDPSender, but that never reaches us when no audio is flowing (e.g. a
+// failed tune produces no stdout). And because AntennaHead is sandboxed, the
+// app cannot kill an orphaned helper — so the helper must reap itself. We poll
+// getppid(): when it changes we've been reparented to launchd, and exit hard
+// (we may be blocked in a USB read where do_exit isn't polled).
+static void * parent_watchdog_thread_fn(void *arg)
+{
+    pid_t original_parent = getppid();
+    while (do_exit == 0)
+    {
+        if (getppid() != original_parent)
+        {
+            _exit(0);
+        }
+        usleep(500000);
+    }
+    return 0;
+}
+
+
+
 int main(int argc, char **argv)
 {
     @autoreleasepool
@@ -2010,6 +2034,10 @@ int main(int argc, char **argv)
 		pthread_create(&dongle.thread, NULL, dongle_thread_fn, (void *)(&dongle));
 
 		pthread_create(&status.thread, NULL, status_thread_fn, (void *)(&status));
+
+		// Self-reap if the launching (sandboxed) app dies and can't kill us.
+		pthread_t parent_watchdog_thread;
+		pthread_create(&parent_watchdog_thread, NULL, parent_watchdog_thread_fn, NULL);
 
 		while (!do_exit) {
 			usleep(100000);

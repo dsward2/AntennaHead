@@ -1,16 +1,45 @@
 import Foundation
 import Network
 
+private extension Dictionary where Key == String, Value == Any {
+    /// String value for a key, coercing JSON numbers to their string form.
+    func string(_ key: String) -> String {
+        if let s = self[key] as? String { return s }
+        if let n = self[key] as? NSNumber { return n.stringValue }
+        return ""
+    }
+}
+
 @MainActor
 @Observable
 final class AntennaHeadHTTPServer {
-    let httpPort: UInt16 = 8090
-    let httpsPort: UInt16 = 8094
+    /// Listener ports. Set by the owner (from `PortSettings`) before `start()`.
+    var httpPort: UInt16 = 8090
+    var httpsPort: UInt16 = 8094
     private(set) var isRunning = false
     private(set) var httpsEnabled = false
 
     /// Retained for compatibility with code that reads `httpServer.port`.
     var port: UInt16 { httpPort }
+
+    /// Posted after the web Settings page stores a new value. ContentView
+    /// observes this and restarts services so the change takes effect (the
+    /// output bitrate is baked into both `WebConfig` and the LAS launch args).
+    static let settingsDidChangeNotification = Notification.Name("AntennaHeadHTTPServer.settingsDidChange")
+
+    /// `local_radio_config` key holding the system-wide stream output bitrate
+    /// in bits/sec (key name retained from LocalRadio's database).
+    static let outputBitrateConfigKey = "AACBitrate"
+    static let defaultOutputBitrate = 128_000
+    static let outputBitrateOptions = [32_000, 48_000, 64_000, 96_000, 128_000, 192_000, 256_000]
+
+    /// The stored output bitrate (bits/sec), falling back to the default.
+    @MainActor static func storedOutputBitrate(sqlite: SQLiteController?) -> Int {
+        let stored = ((try? sqlite?.localRadioAppSettingsValue(forKey: outputBitrateConfigKey)) ?? nil)
+            .flatMap(Int.init)
+        guard let stored, outputBitrateOptions.contains(stored) else { return defaultOutputBitrate }
+        return stored
+    }
 
     /// App services the web routes drive. Set by the owner (ContentView) before
     /// `start()`. Both are `@MainActor`; the nonisolated routing path reaches
@@ -77,6 +106,10 @@ final class AntennaHeadHTTPServer {
         params.allowLocalEndpointReuse = true
         let isSecure = tlsIdentity != nil
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+        // Advertise the web UI on the LAN via Bonjour (visible in Safari's
+        // Bonjour bookmarks and discovery apps).
+        listener.service = NWListener.Service(name: "AntennaHead",
+                                              type: isSecure ? "_https._tcp" : "_http._tcp")
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection, auth: auth, isSecure: isSecure, webConfig: webConfig)
         }
@@ -219,6 +252,150 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "favorites.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["FAVORITES_TABLE": favoritesTableHTML()])
 
+        case "/categories.html":
+            return renderHTML(relativePath: "categories.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["CATEGORIES_TABLE": categoriesTableHTML()])
+
+        case "/tuner_wbfm.html", "/tuner_general.html", "/tuner_am.html", "/tuner_aviation.html":
+            // Tuner sub-category pages: fill the "add to category" pop-up.
+            return renderHTML(relativePath: String(path.dropFirst()), host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["CATEGORY_SELECT": categorySelectOptionsHTML()])
+
+        case "/tuner_advanced.html":
+            return renderHTML(relativePath: "tuner_advanced.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["TUNER_FORM": newFrequencyFormHTML()])
+
+        case "/devices.html":
+            return renderHTML(relativePath: "devices.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["DEVICES_FORM": devicesFormHTML(),
+                                      "CUSTOM_TASKS_FORM": customTasksFormHTML()])
+
+        case "/devicelistenbuttonclicked.html":
+            // Buttons are wired; the Core Audio device-input pipeline is deferred
+            // (needs a capture helper), so this currently logs .notImplemented.
+            let fields = formFields(fromBody: request.body)
+            sdrController?.startTasksForDevice(deviceName: fields["audio_input"] ?? "",
+                                               deviceAudioOutputFilter: fields["audio_output_filter"] ?? "vol 1")
+            return okResponse()
+
+        case "/customtasklistenbuttonclicked.html":
+            if let id = formFields(fromBody: request.body)["custom_task_select"].flatMap(Int64.init) {
+                try? sdrController?.startTasksForCustomTask(id: id)
+            }
+            return okResponse()
+
+        case "/settings.html":
+            return renderHTML(relativePath: "settings.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["AAC_BITRATE_SELECT": outputBitrateSelectOptionsHTML()])
+
+        case "/applyaacsettings.html":
+            // POST body is a JSON object {bitrate: "<bps>"} from applyAACSettings().
+            let bitrate = Int(jsonObject(fromBody: request.body).string("bitrate"))
+            if let bitrate, Self.outputBitrateOptions.contains(bitrate) {
+                try? sqlite?.storeLocalRadioAppSettingsValue("\(bitrate)", forKey: Self.outputBitrateConfigKey)
+                NotificationCenter.default.post(name: Self.settingsDidChangeNotification, object: nil)
+            }
+            return okResponse()
+
+        case "/customtasks.html":
+            return htmlFragmentResponse(customTasksManagerHTML())
+
+        case "/editcustomtask.html":
+            let id = queryValue("id", in: request.path).flatMap(Int64.init)
+            return htmlFragmentResponse(editCustomTaskHTML(id: id))
+
+        case "/storecustomtask.html":
+            upsertCustomTask(fromBody: request.body)
+            return okResponse()
+
+        case "/deletecustomtask.html":
+            if let id = formFields(fromBody: request.body)["id"].flatMap(Int64.init) {
+                try? sqlite?.deleteCustomTaskRecord(forID: id)
+            }
+            return okResponse()
+
+        case "/frequencylistenbuttonclicked.html":
+            // Ad-hoc tune from the web Tuner. Body is a JSON *object*
+            // {frequency, sample_rate, tuner_gain, stereo_flag, modulation}.
+            let o = jsonObject(fromBody: request.body)
+            if let hz = Int(o.string("frequency")), hz > 0 {
+                sdrController?.startTasksForFrequency(
+                    frequencyHz: hz,
+                    sampleRate: Int(o.string("sample_rate")) ?? 170_000,
+                    tunerGain: Double(o.string("tuner_gain")) ?? 49.6,
+                    stereo: o.string("stereo_flag") == "1",
+                    modulation: o.string("modulation"))
+            }
+            return okResponse()
+
+        case "/insertnewfrequency.html":
+            insertNewFrequency(fromBody: request.body)
+            return okResponse()
+
+        case "/category.html":
+            guard let id = queryValue("id", in: request.path).flatMap(Int64.init),
+                  let c = (try? sqlite?.categoryRecord(forID: id)) ?? nil else {
+                return renderHTML(relativePath: "category.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                                  extra: ["CATEGORY_NAME": "Error: category not found",
+                                          "SCAN_CATEGORY_BUTTON": "", "CATEGORY_TABLE": "",
+                                          "EDIT_CATEGORY_LIST_BUTTON": "", "CATEGORY_SETTINGS_BUTTON": ""])
+            }
+            return renderHTML(relativePath: "category.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["CATEGORY_NAME": htmlText(c.categoryName),
+                                      "SCAN_CATEGORY_BUTTON": scanCategoryButtonHTML(category: c),
+                                      "CATEGORY_TABLE": categoryFavoritesTableHTML(categoryID: id),
+                                      "EDIT_CATEGORY_LIST_BUTTON": categoryNavButtonHTML(page: "editcategory.html", id: id, label: "Edit Frequencies List"),
+                                      "CATEGORY_SETTINGS_BUTTON": categoryNavButtonHTML(page: "editcategorysettings.html", id: id, label: "Category Settings")])
+
+        case "/editcategory.html":
+            guard let id = queryValue("id", in: request.path).flatMap(Int64.init),
+                  let c = (try? sqlite?.categoryRecord(forID: id)) ?? nil else {
+                return renderHTML(relativePath: "editcategory.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                                  extra: ["EDIT_CATEGORY_NAME": "Error: category not found",
+                                          "EDIT_CATEGORY_TABLE": "", "DELETE_CATEGORY_BUTTON": ""])
+            }
+            return renderHTML(relativePath: "editcategory.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["EDIT_CATEGORY_NAME": htmlText(c.categoryName),
+                                      "EDIT_CATEGORY_TABLE": editCategoryTableHTML(categoryID: id),
+                                      "DELETE_CATEGORY_BUTTON": deleteCategoryButtonHTML(categoryID: id, name: c.categoryName)])
+
+        case "/editcategorysettings.html":
+            guard let id = queryValue("id", in: request.path).flatMap(Int64.init),
+                  let c = (try? sqlite?.categoryRecord(forID: id)) ?? nil else {
+                return renderHTML(relativePath: "editcategorysettings.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                                  extra: ["EDIT_CATEGORY_NAME": "Error: category not found", "EDIT_CATEGORY_SETTINGS": ""])
+            }
+            return renderHTML(relativePath: "editcategorysettings.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["EDIT_CATEGORY_NAME": htmlText(c.categoryName),
+                                      "EDIT_CATEGORY_SETTINGS": editCategorySettingsFormHTML(category: c)])
+
+        case "/editcategoryitem.html":
+            // GET web service: toggle a frequency's membership in a category.
+            if let catID = queryValue("cat_id", in: request.path).flatMap(Int64.init),
+               let freqID = queryValue("freq_id", in: request.path).flatMap(Int64.init) {
+                let isMember = queryValue("is_member", in: request.path) == "true"
+                toggleCategoryItem(catID: catID, freqID: freqID, isMember: isMember)
+            }
+            return okResponse()
+
+        case "/addcategory.html":
+            addCategory(fromBody: request.body)
+            return okResponse()
+
+        case "/storecategory.html":
+            saveCategory(fromBody: request.body)
+            return okResponse()
+
+        case "/deletecategory.html":
+            deleteCategory(fromBody: request.body)
+            return okResponse()
+
+        case "/scannerlistenbuttonclicked.html":
+            if let id = frequencyID(fromListenBody: request.body), id > 0 {
+                try? sdrController?.startTasksForCategoryScan(id: id)
+            }
+            return okResponse()
+
         case "/viewfavorite.html":
             var name = ""
             var item = "Error: missing favorite id"
@@ -227,6 +404,35 @@ final class AntennaHeadHTTPServer {
             }
             return renderHTML(relativePath: "viewfavorite.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["VIEW_FAVORITE_NAME": htmlText(name), "VIEW_FAVORITE_ITEM": item])
+
+        case "/editfavorite.html":
+            var name = ""
+            var item = "Error: missing favorite id"
+            if let idString = queryValue("id", in: request.path), let id = Int64(idString) {
+                (name, item) = editFavorite(id: id)
+            }
+            return renderHTML(relativePath: "editfavorite.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["EDIT_FAVORITE_NAME": htmlText(name), "EDIT_FAVORITE": item])
+
+        case "/storefrequency.html":
+            saveFrequency(fromBody: request.body)
+            return okResponse()
+
+        case "/deletefrequency.html":
+            deleteFrequency(fromBody: request.body)
+            return okResponse()
+
+        case "/nowplaying.html":
+            let page = nowPlayingPage()
+            return renderHTML(relativePath: "nowplaying.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["NOW_PLAYING_NAME": htmlText(page.name),
+                                      "NOW_PLAYING_DETAILS": page.details,
+                                      "OPEN_AUDIO_PLAYER_PAGE_BUTTON": Self.openAudioPlayerButtonHTML])
+
+        case "/nowplayingstatus.html":
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json"],
+                                body: nowPlayingStatusJSON())
 
         case "/listenbuttonclicked.html":
             // POST body is a serialized form: [{"name":"id","value":"N"}, ...]
@@ -259,6 +465,492 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
+    /// `%%CATEGORIES_TABLE%%` — ported from `generateCategoriesString`. Lists all
+    /// categories (each ID links to `category.html?id=N`) plus an "Add New
+    /// Category" button that loads `addcategoryform.html`.
+    @MainActor private func categoriesTableHTML() -> String {
+        let categories = (try? sqlite?.allCategoryRecords()) ?? []
+        var s = "<table class='u-full-width'><thead><tr><th>ID</th><th>Category</th></tr></thead><tbody>"
+        for c in categories {
+            guard let id = c.id else { continue }
+            let title = "Show category \(c.categoryName)"
+            s += "<tr><td>"
+            s += "<a class='button button-primary' type='submit' onclick=\"loadContent('category.html?id=\(id)');\" title='\(htmlAttribute(title))'>\(id)</a>"
+            s += "</td><td>\(htmlText(c.categoryName))</td></tr>"
+        }
+        s += "</tbody></table>"
+        s += "<form class='new-category-form' id='new-category-form' action='javascript:loadContent(&quot;addcategoryform.html&quot;)'>"
+        s += "<br>&nbsp;<br>&nbsp;<br>\n"
+        s += "<input id='add-category-button' class='twelve columns button button-primary' type='submit' value='Add New Category'>\n"
+        s += "</form>\n<br>&nbsp;<br>\n"
+        return s
+    }
+
+    /// `%%CATEGORY_SELECT%%` — a category pop-up (used by the Tuner sub-category
+    /// pages to file a newly-tuned frequency under a category). Ported from
+    /// `generateCategorySelectOptions`; leading blank option = "no category".
+    @MainActor private func categorySelectOptionsHTML() -> String {
+        let categories = (try? sqlite?.allCategoryRecords()) ?? []
+        var s = "<label for='categories_select'>Category:</label>"
+        s += "<select class='twelve columns value-prop' name='categories_select' "
+        s += "title='The Category pop-up button can be used when adding a new Favorites frequency record'>"
+        s += "<option value='' selected></option>"
+        for c in categories {
+            guard let id = c.id else { continue }
+            s += "<option value='\(id)'>\(htmlText(c.categoryName))</option>"
+        }
+        s += "</select>"
+        return s
+    }
+
+    // MARK: Settings page (system-wide output bitrate)
+
+    /// `%%AAC_BITRATE_SELECT%%` — `<option>`s for the output bitrate pop-up,
+    /// with the stored `local_radio_config` value selected.
+    @MainActor private func outputBitrateSelectOptionsHTML() -> String {
+        let current = Self.storedOutputBitrate(sqlite: sqlite)
+        var s = ""
+        for bps in Self.outputBitrateOptions {
+            s += "<option value='\(bps)'\(bps == current ? " selected" : "")>\(bps / 1000) kbps</option>"
+        }
+        return s
+    }
+
+    // MARK: Devices page (audio-input + custom-task forms)
+
+    /// `%%DEVICES_FORM%%` — Core Audio input picker + output filter + Listen.
+    /// Ported from `generateDevicesFormString`.
+    @MainActor private func devicesFormHTML() -> String {
+        var s = "<form class='device_form' id='deviceForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label for='audio_input'>Select Audio Input:</label>"
+        s += "<select name='audio_input' class='twelve columns value-prop' title='Selects a Core Audio input device, like &quot;Built-in Microphone&quot;.'>"
+        for name in AudioInputDevices.names() {
+            s += "<option value='\(htmlAttribute(name))'>\(htmlText(name))</option>"
+        }
+        s += "</select>"
+        s += "<label for='audio_output_filter'>Sox Audio Output Filter:</label>"
+        s += "<input class='twelve columns value-prop' type='text' id='audio_output_filter' name='audio_output_filter' value='vol 1' "
+        s += "title='Applied by the Sox audio tool to the final output. Default &quot;vol 1&quot;. Do not set a &quot;rate&quot; here — the sample rate is fixed at 48000.'>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"deviceListenButtonClicked(getElementById('deviceForm'));\" "
+        s += "title='Listen to the selected audio input device.'>"
+        s += "</form><br>&nbsp;<br>"
+        return s
+    }
+
+    /// `%%CUSTOM_TASKS_FORM%%` — dropdown of saved custom tasks + Listen.
+    /// Ported from `generateCustomTasksFormString`.
+    @MainActor private func customTasksFormHTML() -> String {
+        let tasks = (try? sqlite?.allCustomTaskRecords()) ?? []
+        var s = "<form class='custom_task_form' id='customTaskForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label for='custom_task_select'>Select Custom Task</label>"
+        s += "<select name='custom_task_select' class='twelve columns value-prop' title='Uses an external task pipeline as the audio source.'>"
+        for t in tasks {
+            guard let id = t.id else { continue }
+            s += "<option value='\(id)'>\(htmlText(t.taskName))</option>"
+        }
+        s += "</select>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"customTaskListenButtonClicked(getElementById('customTaskForm'));\" "
+        s += "title='Listen to the selected custom task.'>"
+        s += "</form>"
+        s += "<form action='javascript:loadContent(&quot;customtasks.html&quot;)'>"
+        s += "<input class='twelve columns button' type='submit' value='Manage Custom Tasks'></form><br>&nbsp;<br>"
+        return s
+    }
+
+    // MARK: Custom-task web manager (list / edit / upsert / delete)
+
+    /// Fragment returned for pages that have no `%%…%%` template file. Loaded
+    /// into index.html's content_frame by `loadContent`, so it uses the site CSS.
+    nonisolated private func htmlFragmentResponse(_ html: String) -> HTTPResponse {
+        HTTPResponse(status: 200, reason: "OK",
+                     headers: ["Content-Type": "text/html; charset=utf-8"],
+                     body: Data(html.utf8))
+    }
+
+    /// `customtasks.html` — list of custom tasks (each → editor) + Add button.
+    @MainActor private func customTasksManagerHTML() -> String {
+        let tasks = (try? sqlite?.allCustomTaskRecords()) ?? []
+        var s = "<div class='container'><section class='header'>"
+        s += "<h2 class='title'>LocalRadio</h2><h3 class='title'>Custom Tasks</h3>"
+        s += "<table class='u-full-width'><thead><tr><th>ID</th><th>Task</th></tr></thead><tbody>"
+        for t in tasks {
+            guard let id = t.id else { continue }
+            s += "<tr><td>"
+            s += "<a class='button button-primary' type='submit' onclick=\"loadContent('editcustomtask.html?id=\(id)');\">\(id)</a>"
+            s += "</td><td>\(htmlText(t.taskName))</td></tr>"
+        }
+        s += "</tbody></table>"
+        s += "<form action='javascript:loadContent(&quot;editcustomtask.html&quot;)'>"
+        s += "<br>&nbsp;<br>\n<input class='twelve columns button button-primary' type='submit' value='Add New Custom Task'></form>"
+        s += "<br>&nbsp;<br></section></div>"
+        return s
+    }
+
+    /// `editcustomtask.html` — edit an existing task (id) or create a new one.
+    /// Field names match the `custom_task` columns; `task_json` is edited as raw
+    /// JSON (`{"tasks":[{"path":..,"arguments":[..]}]}`). Save → storecustomtask.html.
+    @MainActor private func editCustomTaskHTML(id: Int64?) -> String {
+        let task: CustomTask = id.flatMap { try? sqlite?.customTask(forID: $0) ?? nil } ?? CustomTask.prototype()
+        let isEditing = task.id != nil
+
+        func text(_ label: String, _ name: String, _ value: String, type: String = "text") -> String {
+            "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'>"
+        }
+
+        var s = "<div class='container'><section class='header'>"
+        s += "<h2 class='title'>LocalRadio</h2><h3 class='title'>\(isEditing ? "Edit Custom Task" : "Add New Custom Task")</h3>"
+        s += "<form id='customTaskEditForm' onsubmit='event.preventDefault(); return storeCustomTaskRecord(this);' method='POST'>"
+        if let taskID = task.id { s += "<input type='hidden' name='id' value='\(taskID)'>" }
+        s += text("Task Name:", "task_name", task.taskName)
+        s += text("Sample Rate:", "sample_rate", "\(task.sampleRate)", type: "number")
+        s += text("Channels:", "channels", "\(task.channels)", type: "number")
+        s += text("Input Buffer Size:", "input_buffer_size", "\(task.inputBufferSize)", type: "number")
+        s += text("AudioConverter Buffer Size:", "audioconverter_buffer_size", "\(task.audioconverterBufferSize)", type: "number")
+        s += text("AudioQueue Buffer Size:", "audioqueue_buffer_size", "\(task.audioqueueBufferSize)", type: "number")
+        s += "<label>Task Pipeline — executables piped left → right (each stage's stdout feeds the next):</label>"
+        // Graphical index of the pipeline. Built/refreshed by JS (initCustomTaskEditor
+        // in localradio.js); clicking a node scrolls to that stage's editor below.
+        s += "<a id='pipeline-overview'></a><div id='pipeline-overview-graphic' class='ct-pipeline'></div>"
+        s += "<div id='task-stages'>\(customTaskStagesHTML(task.taskJson))</div>"
+        s += "<input class='button' type='button' value='+ Add Stage' onclick='addCustomTaskStage();'>"
+        // JS gathers the stage/argument fields into this hidden field on submit.
+        s += "<input type='hidden' name='task_json' id='task_json_hidden' value=''>"
+        s += "<br>&nbsp;<br><input class='twelve columns button button-primary' type='submit' value='Save Changes'>"
+        if isEditing {
+            // Like the Tuner pages' Listen button: plays what's on the form.
+            // Saves the edits first, since the pipeline is built from the DB.
+            s += "<br>&nbsp;<br><input class='twelve columns button button-primary' type='button' value='Listen' "
+            s += "onclick='editCustomTaskListenButtonClicked(this.form, \(task.id!));' "
+            s += "title='Save changes and listen to this custom task.'>"
+        }
+        s += "</form>"
+        if isEditing {
+            s += "<form id='deleteCustomTaskForm' onsubmit='event.preventDefault(); return deleteCustomTaskRecord(this);' method='POST'>"
+            s += "<input type='hidden' name='id' value='\(task.id!)'>"
+            s += "<input type='hidden' id='task_name' name='task_name' value='\(htmlAttribute(task.taskName))'>"
+            s += "<br>&nbsp;<br><input class='twelve columns button' type='submit' value='Delete This Custom Task'></form>"
+        }
+        s += "<br>&nbsp;<br></section></div>"
+        return s
+    }
+
+    /// Renders the structured task-pipeline editor from `task_json`. One block
+    /// per pipe stage (executable path + argument list). The matching JS in
+    /// localradio.js adds/removes stages/arguments and serializes them back to
+    /// `task_json` on save, so the markup here and there must stay in sync.
+    @MainActor private func customTaskStagesHTML(_ json: String) -> String {
+        var stages: [(path: String, args: [String])] = []
+        if let data = json.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let tasks = obj["tasks"] as? [[String: Any]] {
+            for t in tasks {
+                let path = (t["path"] as? String) ?? ""
+                let args = (t["arguments"] as? [Any])?.compactMap { $0 as? String } ?? []
+                stages.append((path, args))
+            }
+        }
+        if stages.isEmpty { stages = [("", [])] }
+        return stages.map { customTaskStageHTML(path: $0.path, args: $0.args) }.joined()
+    }
+
+    nonisolated private func customTaskStageHTML(path: String, args: [String]) -> String {
+        var argRows = ""
+        for arg in (args.isEmpty ? [""] : args) {
+            argRows += "<div class='task-arg-row'><input class='task-arg' type='text' value='\(htmlAttribute(arg))' style='width:80%;'> "
+            argRows += "<input class='button' type='button' value='-' onclick='removeCustomTaskArgument(this);'></div>"
+        }
+        var s = "<div class='task-stage' style='border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:10px;'>"
+        s += "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
+        s += "<label>Executable path</label>"
+        s += "<input class='task-path u-full-width' type='text' value='\(htmlAttribute(path))' placeholder='/path/to/tool'>"
+        s += "<label>Arguments</label><div class='task-args'>\(argRows)</div>"
+        s += "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
+        s += "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
+        s += "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'>"
+        s += "</div>"
+        return s
+    }
+
+    /// Inserts (no id) or updates (id present) a `custom_task` from the editor form.
+    @MainActor private func upsertCustomTask(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        var task: CustomTask
+        if let idString = fields["id"], let id = Int64(idString),
+           let existing = (try? sqlite?.customTask(forID: id)) ?? nil {
+            task = existing
+        } else {
+            task = CustomTask.prototype()
+        }
+
+        if let v = fields["task_name"] { task.taskName = v }
+        if let v = fields["task_json"] { task.taskJson = v }
+        if let v = fields["sample_rate"], let n = Int(v) { task.sampleRate = n }
+        if let v = fields["channels"], let n = Int(v) { task.channels = n }
+        if let v = fields["input_buffer_size"], let n = Int(v) { task.inputBufferSize = n }
+        if let v = fields["audioconverter_buffer_size"], let n = Int(v) { task.audioconverterBufferSize = n }
+        if let v = fields["audioqueue_buffer_size"], let n = Int(v) { task.audioqueueBufferSize = n }
+
+        if task.id != nil {
+            try? sqlite?.updateCustomTaskRecord(task)
+        } else {
+            try? sqlite?.insertCustomTaskRecord(&task)
+        }
+    }
+
+    // MARK: Tuner (advanced form + insert-new-frequency)
+
+    /// `%%TUNER_FORM%%` for tuner_advanced.html — a full new-frequency form whose
+    /// field names match the `frequency` table columns. Submits (via
+    /// `insertNewFrequencyRecord`) to insertnewfrequency.html.
+    @MainActor private func newFrequencyFormHTML() -> String {
+        let p = Frequency.prototype()
+
+        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
+            let stepAttr = step.map { " step='\($0)'" } ?? ""
+            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
+        }
+        func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
+            var s = "<label for='\(name)'>\(label)</label><select class='twelve columns value-prop' name='\(name)'>"
+            for opt in options {
+                s += "<option value='\(htmlAttribute(opt.value))'\(opt.value == current ? " selected" : "")>\(htmlText(opt.label))</option>"
+            }
+            return s + "</select>"
+        }
+        let onOff = [("0", "Off"), ("1", "On")]
+        let modulationOptions = Frequency.modulationOptions.map { ($0, $0.uppercased()) }
+
+        var s = "<form class='wbfm-tuner-form' id='tuner-advanced-form' onsubmit='event.preventDefault(); return insertNewFrequencyRecord(this);' method='POST'>"
+        s += text("Station Name:", "station_name", "")
+        s += text("Frequency (Hz):", "frequency", "\(p.frequency)", type: "number")
+        s += select("Modulation:", "modulation", p.modulation, modulationOptions)
+        s += select("FM Stereo:", "stereo_flag", p.stereoFlag ? "1" : "0", onOff)
+        s += text("Sample Rate:", "sample_rate", "\(p.sampleRate)", type: "number")
+        s += text("Tuner Gain:", "tuner_gain", "\(p.tunerGain)", type: "number", step: "0.1")
+        s += select("Tuner AGC:", "tuner_agc", "\(p.tunerAgc)", onOff)
+        s += select("Sampling Mode:", "sampling_mode", "\(p.samplingMode)",
+                    [("0", "Standard"), ("1", "Direct Sampling (I)"), ("2", "Direct Sampling (Q)")])
+        s += text("Oversampling:", "oversampling", "\(p.oversampling)", type: "number")
+        s += text("Squelch Level:", "squelch_level", "\(p.squelchLevel)", type: "number", step: "0.1")
+        s += text("FIR Size:", "fir_size", "\(p.firSize)", type: "number")
+        s += text("atan Math:", "atan_math", p.atanMath)
+        s += text("Audio Output Filter:", "audio_output_filter", p.audioOutputFilter)
+        s += text("rtl_fm Options:", "options", p.options)
+        s += text("USB Device:", "usb_device_string", p.usbDeviceString)
+        s += select("Bias-T Power:", "bias_t_flag", "\(p.biasTFlag)", onOff)
+        s += categorySelectOptionsHTML()
+        s += "<br>&nbsp;<br>&nbsp;<br>"
+        s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick='advancedListenButtonClicked(this.form);' "
+        s += "title='Tune the RTL-SDR radio to the frequency and settings above.'>"
+        s += "<br>&nbsp;<br>&nbsp;<br>"
+        s += "<input class='twelve columns button button-primary' type='submit' value='Add New Favorite Frequency'>"
+        s += "</form>"
+        return s
+    }
+
+    /// Inserts a new `frequency` record from a Tuner form (insertnewfrequency.html),
+    /// optionally filing it under the `categories_select` category.
+    @MainActor private func insertNewFrequency(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        var f = Frequency.prototype()
+        if let v = fields["station_name"], !v.isEmpty { f.stationName = v }
+        if let v = fields["frequency"], let n = Int(v) { f.frequency = n }
+        if let v = fields["frequency_mode"] { f.frequencyMode = (v == "frequency_mode_range" || v == "1") ? 1 : 0 }
+        if let v = fields["frequency_scan_end"], let n = Int(v) { f.frequencyScanEnd = n }
+        if let v = fields["frequency_scan_interval"], let n = Int(v) { f.frequencyScanInterval = n }
+        if let v = fields["modulation"] { f.modulation = v }
+        if let v = fields["stereo_flag"] { f.stereoFlag = (v == "1") }
+        if let v = fields["sample_rate"], let n = Int(v) { f.sampleRate = n }
+        if let v = fields["tuner_gain"], let n = Double(v) { f.tunerGain = n }
+        if let v = fields["tuner_agc"], let n = Int(v) { f.tunerAgc = n }
+        if let v = fields["sampling_mode"], let n = Int(v) { f.samplingMode = n }
+        if let v = fields["oversampling"], let n = Int(v) { f.oversampling = n }
+        if let v = fields["squelch_level"], let n = Double(v) { f.squelchLevel = n }
+        if let v = fields["fir_size"], let n = Int(v) { f.firSize = n }
+        if let v = fields["atan_math"] { f.atanMath = v }
+        if let v = fields["audio_output_filter"] { f.audioOutputFilter = v }
+        if let v = fields["options"] { f.options = v }
+        if let v = fields["usb_device_string"] { f.usbDeviceString = v }
+        if let v = fields["bias_t_flag"], let n = Int(v) { f.biasTFlag = n }
+
+        guard let newID = try? sqlite?.insertFrequencyRecord(&f) else { return }
+        if let cidString = fields["categories_select"], let cid = Int64(cidString) {
+            try? sqlite?.insertFreqCatRecord(forFrequencyID: newID, categoryID: cid)
+        }
+    }
+
+    // MARK: Category page tree (category.html and its edit/add/delete routes)
+
+    /// `%%SCAN_CATEGORY_BUTTON%%` — a "Scan All Frequencies" button, only when
+    /// the category has scanning enabled. Posts to scannerlistenbuttonclicked.html.
+    @MainActor private func scanCategoryButtonHTML(category c: Category) -> String {
+        guard c.categoryScanningEnabled == 1, let id = c.id else { return "" }
+        var s = "<form id='scannerlistenForm' action='#'>"
+        s += "<input type='hidden' name='id' value='\(id)'>"
+        s += "<br><input class='twelve columns button button-primary' type='button' value='Scan All Frequencies' "
+        s += "onclick=\"scannerListenButtonClicked(scannerlistenForm);\">"
+        s += "</form><br>&nbsp;<br>\n"
+        return s
+    }
+
+    /// `%%EDIT_CATEGORY_LIST_BUTTON%%` / `%%CATEGORY_SETTINGS_BUTTON%%` — a button
+    /// that loads another category page for this id.
+    private func categoryNavButtonHTML(page: String, id: Int64, label: String) -> String {
+        "<form action='javascript:loadContent(&quot;\(page)?id=\(id)&quot;)'>"
+            + "<input class='button twelve columns' type='submit' value='\(htmlText(label))'>"
+            + "<input type='hidden' name='id' value='\(id)'></form><br>&nbsp;<br>\n"
+    }
+
+    /// `%%CATEGORY_TABLE%%` — frequencies belonging to a category, each linking to
+    /// its view page. Ported from `generateCategoryFavoritesString`.
+    @MainActor private func categoryFavoritesTableHTML(categoryID: Int64) -> String {
+        let frequencies = (try? sqlite?.allFrequencyRecords(forCategoryID: categoryID)) ?? []
+        var s = "<table class='u-full-width'><thead><tr><th>Frequency</th><th>Name</th></tr></thead><tbody>"
+        for f in frequencies {
+            guard let id = f.id else { continue }
+            s += "<tr><td>"
+            s += "<a class='button button-primary two columns' type='submit' onclick=\"loadContent('viewfavorite.html?id=\(id)');\">\(htmlText(f.formattedFrequency))</a>"
+            s += "</td><td>\(htmlText(f.stationName))</td></tr>"
+        }
+        s += "</tbody></table>"
+        return s
+    }
+
+    /// `%%EDIT_CATEGORY_TABLE%%` — every frequency with a membership checkbox for
+    /// this category. Ported from `generateEditCategoryString`.
+    @MainActor private func editCategoryTableHTML(categoryID: Int64) -> String {
+        let frequencies = (try? sqlite?.allFrequencyRecords()) ?? []
+        var s = "<table class='u-full-width'><thead><tr><th>ID</th><th>Frequency</th><th>Name</th></tr></thead><tbody>"
+        for f in frequencies {
+            guard let id = f.id else { continue }
+            let isMember = (try? sqlite?.freqCatRecordExists(forFrequencyID: id, categoryID: categoryID)) ?? false
+            let checked = isMember ? " checked" : ""
+            s += "<tr><td>"
+            s += "<input type='checkbox' class='checkbox' onclick='handleEditCategoryClick(this);' cat_id='\(categoryID)' freq_id='\(id)'\(checked)></td>"
+            s += "<td>\(htmlText(f.formattedFrequency))</td><td>\(htmlText(f.stationName))</td></tr>"
+        }
+        s += "</tbody></table>"
+        return s
+    }
+
+    /// `%%DELETE_CATEGORY_BUTTON%%` — ported from `generateDeleteCategoryButtonStringForID`.
+    private func deleteCategoryButtonHTML(categoryID: Int64, name: String) -> String {
+        var label = name
+        if label.count > 25 { label = String(label.prefix(25)) + "..." }
+        var s = "<form class='delete-favorite-form' id='delete-favorite-form' onsubmit='event.preventDefault(); return deleteCategoryRecord(this);' method='POST'>\n"
+        s += "<br>&nbsp;<br>&nbsp;<br>\n"
+        s += "<input id='delete-category-button' class='twelve columns button button-primary' type='submit' value='Delete \(htmlText(label)) Category'>\n"
+        s += "<input type='hidden' id='category_id' name='category_id' value='\(categoryID)'>\n"
+        s += "<input type='hidden' id='category_name' name='category_name' value='\(htmlAttribute(name))'>\n"
+        s += "</form>\n<br>&nbsp;<br>\n"
+        return s
+    }
+
+    /// `%%EDIT_CATEGORY_SETTINGS%%` — the category scan-settings form. Field names
+    /// match the `category` table columns; Save posts to storecategory.html.
+    /// Ported (simplified to plain inputs) from `generateEditCategorySettingsStringForID`.
+    private func editCategorySettingsFormHTML(category c: Category) -> String {
+        guard let id = c.id else { return "Error getting category" }
+
+        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
+            let stepAttr = step.map { " step='\($0)'" } ?? ""
+            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
+        }
+        func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
+            var s = "<label for='\(name)'>\(label)</label><select class='twelve columns value-prop' name='\(name)'>"
+            for opt in options {
+                s += "<option value='\(htmlAttribute(opt.value))'\(opt.value == current ? " selected" : "")>\(htmlText(opt.label))</option>"
+            }
+            return s + "</select>"
+        }
+        let onOff = [("0", "Off"), ("1", "On")]
+        let modulationOptions = Frequency.modulationOptions.map { ($0, $0.uppercased()) }
+
+        var s = "<form class='editcategorysettings' id='editcategorysettings' onsubmit='event.preventDefault(); return storeCategoryRecord(this);' method='POST'>"
+        s += text("Name:", "category_name", c.categoryName)
+        s += select("Enable Category Scanning:", "category_scanning_enabled", "\(c.categoryScanningEnabled)", [("0", "Disabled"), ("1", "Enabled")])
+        s += text("USB Device:", "scan_usb_device_string", c.scanUsbDeviceString)
+        s += text("Tuner Gain:", "scan_tuner_gain", "\(c.scanTunerGain)", type: "number", step: "0.1")
+        s += select("Tuner AGC:", "scan_tuner_agc", "\(c.scanTunerAgc)", onOff)
+        s += text("Sample Rate:", "scan_sample_rate", "\(c.scanSampleRate)", type: "number")
+        s += select("Sampling Mode:", "scan_sampling_mode", "\(c.scanSamplingMode)",
+                    [("0", "Standard"), ("1", "Direct Sampling (I)"), ("2", "Direct Sampling (Q)")])
+        s += text("Oversampling:", "scan_oversampling", "\(c.scanOversampling)", type: "number")
+        s += select("Modulation:", "scan_modulation", c.scanModulation, modulationOptions)
+        s += text("Squelch Level:", "scan_squelch_level", "\(c.scanSquelchLevel)", type: "number", step: "0.1")
+        s += text("Squelch Delay:", "scan_squelch_delay", "\(c.scanSquelchDelay)", type: "number", step: "0.1")
+        s += text("RTL-FM Options:", "scan_options", c.scanOptions)
+        s += text("FIR Size:", "scan_fir_size", "\(c.scanFirSize)", type: "number")
+        s += text("atan Math:", "scan_atan_math", c.scanAtanMath)
+        s += text("Sox Audio Output Filter:", "scan_audio_output_filter", c.scanAudioOutputFilter)
+        s += select("Bias-T Power:", "scan_bias_t_flag", "\(c.scanBiasTFlag)", onOff)
+        s += "<input type='hidden' name='id' value='\(id)'>"
+        s += "<br>&nbsp;<br>&nbsp;<br><input class='twelve columns button button-primary' type='submit' value='Save Changes'>"
+        s += "</form><br>&nbsp;<br>&nbsp;"
+        return s
+    }
+
+    /// Toggles a frequency's membership in a category (editcategoryitem.html).
+    @MainActor private func toggleCategoryItem(catID: Int64, freqID: Int64, isMember: Bool) {
+        let exists = (try? sqlite?.freqCatRecordExists(forFrequencyID: freqID, categoryID: catID)) ?? false
+        if isMember, !exists {
+            try? sqlite?.insertFreqCatRecord(forFrequencyID: freqID, categoryID: catID)
+        } else if !isMember, exists {
+            try? sqlite?.deleteFreqCatRecord(forFrequencyID: freqID, categoryID: catID)
+        }
+    }
+
+    /// Creates a category from the add form (addcategory.html), skipping if a
+    /// category with the same name already exists.
+    @MainActor private func addCategory(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        let name = (fields["category_name"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if let existing = try? sqlite?.categoryRecord(forName: name), existing != nil { return }
+        var record = Category.prototype(name: name)
+        try? sqlite?.insertCategoryRecord(&record)
+    }
+
+    /// Applies edited scan settings to a category (storecategory.html). Unlisted
+    /// fields keep their stored values.
+    @MainActor private func saveCategory(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        guard let idString = fields["id"], let id = Int64(idString),
+              var c = (try? sqlite?.categoryRecord(forID: id)) ?? nil else { return }
+
+        if let v = fields["category_name"] { c.categoryName = v }
+        if let v = fields["category_scanning_enabled"], let n = Int(v) { c.categoryScanningEnabled = n }
+        if let v = fields["scan_usb_device_string"] { c.scanUsbDeviceString = v }
+        if let v = fields["scan_tuner_gain"], let n = Double(v) { c.scanTunerGain = n }
+        if let v = fields["scan_tuner_agc"], let n = Int(v) { c.scanTunerAgc = n }
+        if let v = fields["scan_sample_rate"], let n = Int(v) { c.scanSampleRate = n }
+        if let v = fields["scan_sampling_mode"], let n = Int(v) { c.scanSamplingMode = n }
+        if let v = fields["scan_oversampling"], let n = Int(v) { c.scanOversampling = n }
+        if let v = fields["scan_modulation"] { c.scanModulation = v }
+        if let v = fields["scan_squelch_level"], let n = Double(v) { c.scanSquelchLevel = n }
+        if let v = fields["scan_squelch_delay"], let n = Double(v) { c.scanSquelchDelay = n }
+        if let v = fields["scan_options"] { c.scanOptions = v }
+        if let v = fields["scan_fir_size"], let n = Int(v) { c.scanFirSize = n }
+        if let v = fields["scan_atan_math"] { c.scanAtanMath = v }
+        if let v = fields["scan_audio_output_filter"] { c.scanAudioOutputFilter = v }
+        if let v = fields["scan_bias_t_flag"], let n = Int(v) { c.scanBiasTFlag = n }
+
+        try? sqlite?.updateCategoryRecord(c)
+    }
+
+    /// Deletes the category identified by the posted form's `category_id`.
+    @MainActor private func deleteCategory(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        if let idString = fields["category_id"], let id = Int64(idString) {
+            try? sqlite?.deleteCategoryRecord(forID: id)
+        }
+    }
+
     /// `%%VIEW_FAVORITE_NAME%%` + `%%VIEW_FAVORITE_ITEM%%` — ported from
     /// `generateViewFavoriteItemStringForID`. Returns (station name, item HTML).
     @MainActor private func viewFavorite(id: Int64) -> (name: String, item: String) {
@@ -273,8 +965,222 @@ final class AntennaHeadHTTPServer {
         s += "onclick=\"var listenForm=getElementById('listenForm'); listenButtonClicked(listenForm);\" "
         s += "title='Click Listen to tune the RTL-SDR radio to this frequency.'>"
         s += "</form>"
+        s += "<input class='twelve columns button' type='button' value='Edit' "
+        s += "onclick=\"loadContent('editfavorite.html?id=\(id)');\" "
+        s += "title='Click Edit to modify this favorite.'>"
         s += "<br><br>frequency: \(htmlText(f.formattedFrequency))<br>modulation: \(htmlText(modulation))<br>sample rate: \(f.sampleRate)<br><br>"
         return (f.stationName, s)
+    }
+
+    /// `%%EDIT_FAVORITE_NAME%%` + `%%EDIT_FAVORITE%%` — the favorite edit form.
+    /// Field `name`s match the `frequency` table columns and the client-side
+    /// validator in `localradio.js`; Save posts to `storefrequency.html` and
+    /// Delete to `deletefrequency.html` (both handled by `appStateResponse`).
+    @MainActor private func editFavorite(id: Int64) -> (name: String, item: String) {
+        guard let f = (try? sqlite?.frequencyRecord(forID: id)) ?? nil else {
+            return ("", "Error getting favorite id = \(id)")
+        }
+
+        func text(_ label: String, _ name: String, _ value: String, id elementID: String? = nil,
+                  type: String = "text", step: String? = nil) -> String {
+            let idAttr = elementID.map { " id='\($0)'" } ?? ""
+            let stepAttr = step.map { " step='\($0)'" } ?? ""
+            return "<label>\(label)<input class='u-full-width' type='\(type)'\(idAttr) "
+                + "name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)></label>"
+        }
+        func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
+            var s = "<label>\(label)<select class='u-full-width' name='\(name)'>"
+            for opt in options {
+                let selected = opt.value == current ? " selected" : ""
+                s += "<option value='\(htmlAttribute(opt.value))'\(selected)>\(htmlText(opt.label))</option>"
+            }
+            s += "</select></label>"
+            return s
+        }
+
+        let modulationOptions = Frequency.modulationOptions.map { ($0, $0.uppercased()) }
+
+        var s = "<form id='editFrequencyForm' onsubmit=\"event.preventDefault(); return storeFrequencyRecord(this);\" method='POST'>"
+        s += "<input type='hidden' name='id' value='\(id)'>"
+        s += text("Station Name", "station_name", f.stationName, id: "frequency_name")
+        s += text("Frequency (Hz)", "frequency", "\(f.frequency)", type: "number")
+        s += select("Frequency Mode", "frequency_mode", f.frequencyMode == 1 ? "frequency_mode_range" : "frequency_mode_single",
+                    [("frequency_mode_single", "Single Frequency"), ("frequency_mode_range", "Scan Range")])
+        s += text("Scan Range End (Hz)", "frequency_scan_end", "\(f.frequencyScanEnd)", type: "number")
+        s += text("Scan Range Interval (Hz)", "frequency_scan_interval", "\(f.frequencyScanInterval)", type: "number")
+        s += select("Modulation", "modulation", f.modulation, modulationOptions)
+        s += select("FM Stereo", "stereo_flag", f.stereoFlag ? "1" : "0", [("0", "Off"), ("1", "On")])
+        s += text("Sample Rate", "sample_rate", "\(f.sampleRate)", type: "number")
+        s += text("Tuner Gain", "tuner_gain", "\(f.tunerGain)", type: "number", step: "0.1")
+        s += select("Tuner AGC", "tuner_agc", "\(f.tunerAgc)", [("0", "Off"), ("1", "On")])
+        s += select("Sampling Mode", "sampling_mode", "\(f.samplingMode)",
+                    [("0", "Standard"), ("1", "Direct Sampling (I)"), ("2", "Direct Sampling (Q)")])
+        s += text("Oversampling", "oversampling", "\(f.oversampling)", type: "number")
+        s += text("Squelch Level", "squelch_level", "\(f.squelchLevel)", type: "number", step: "0.1")
+        s += text("FIR Size", "fir_size", "\(f.firSize)", type: "number")
+        s += text("Atan Math", "atan_math", f.atanMath)
+        s += text("Audio Output Filter", "audio_output_filter", f.audioOutputFilter)
+        s += text("rtl_fm Options", "options", f.options)
+        s += text("USB Device", "usb_device_string", f.usbDeviceString)
+        s += select("Bias-T Power", "bias_t_flag", "\(f.biasTFlag)", [("0", "Off"), ("1", "On")])
+        s += "<br><br>"
+        s += "<input class='button button-primary' type='submit' value='Save'>"
+        s += " <input class='button' type='button' value='Delete' onclick='deleteFrequencyRecord(this.form);'>"
+        s += "</form>"
+        return (f.stationName, s)
+    }
+
+    /// Applies a posted edit form to the matching `frequency` record. Unlisted
+    /// fields keep their stored values (the form is loaded from the same record).
+    @MainActor private func saveFrequency(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        guard let idString = fields["id"], let id = Int64(idString),
+              var record = (try? sqlite?.frequencyRecord(forID: id)) ?? nil else { return }
+
+        if let v = fields["station_name"] { record.stationName = v }
+        if let v = fields["frequency"], let n = Int(v) { record.frequency = n }
+        if let v = fields["frequency_mode"] { record.frequencyMode = (v == "frequency_mode_range") ? 1 : 0 }
+        if let v = fields["frequency_scan_end"], let n = Int(v) { record.frequencyScanEnd = n }
+        if let v = fields["frequency_scan_interval"], let n = Int(v) { record.frequencyScanInterval = n }
+        if let v = fields["modulation"] { record.modulation = v }
+        if let v = fields["stereo_flag"] { record.stereoFlag = (v == "1") }
+        if let v = fields["sample_rate"], let n = Int(v) { record.sampleRate = n }
+        if let v = fields["tuner_gain"], let n = Double(v) { record.tunerGain = n }
+        if let v = fields["tuner_agc"], let n = Int(v) { record.tunerAgc = n }
+        if let v = fields["sampling_mode"], let n = Int(v) { record.samplingMode = n }
+        if let v = fields["oversampling"], let n = Int(v) { record.oversampling = n }
+        if let v = fields["squelch_level"], let n = Double(v) { record.squelchLevel = n }
+        if let v = fields["fir_size"], let n = Int(v) { record.firSize = n }
+        if let v = fields["atan_math"] { record.atanMath = v }
+        if let v = fields["audio_output_filter"] { record.audioOutputFilter = v }
+        if let v = fields["options"] { record.options = v }
+        if let v = fields["usb_device_string"] { record.usbDeviceString = v }
+        if let v = fields["bias_t_flag"], let n = Int(v) { record.biasTFlag = n }
+
+        try? sqlite?.updateFrequencyRecord(record)
+    }
+
+    /// Deletes the `frequency` record identified by the posted form's `id`.
+    @MainActor private func deleteFrequency(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        if let idString = fields["id"], let id = Int64(idString) {
+            try? sqlite?.deleteFrequencyRecord(forID: id)
+        }
+    }
+
+    // MARK: Now Playing
+
+    /// Button rendered into `%%OPEN_AUDIO_PLAYER_PAGE_BUTTON%%`. Starts the
+    /// persistent audio element in the top frame via the same `postMessage`
+    /// signal the Listen buttons use.
+    nonisolated static let openAudioPlayerButtonHTML =
+        "<input class='button button-primary' type='button' value='&#9654; Open Audio Player' "
+        + "onclick=\"window.top.postMessage('startaudio', '*');\">"
+
+    /// The active favorite's full record, when tuned to a single frequency.
+    @MainActor private func activeFrequencyRecord() -> Frequency? {
+        guard let id = sdrController?.activeFrequencyID else { return nil }
+        return (try? sqlite?.frequencyRecord(forID: id)) ?? nil
+    }
+
+    /// `%%NOW_PLAYING_NAME%%` + `%%NOW_PLAYING_DETAILS%%` for the initial page
+    /// render. The page's JS then refreshes these live from `nowplayingstatus.html`.
+    @MainActor private func nowPlayingPage() -> (name: String, details: String) {
+        guard let sdr = sdrController, sdr.taskMode != .stopped else {
+            return ("Radio is stopped", "<br><br>No active tuning.")
+        }
+        guard let f = activeFrequencyRecord() else {
+            let name = sdr.stationName.isEmpty ? sdr.statusFunction : sdr.stationName
+            return (name, "<br><br>" + htmlText(sdr.statusFunction))
+        }
+
+        func row(_ label: String, _ value: String) -> String { "\(label): \(htmlText(value))<br>" }
+        var d = "<br><br>"
+        d += row("frequency", f.formattedFrequency)
+        d += row("signal level", "\(sdr.signalLevel)")
+        d += row("squelch level", "\(f.squelchLevel)")
+        d += row("modulation", f.modulation)
+        d += row("sample rate", "\(f.sampleRate)")
+        d += row("sampling mode", "\(f.samplingMode)")
+        d += row("oversampling", "\(f.oversampling)")
+        d += row("tuner gain", "\(f.tunerGain)")
+        d += row("tuner agc", "\(f.tunerAgc)")
+        d += row("rtl-sdr options", "pad \(f.options)")
+        d += row("fir size", "\(f.firSize)")
+        d += row("atan math", f.atanMath)
+        d += row("audio output filter", "rate 48000 \(f.audioOutputFilter)")
+        d += row("bias-t", "\(f.biasTFlag)")
+        d += row("usb device", f.usbDeviceString)
+        return (f.stationName, d)
+    }
+
+    /// JSON consumed by `nowplaying.html`'s `updateStatusDisplay()` for live
+    /// refresh. Keys match the fields that JS reads (`rtlsdr_task_mode`,
+    /// `station_name`, `short_frequency`, the `frequency` columns, …).
+    @MainActor private func nowPlayingStatusJSON() -> Data {
+        var dict: [String: Any] = [
+            "rtlsdr_task_mode": sdrController?.taskMode.rawValue ?? "stopped",
+            "signal_level": sdrController?.signalLevel ?? 0
+        ]
+        if let f = activeFrequencyRecord() {
+            dict["station_name"] = f.stationName
+            dict["short_frequency"] = f.formattedFrequency
+            dict["frequency"] = f.frequency
+            dict["frequency_mode"] = f.frequencyMode
+            dict["frequency_scan_end"] = f.frequencyScanEnd
+            dict["frequency_scan_interval"] = f.frequencyScanInterval
+            dict["modulation"] = f.modulation
+            dict["sample_rate"] = f.sampleRate
+            dict["sampling_mode"] = f.samplingMode
+            dict["oversampling"] = f.oversampling
+            dict["tuner_gain"] = f.tunerGain
+            dict["tuner_agc"] = f.tunerAgc
+            dict["squelch_level"] = f.squelchLevel
+            dict["fir_size"] = f.firSize
+            dict["atan_math"] = f.atanMath
+            dict["audio_output_filter"] = f.audioOutputFilter
+            dict["options"] = f.options
+            dict["bias_t_flag"] = f.biasTFlag
+            dict["usb_device_string"] = f.usbDeviceString
+            dict["stereo_flag"] = f.stereoFlag ? 1 : 0
+        } else {
+            dict["station_name"] = sdrController?.statusFunction ?? "Not Playing"
+            dict["short_frequency"] = ""
+        }
+        return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
+    }
+
+    /// Parses a jQuery `serializeArray()` body — `[{"name":..,"value":..}, ...]`
+    /// — into a `[name: value]` dictionary.
+    nonisolated private func formFields(fromBody body: Data) -> [String: String] {
+        guard !body.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: body),
+              let array = object as? [[String: Any]] else { return [:] }
+        var fields: [String: String] = [:]
+        for field in array {
+            guard let name = field["name"] as? String else { continue }
+            if let value = field["value"] as? String {
+                fields[name] = value
+            } else if let number = field["value"] as? NSNumber {
+                fields[name] = number.stringValue
+            }
+        }
+        return fields
+    }
+
+    /// Parses a JSON *object* body into `[String: Any]` (the Tuner's Listen
+    /// button posts an object, not the serializeArray array).
+    nonisolated private func jsonObject(fromBody body: Data) -> [String: Any] {
+        guard !body.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: body),
+              let dict = obj as? [String: Any] else { return [:] }
+        return dict
+    }
+
+    nonisolated private func okResponse() -> HTTPResponse {
+        HTTPResponse(status: 200, reason: "OK",
+                     headers: ["Content-Type": "text/plain; charset=utf-8"],
+                     body: Data("OK".utf8))
     }
 
     /// Extracts the `id` field from the Listen form's JSON body.
@@ -426,6 +1332,8 @@ final class AntennaHeadHTTPServer {
             dict["DEVICE_ICON"]     = loadSVG(named: "devices")
             dict["GEAR_ICON"]       = loadSVG(named: "gear")
             dict["INFO_ICON"]       = loadSVG(named: "info")
+        case "info.html":
+            dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "LocalRadio-animation")
         default:
             break
         }

@@ -9,11 +9,24 @@
 /* Begin PBXBuildFile section */
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
 		0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB66C2FECE41D00BA711A /* PCMPassthrough */; };
-		0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; };
 		0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6702FECE80100BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8652FF2326F00BA711A /* PCMUDPSender in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB8642FF2326F00BA711A /* PCMUDPSender */; };
 		0EAEB86A2FF233EC00BA711A /* PCMUDPSender in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8692FF233EC00BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8BA2FF3BAFE00BA711A /* libliquid.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8BC2FF3BB1500BA711A /* libfec.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8BB2FF3BB1500BA711A /* libfec.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8BE2FF3BB2C00BA711A /* libfftw3f.3.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8BD2FF3BB2C00BA711A /* libfftw3f.3.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8C02FF3BB5000BA711A /* libsndfile.1.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8BF2FF3BB5000BA711A /* libsndfile.1.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8C22FF3BB8700BA711A /* libFLAC.14.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C12FF3BB8700BA711A /* libFLAC.14.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8C92FF3BBD100BA711A /* libvorbisenc.2.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C32FF3BBD100BA711A /* libvorbisenc.2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8CA2FF3BBD100BA711A /* libmp3lame.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C42FF3BBD100BA711A /* libmp3lame.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8CB2FF3BBD100BA711A /* libogg.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C52FF3BBD100BA711A /* libogg.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8CC2FF3BBD100BA711A /* libmpg123.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8CD2FF3BBD100BA711A /* libopus.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8D32FF6506300BA711A /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB8D22FF6506300BA711A /* AudioInputCapture */; };
+		0EAEB8DB2FF65A7000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -59,11 +72,13 @@
 			dstPath = Contents/Helpers;
 			dstSubfolderSpec = 1;
 			files = (
+				0EAEB8DB2FF65A7000BA711A /* AudioInputCapture in CopyFiles */,
 				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
-				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
 				0EAEB86A2FF233EC00BA711A /* PCMUDPSender in CopyFiles */,
 				0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */,
+				0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */,
+				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,7 +88,18 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				0EAEB8BC2FF3BB1500BA711A /* libfec.dylib in Embed Frameworks */,
+				0EAEB8BE2FF3BB2C00BA711A /* libfftw3f.3.dylib in Embed Frameworks */,
+				0EAEB8C22FF3BB8700BA711A /* libFLAC.14.dylib in Embed Frameworks */,
+				0EAEB8C92FF3BBD100BA711A /* libvorbisenc.2.dylib in Embed Frameworks */,
+				0EAEB8CA2FF3BBD100BA711A /* libmp3lame.0.dylib in Embed Frameworks */,
+				0EAEB8CB2FF3BBD100BA711A /* libogg.0.dylib in Embed Frameworks */,
+				0EAEB8CC2FF3BBD100BA711A /* libmpg123.0.dylib in Embed Frameworks */,
+				0EAEB8CD2FF3BBD100BA711A /* libopus.0.dylib in Embed Frameworks */,
+				0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */,
+				0EAEB8BA2FF3BAFE00BA711A /* libliquid.dylib in Embed Frameworks */,
 				0ECF58D82FDB8040006943DA /* libusb-1.0.0.dylib in Embed Frameworks */,
+				0EAEB8C02FF3BB5000BA711A /* libsndfile.1.dylib in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -88,6 +114,23 @@
 		0EAEB8602FF22E9F00BA711A /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Package.swift; path = Packages/PCMUDPSender/Package.swift; sourceTree = "<group>"; };
 		0EAEB8622FF22EF900BA711A /* PCMUDPSender */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = PCMUDPSender; path = "/Volumes/ExternalSSD/Users/dsward/Documents/Claude working directory/AntennaHead/Packages/PCMUDPSender"; sourceTree = "<absolute>"; };
 		0EAEB8692FF233EC00BA711A /* PCMUDPSender */ = {isa = PBXFileReference; lastKnownFileType = text; path = PCMUDPSender; sourceTree = BUILT_PRODUCTS_DIR; };
+		0EAEB8B72FF3BA2700BA711A /* stereodemux */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = stereodemux; sourceTree = "<group>"; };
+		0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libliquid.dylib; sourceTree = "<group>"; };
+		0EAEB8BB2FF3BB1500BA711A /* libfec.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libfec.dylib; sourceTree = "<group>"; };
+		0EAEB8BD2FF3BB2C00BA711A /* libfftw3f.3.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libfftw3f.3.dylib; sourceTree = "<group>"; };
+		0EAEB8BF2FF3BB5000BA711A /* libsndfile.1.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libsndfile.1.dylib; sourceTree = "<group>"; };
+		0EAEB8C12FF3BB8700BA711A /* libFLAC.14.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libFLAC.14.dylib; sourceTree = "<group>"; };
+		0EAEB8C32FF3BBD100BA711A /* libvorbisenc.2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libvorbisenc.2.dylib; sourceTree = "<group>"; };
+		0EAEB8C42FF3BBD100BA711A /* libmp3lame.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libmp3lame.0.dylib; sourceTree = "<group>"; };
+		0EAEB8C52FF3BBD100BA711A /* libogg.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libogg.0.dylib; sourceTree = "<group>"; };
+		0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libmpg123.0.dylib; sourceTree = "<group>"; };
+		0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libopus.0.dylib; sourceTree = "<group>"; };
+		0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libvorbis.0.dylib; sourceTree = "<group>"; };
+		0EAEB8D42FF65A3200BA711A /* arm64-apple-macos.swiftsourceinfo */ = {isa = PBXFileReference; lastKnownFileType = file; path = "arm64-apple-macos.swiftsourceinfo"; sourceTree = "<group>"; };
+		0EAEB8D62FF65A3200BA711A /* arm64-apple-macos.swiftdoc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "arm64-apple-macos.swiftdoc"; sourceTree = "<group>"; };
+		0EAEB8D72FF65A3200BA711A /* arm64-apple-macos.swiftmodule */ = {isa = PBXFileReference; lastKnownFileType = file; path = "arm64-apple-macos.swiftmodule"; sourceTree = "<group>"; };
+		0EAEB8D82FF65A3200BA711A /* arm64-apple-macos.abi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "arm64-apple-macos.abi.json"; sourceTree = "<group>"; };
+		0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */ = {isa = PBXFileReference; lastKnownFileType = text; path = AudioInputCapture; sourceTree = BUILT_PRODUCTS_DIR; };
 		0ECF511B2FD92707006943DA /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
 		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -123,6 +166,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */,
+				0EAEB8D32FF6506300BA711A /* AudioInputCapture in Frameworks */,
 				0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */,
 				0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */,
 				0ECF51072FD87EB4006943DA /* X509 in Frameworks */,
@@ -157,11 +201,44 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0EAEB8D52FF65A3200BA711A /* Project */ = {
+			isa = PBXGroup;
+			children = (
+				0EAEB8D42FF65A3200BA711A /* arm64-apple-macos.swiftsourceinfo */,
+			);
+			path = Project;
+			sourceTree = "<group>";
+		};
+		0EAEB8D92FF65A3200BA711A /* AudioInputCapture.swiftmodule */ = {
+			isa = PBXGroup;
+			children = (
+				0EAEB8D52FF65A3200BA711A /* Project */,
+				0EAEB8D62FF65A3200BA711A /* arm64-apple-macos.swiftdoc */,
+				0EAEB8D72FF65A3200BA711A /* arm64-apple-macos.swiftmodule */,
+				0EAEB8D82FF65A3200BA711A /* arm64-apple-macos.abi.json */,
+			);
+			name = AudioInputCapture.swiftmodule;
+			path = "../../../Library/Developer/Xcode/DerivedData/AntennaHead-ecmfomqxessczldighxpymztxnmk/Build/Products/Debug/AudioInputCapture.swiftmodule";
+			sourceTree = "<group>";
+		};
 		0ECF510F2FD914EB006943DA /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0EAEB8B72FF3BA2700BA711A /* stereodemux */,
 				0EAEB6772FED562F00BA711A /* sox */,
+				0EAEB8C12FF3BB8700BA711A /* libFLAC.14.dylib */,
+				0EAEB8C42FF3BBD100BA711A /* libmp3lame.0.dylib */,
+				0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */,
+				0EAEB8C52FF3BBD100BA711A /* libogg.0.dylib */,
+				0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */,
+				0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */,
+				0EAEB8C32FF3BBD100BA711A /* libvorbisenc.2.dylib */,
+				0EAEB8BF2FF3BB5000BA711A /* libsndfile.1.dylib */,
+				0EAEB8BD2FF3BB2C00BA711A /* libfftw3f.3.dylib */,
+				0EAEB8BB2FF3BB1500BA711A /* libfec.dylib */,
+				0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */,
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
+				0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */,
 				0ECF511B2FD92707006943DA /* LiveAudioServer */,
 				0EAEB8692FF233EC00BA711A /* PCMUDPSender */,
 				0EAEB6702FECE80100BA711A /* PCMPassthrough */,
@@ -172,6 +249,7 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
+				0EAEB8D92FF65A3200BA711A /* AudioInputCapture.swiftmodule */,
 				0EAEB8602FF22E9F00BA711A /* Package.swift */,
 				0EAEB8622FF22EF900BA711A /* PCMUDPSender */,
 				0EAEB66F2FECE50B00BA711A /* PCMPassthrough */,
@@ -246,6 +324,7 @@
 				AA000002AA000002AA000002 /* librtlsdr */,
 				0EAEB66C2FECE41D00BA711A /* PCMPassthrough */,
 				0EAEB8642FF2326F00BA711A /* PCMUDPSender */,
+				0EAEB8D22FF6506300BA711A /* AudioInputCapture */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -356,6 +435,7 @@
 				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */,
 				0EAEB66B2FECE41D00BA711A /* XCLocalSwiftPackageReference "Packages/PCMPassthrough" */,
 				0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */,
+				0EAEB8D12FF6506300BA711A /* XCLocalSwiftPackageReference "Packages/AudioInputCapture" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -375,7 +455,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0EAEB6712FECE80100BA711A /* PCMPassthrough in Resources */,
 				0EA8DC4B2FD666B300D79877 /* Web in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -642,6 +721,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AntennaHead captures audio from the selected input device to stream it.";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -686,6 +766,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AntennaHead captures audio from the selected input device to stream it.";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -922,6 +1003,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/PCMUDPSender;
 		};
+		0EAEB8D12FF6506300BA711A /* XCLocalSwiftPackageReference "Packages/AudioInputCapture" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/AudioInputCapture;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -968,6 +1053,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */;
 			productName = PCMUDPSender;
+		};
+		0EAEB8D22FF6506300BA711A /* AudioInputCapture */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioInputCapture;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;

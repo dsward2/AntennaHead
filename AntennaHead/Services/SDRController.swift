@@ -29,6 +29,8 @@ final class SDRController {
         case frequencyNotFound(Int64)
         case categoryNotFound(Int64)
         case categoryHasNoFrequencies(Int64)
+        case customTaskNotFound(Int64)
+        case customTaskHasNoStages(Int64)
         case notImplemented(String)
 
         var description: String {
@@ -36,6 +38,8 @@ final class SDRController {
             case .frequencyNotFound(let id): return "No frequency record found for id \(id)."
             case .categoryNotFound(let id): return "No category record found for id \(id)."
             case .categoryHasNoFrequencies(let id): return "Category \(id) has no frequencies to scan."
+            case .customTaskNotFound(let id): return "No custom task record found for id \(id)."
+            case .customTaskHasNoStages(let id): return "Custom task \(id) has no tasks defined."
             case .notImplemented(let what): return "\(what) is not yet implemented."
             }
         }
@@ -44,11 +48,19 @@ final class SDRController {
     // Output format of the pipeline's terminal stage; must match LiveAudioServer's
     // UDP input configuration (see LiveAudioServerProcessManager).
     private static let outputSampleRate = 48_000
-    private static let outputChannels = 1
+    // The pipeline always emits 2-channel audio so LiveAudioServer's UDP input
+    // format stays constant across retunes (mono stations are upmixed to
+    // dual-mono; FM-stereo stations decode true L/R via stereodemux).
+    private static let outputChannels = 2
 
     private let sqliteController: SQLiteController
     /// UDP port the terminal PCMUDPSender stage targets (LiveAudioServer's input).
-    private let udpInputPort: UInt16
+    /// Configurable via `updatePorts`; used when the next pipeline is built.
+    private(set) var udpInputPort: UInt16
+    /// Local UDP port rtl_fm's `-c` status feed (frequency + RMS signal level)
+    /// is sent to, captured by `statusListener`. Shown on the Configuration tab.
+    private(set) var statusUDPPort: UInt16
+    private var statusListener: RTLSDRStatusListener?
 
     let radioTaskPipelineManager = TaskPipelineManager()
 
@@ -69,11 +81,35 @@ final class SDRController {
     private(set) var audioOutputFilter: String = ""
     private(set) var tunerAGC: Bool = false
     private(set) var directSamplingQBranch: Bool = false
+    /// Latest RMS signal level reported by rtl_fm (raw, matches LocalRadio's
+    /// "signal level" display). Zero when no tuner is running.
+    private(set) var signalLevel: Int = 0
     private(set) var lastError: Error?
 
-    init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16) {
+    init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
+        self.statusUDPPort = statusUDPPort
+        startStatusListener()
+    }
+
+    /// Applies the configured UDP ports (Configuration sheet). The audio port
+    /// takes effect when the next pipeline is built; a changed status port
+    /// recreates the rtl_fm status listener immediately.
+    func updatePorts(udpInput: UInt16, statusUDP: UInt16) {
+        udpInputPort = udpInput
+        guard statusUDP != statusUDPPort else { return }
+        statusUDPPort = statusUDP
+        statusListener?.stop()
+        startStatusListener()
+    }
+
+    private func startStatusListener() {
+        statusListener = RTLSDRStatusListener(port: statusUDPPort)
+        statusListener?.onRMSPower = { [weak self] rms in
+            Task { @MainActor in self?.signalLevel = rms }
+        }
+        statusListener?.start()
     }
 
     // MARK: Public control API (ported from SDRController.h)
@@ -86,6 +122,25 @@ final class SDRController {
         let tuning = makeTuning(forFrequency: frequency)
         taskMode = .frequency
         activeFrequencyID = id
+        startPipeline(with: tuning)
+    }
+
+    /// Tune to an ad-hoc frequency from the web Tuner (no saved record). Builds a
+    /// one-off `Frequency` from the prototype defaults plus the tuner's chosen
+    /// parameters, then drives the normal pipeline (stereodemux is inserted when
+    /// `modulation == "fm"` and `stereo`).
+    func startTasksForFrequency(frequencyHz: Int, sampleRate: Int, tunerGain: Double,
+                                stereo: Bool, modulation: String) {
+        var f = Frequency.prototype()
+        f.frequency = frequencyHz
+        f.sampleRate = sampleRate
+        f.tunerGain = tunerGain
+        f.stereoFlag = stereo
+        f.modulation = modulation.isEmpty ? "fm" : modulation
+        f.stationName = String(format: "%.4f MHz", Double(frequencyHz) / 1_000_000.0)
+        let tuning = makeTuning(forFrequency: f)
+        taskMode = .frequency
+        activeFrequencyID = nil   // ad-hoc: not a saved favorite
         startPipeline(with: tuning)
     }
 
@@ -104,14 +159,130 @@ final class SDRController {
         startPipeline(with: tuning)
     }
 
-    /// Deferred — requires a Core Audio source stage (LocalRadio's AudioMonitor2).
-    func startTasksForDevice(deviceName: String, deviceAudioOutputFilter: String) throws {
-        throw SDRError.notImplemented("Core Audio device input")
+    /// Listen to a Core Audio input device. The `AudioInputCapture` helper
+    /// captures the named device and emits 48 kHz / 2-channel S16LE (the
+    /// LiveAudioServer contract), so sox only applies the output filter.
+    func startTasksForDevice(deviceName: String, deviceAudioOutputFilter: String) {
+        Self.sweepOrphanedHelpers()
+        if radioTaskPipelineManager.status == .running {
+            radioTaskPipelineManager.terminate()
+        }
+
+        taskMode = .device
+        activeFrequencyID = nil
+        publishDeviceStatus(deviceName: deviceName, filter: deviceAudioOutputFilter)
+
+        let capture = makeAudioCaptureTaskItem(deviceName: deviceName)
+        // Capture already outputs 48 kHz / 2-channel, so this sox stage is a
+        // no-op resample that just applies the station's audio filter tokens.
+        let resample = makeResampleTaskItem(inputRate: Self.outputSampleRate,
+                                            inputChannels: Self.outputChannels,
+                                            audioOutputFilter: deviceAudioOutputFilter)
+        let udpSender = makeUDPSenderTaskItem()
+
+        guard let capture, let resample, let udpSender else {
+            taskMode = .stopped
+            return  // lastError already set by the failing builder
+        }
+
+        radioTaskPipelineManager.add(capture)
+        radioTaskPipelineManager.add(resample)
+        radioTaskPipelineManager.add(udpSender)
+
+        do {
+            try radioTaskPipelineManager.start()
+            lastError = nil
+        } catch {
+            lastError = error
+            print("SDRController: failed to start device pipeline - \(error)")
+            taskMode = .stopped
+        }
     }
 
-    /// Deferred — requires custom-task JSON parsing and arbitrary source stages.
+    /// Listen to a custom task: a user-defined pipe of external executables
+    /// (`task_json`) whose final stage emits raw S16LE at the record's
+    /// `sample_rate`/`channels`, which sox then normalizes to 48 kHz / 2 ch.
+    ///
+    /// Note: under the App Sandbox, launching binaries at arbitrary external
+    /// paths (e.g. `/Applications/rtl-sdr/...`) may be denied; such a task will
+    /// fail to start and surface via `lastError`.
     func startTasksForCustomTask(id: Int64) throws {
-        throw SDRError.notImplemented("Custom task input")
+        guard let task = try sqliteController.customTask(forID: id) else {
+            throw SDRError.customTaskNotFound(id)
+        }
+        let stages = Self.parseCustomTaskStages(task.taskJson)
+        guard !stages.isEmpty else {
+            throw SDRError.customTaskHasNoStages(id)
+        }
+
+        Self.sweepOrphanedHelpers()
+        if radioTaskPipelineManager.status == .running {
+            radioTaskPipelineManager.terminate()
+        }
+
+        taskMode = .customTask
+        activeFrequencyID = nil
+        publishCustomTaskStatus(name: task.taskName)
+
+        var items: [TaskItem] = stages.map { stage in
+            let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: stage.path,
+                                                             functionName: task.taskName)
+            for arg in stage.arguments { item.addArgument(arg) }
+            return item
+        }
+        // sox normalizes the task's output rate/channels to the 48 kHz / 2 ch
+        // LiveAudioServer contract (time-based buffer avoids low-rate glitches).
+        guard let resample = makeResampleTaskItem(inputRate: task.sampleRate,
+                                                  inputChannels: max(1, task.channels),
+                                                  audioOutputFilter: "vol 1"),
+              let udpSender = makeUDPSenderTaskItem() else {
+            taskMode = .stopped
+            return
+        }
+        items.append(resample)
+        items.append(udpSender)
+        items.forEach { radioTaskPipelineManager.add($0) }
+
+        do {
+            try radioTaskPipelineManager.start()
+            lastError = nil
+        } catch {
+            lastError = error
+            print("SDRController: failed to start custom-task pipeline - \(error)")
+            taskMode = .stopped
+        }
+    }
+
+    private struct CustomTaskStage {
+        let path: String
+        let arguments: [String]
+    }
+
+    /// Parses `task_json` (`{"tasks":[{"path":..,"arguments":[..]}]}`) into stages.
+    private static func parseCustomTaskStages(_ json: String) -> [CustomTaskStage] {
+        struct Payload: Decodable {
+            struct Task: Decodable { let path: String; let arguments: [String]? }
+            let tasks: [Task]
+        }
+        guard let data = json.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return [] }
+        return payload.tasks
+            .filter { !$0.path.isEmpty }
+            .map { CustomTaskStage(path: $0.path, arguments: $0.arguments ?? []) }
+    }
+
+    private func publishCustomTaskStatus(name: String) {
+        statusFunction = "Using Custom Task '\(name)'"
+        stationName = name
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
     }
 
     func terminateTasks() {
@@ -119,6 +290,7 @@ final class SDRController {
         taskMode = .stopped
         activeFrequencyID = nil
         statusFunction = "No active tuning"
+        signalLevel = 0
     }
 
     // MARK: Tuning resolution
@@ -136,6 +308,7 @@ final class SDRController {
         var atanMath: String
         var directQBranch: Bool
         var tunerAGC: Bool
+        var stereoFlag: Bool
         var options: String
         var audioOutputFilter: String
         /// Already-formatted rtl_fm frequency arguments, e.g. ["-f", "89100000"].
@@ -158,6 +331,7 @@ final class SDRController {
             atanMath: f.atanMath,
             directQBranch: f.samplingMode == 2,
             tunerAGC: f.tunerAgc == 1,
+            stereoFlag: f.stereoFlag,
             options: f.options,
             audioOutputFilter: f.audioOutputFilter,
             frequencyArgs: frequencyArguments(for: f),
@@ -184,6 +358,7 @@ final class SDRController {
             atanMath: c.scanAtanMath,
             directQBranch: c.scanSamplingMode == 2,
             tunerAGC: c.scanTunerAgc == 1,
+            stereoFlag: false,   // category scan has no stereo setting; stays mono
             options: c.scanOptions,
             audioOutputFilter: c.scanAudioOutputFilter,
             frequencyArgs: freqArgs,
@@ -204,24 +379,37 @@ final class SDRController {
     // MARK: Pipeline assembly
 
     private func startPipeline(with tuning: Tuning) {
+        // Clear any helpers orphaned by a previous session (e.g. an Xcode "Stop"
+        // SIGKILL that skipped clean teardown) before launching rtl_fm, so a
+        // stale process isn't still holding the RTL-SDR device.
+        Self.sweepOrphanedHelpers()
+
         if radioTaskPipelineManager.status == .running {
             radioTaskPipelineManager.terminate()
         }
 
         publishStatus(tuning)
 
+        // FM-stereo stations decode the multiplex into L/R via stereodemux,
+        // which then feeds sox as 2-channel; everything else stays mono into sox
+        // (which upmixes to dual-mono on output).
+        let isStereo = tuning.modulation == "fm" && tuning.stereoFlag
+
         let source = makeRTLSDRSourceTaskItem(tuning)
+        let stereoDemux = isStereo ? makeStereoDemuxTaskItem(tuning) : nil
         let resample = makeResampleTaskItem(inputRate: tuning.sampleRate,
+                                            inputChannels: isStereo ? 2 : 1,
                                             audioOutputFilter: tuning.audioOutputFilter)
         let udpSender = makeUDPSenderTaskItem()
 
-        guard let source, let resample, let udpSender else {
+        guard let source, let resample, let udpSender, !(isStereo && stereoDemux == nil) else {
             taskMode = .stopped
             activeFrequencyID = nil
             return  // lastError already set by the failing builder
         }
 
         radioTaskPipelineManager.add(source)
+        if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         radioTaskPipelineManager.add(udpSender)
 
@@ -234,6 +422,38 @@ final class SDRController {
             taskMode = .stopped
             activeFrequencyID = nil
         }
+    }
+
+    /// AudioInputCapture source stage: captures the named Core Audio input and
+    /// emits 48 kHz / 2-channel S16LE on stdout.
+    private func makeAudioCaptureTaskItem(deviceName: String) -> TaskItem? {
+        let path = helperPath("AudioInputCapture")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("AudioInputCapture helper missing at \(path)")
+            print("SDRController: AudioInputCapture helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
+                                                         functionName: "AudioInputCapture")
+        item.addArgument("--device-name"); item.addArgument(deviceName)
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    private func publishDeviceStatus(deviceName: String, filter: String) {
+        statusFunction = "Listening to \(deviceName)"
+        stationName = deviceName
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = filter
+        tunerAGC = false
+        directSamplingQBranch = false
     }
 
     private func makeRTLSDRSourceTaskItem(_ tuning: Tuning) -> TaskItem? {
@@ -255,8 +475,9 @@ final class SDRController {
         }
         item.addArgument("-A"); item.addArgument(tuning.atanMath)
         item.addArgument("-p"); item.addArgument("0")
-        // Note: rtl_fm's `-c <StatusPort>` (signal-level UDP) is deferred until a
-        // status listener exists.
+        // rtl_fm streams "Frequency:/RMS Power:" status to this local UDP port;
+        // RTLSDRStatusListener parses it into `signalLevel`.
+        item.addArgument("-c"); item.addArgument(Int(statusUDPPort))
         item.addArgument("-E"); item.addArgument("pad")
 
         if tuning.directQBranch {
@@ -277,10 +498,27 @@ final class SDRController {
         return item
     }
 
-    /// sox stage: resample rtl_fm's mono output to S16LE mono 48000 Hz (the
+    /// stereodemux stage: decodes rtl_fm's wideband FM multiplex (mono S16LE at
+    /// the tuner rate) into interleaved S16LE stereo at the same rate, which the
+    /// sox stage then resamples. Ported from LocalRadio's StereoDemux step.
+    private func makeStereoDemuxTaskItem(_ tuning: Tuning) -> TaskItem? {
+        let path = helperPath("stereodemux")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("stereodemux helper missing at \(path)")
+            print("SDRController: stereodemux helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
+                                                         functionName: "stereodemux")
+        item.addArgument("-r"); item.addArgument(tuning.sampleRate)
+        return item
+    }
+
+    /// sox stage: resample the upstream audio to S16LE 2-channel 48000 Hz (the
     /// LiveAudioServer UDP-input contract) and apply the station's audio filter.
-    /// Replaces LocalRadio's AudioMonitor2 resampling step.
-    private func makeResampleTaskItem(inputRate: Int, audioOutputFilter: String) -> TaskItem? {
+    /// `inputChannels` is 2 when fed by stereodemux, else 1 (mono is upmixed to
+    /// dual-mono on output). Replaces LocalRadio's AudioMonitor2 resampling step.
+    private func makeResampleTaskItem(inputRate: Int, inputChannels: Int, audioOutputFilter: String) -> TaskItem? {
         let item: TaskItem
         do {
             item = try radioTaskPipelineManager.makeSoxTaskItem()
@@ -293,15 +531,24 @@ final class SDRController {
         item.addArgument("-V2")     // show failures and warnings
         item.addArgument("-q")      // no terminal audio meter
 
-        // Input: raw mono S16LE at rtl_fm's output (tuner) sample rate.
+        // Keep sox's processing block small in *time*, independent of input rate.
+        // sox's default buffer (8192 bytes) is ~0.4 s at a 10 kHz mono input, so
+        // it reads/emits in ~0.4 s bursts; LiveAudioServer's idle detector then
+        // injects silence between bursts, producing choppy narrowband audio.
+        // (Wideband is unaffected — the same byte buffer is only ~25 ms there.)
+        // Size the buffer for ~50 ms at the input rate so audio flows steadily.
+        let blockBytes = max(1024, inputRate * inputChannels * 2 / 20)
+        item.addArgument("--buffer"); item.addArgument(blockBytes)
+
+        // Input: raw S16LE at rtl_fm's/stereodemux's output (tuner) sample rate.
         item.addArgument("-r"); item.addArgument(inputRate)
         item.addArgument("-e"); item.addArgument("signed-integer")
         item.addArgument("-b"); item.addArgument(16)
-        item.addArgument("-c"); item.addArgument(Self.outputChannels)
+        item.addArgument("-c"); item.addArgument(inputChannels)
         item.addArgument("-t"); item.addArgument("raw")
         item.addArgument("-")       // stdin
 
-        // Output: raw mono S16LE.
+        // Output: raw S16LE, 2-channel (mono input is duplicated to both).
         item.addArgument("-e"); item.addArgument("signed-integer")
         item.addArgument("-b"); item.addArgument(16)
         item.addArgument("-c"); item.addArgument(Self.outputChannels)
@@ -333,6 +580,66 @@ final class SDRController {
         Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/\(name)")
             .path
+    }
+
+    // MARK: Orphaned-helper sweep
+
+    /// Best-effort cleanup of helper processes left over from a previous session
+    /// (still under this bundle's `Contents/Helpers/`, reparented to launchd /
+    /// PPID 1). Restricting to PPID 1 targets only true orphans — never this
+    /// app's live children nor another instance's.
+    ///
+    /// NOTE: under the App Sandbox a process generally cannot signal a
+    /// non-descendant, so this `kill()` typically fails with EPERM (and process
+    /// enumeration may be restricted too). It is kept as a harmless fallback for
+    /// unsandboxed runs (e.g. tests); the *primary* defense against orphans is
+    /// each helper's parent-death watchdog — PCMUDPSender and LiveAudioServer's
+    /// `--exit-with-parent`, and rtl_fm_localradio's built-in getppid watchdog —
+    /// which lets every helper reap itself when the app dies.
+    private static func sweepOrphanedHelpers() {
+        let helpersDir = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers").path
+        let prefix = helpersDir.hasSuffix("/") ? helpersDir : helpersDir + "/"
+
+        for proc in runningProcesses() where proc.ppid == 1 {
+            guard let path = executablePath(forPID: proc.pid), path.hasPrefix(prefix) else { continue }
+            if kill(proc.pid, SIGKILL) == 0 {
+                print("SDRController: reaped orphaned helper PID=\(proc.pid) \(path)")
+            } else {
+                print("SDRController: failed to reap orphaned helper PID=\(proc.pid) \(path) — errno=\(errno)")
+            }
+        }
+    }
+
+    private struct ProcessEntry {
+        let pid: pid_t
+        let ppid: pid_t
+    }
+
+    /// Snapshot of all processes via `sysctl(KERN_PROC_ALL)`, reduced to pid/ppid.
+    private static func runningProcesses() -> [ProcessEntry] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+
+        let stride = MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride)
+        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
+
+        // The table can shrink between the sizing and fetching calls; trust the
+        // byte count returned by the second call.
+        let count = size / stride
+        return procs.prefix(count).map {
+            ProcessEntry(pid: $0.kp_proc.p_pid, ppid: $0.kp_eproc.e_ppid)
+        }
+    }
+
+    /// Resolves a process's executable path, or nil if it can't be inspected
+    /// (e.g. it exited, or belongs to another user).
+    private static func executablePath(forPID pid: pid_t) -> String? {
+        // PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN); the macro isn't imported into Swift.
+        var buffer = [CChar](repeating: 0, count: 4 * 1024)
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(cString: buffer)
     }
 
     private func publishStatus(_ tuning: Tuning) {

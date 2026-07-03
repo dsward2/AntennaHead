@@ -488,6 +488,11 @@
                 {
                     stopNowPlayingUpdates();
                 }
+
+                if (contentFileName.indexOf("editcustomtask.html") == 0)
+                {
+                    initCustomTaskEditor();
+                }
             }
         };
         xhttp.open("GET", contentFileName, true);

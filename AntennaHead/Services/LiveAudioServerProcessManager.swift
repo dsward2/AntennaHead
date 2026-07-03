@@ -37,17 +37,20 @@ final class LiveAudioServerProcessManager {
     private static let executablePathKey = "AntennaHead.liveAudioServer.executablePath"
 
     /// PCM format LAS expects on its UDP input. Must match the pipeline's
-    /// terminal format (rtl_fm -> sox normalize -> PCMUDPSender): S16LE mono 48k.
+    /// terminal format (sox normalize -> PCMUDPSender): S16LE 2-channel 48k.
+    /// The pipeline always emits 2 channels (mono upmixed to dual-mono;
+    /// FM-stereo decoded to L/R), so this format is constant across retunes.
     private static let audioSampleRate = 48_000
-    private static let audioChannels = 1
+    private static let audioChannels = 2
 
-    /// HTTP port LiveAudioServer listens on for its web UI (LAS default).
-    let httpPort = 8080
+    /// HTTP port LiveAudioServer listens on for its web UI. Updated from
+    /// `PortSettings` on each `start(...)`.
+    private(set) var httpPort = 8080
 
     /// UDP port LAS listens on for incoming PCM. `SDRController` points its
-    /// PCMUDPSender stage at this port.
+    /// PCMUDPSender stage at this port. Updated from `PortSettings` on start.
     static let defaultUDPInputPort: UInt16 = 6020
-    let udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort
+    private(set) var udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort
 
     private(set) var isRunning = false
     private(set) var lastError: Error?
@@ -56,9 +59,14 @@ final class LiveAudioServerProcessManager {
     private var serverProcess: Process?
     private var userInitiatedStop = false
 
-    /// Auth/TLS captured at last start so `restart()` can reapply them.
+    /// Auth/TLS/bitrate captured at last start so `restart()` can reapply them.
     private var currentAuth: HTTPAuthCredentials.Credentials?
     private var currentTLS: TLSConfig?
+    private var currentOutputBitrate = 128_000
+
+    /// Bonjour (mDNS) name LAS advertises its HTTP/HTTPS listeners under on
+    /// the LAN (LAS `--bonjour`), so players can discover the audio stream.
+    static let bonjourName = "AntennaHead Audio"
 
     var executableURL: URL {
         get {
@@ -75,13 +83,18 @@ final class LiveAudioServerProcessManager {
     }
 
     /// Starts (or restarts) LiveAudioServer. Called at app launch and whenever
-    /// auth/TLS settings change. The radio pipeline is managed separately by
-    /// `SDRController`, which never restarts LAS — so listeners survive retunes.
-    func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
+    /// auth/TLS/bitrate/port settings change. The radio pipeline is managed
+    /// separately by `SDRController`, which never restarts LAS — so listeners
+    /// survive retunes. `outputBitrate` (bits/sec) applies to both encoders.
+    func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?, outputBitrate: Int = 128_000,
+               httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort) {
         stop()
 
         currentAuth = auth
         currentTLS = tls
+        currentOutputBitrate = outputBitrate
+        self.httpPort = Int(httpPort)
+        self.udpInputPort = udpInputPort
 
         let serverURL = executableURL
         guard FileManager.default.isExecutableFile(atPath: serverURL.path) else {
@@ -95,12 +108,17 @@ final class LiveAudioServerProcessManager {
         // --exit-with-parent makes LAS reap itself if the app dies/crashes
         // (otherwise it orphans holding its HTTP port).
         var serverArgs: [String] = [
-            "--udp-input-port", "\(udpInputPort)",
+            "--port", "\(self.httpPort)",
+            "--udp-input-port", "\(self.udpInputPort)",
             "--keep-alive",
             "--filler-mode", "silence",
             "--exit-with-parent",
             "--rate", "\(Self.audioSampleRate)",
-            "--channels", "\(Self.audioChannels)"
+            "--channels", "\(Self.audioChannels)",
+            // LAS takes kbps; the setting is stored in bits/sec.
+            "--mp3-bitrate", "\(outputBitrate / 1000)",
+            "--aac-bitrate", "\(outputBitrate / 1000)",
+            "--bonjour", Self.bonjourName
         ]
         if let tls {
             serverArgs.append(contentsOf: ["--tls-identity", tls.identityPath,
@@ -184,6 +202,7 @@ final class LiveAudioServerProcessManager {
 
     func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
         stop()
-        start(auth: auth, tls: tls)
+        start(auth: auth, tls: tls, outputBitrate: currentOutputBitrate,
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort)
     }
 }

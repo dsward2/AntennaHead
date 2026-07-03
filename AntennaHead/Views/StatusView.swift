@@ -1,155 +1,80 @@
 import SwiftUI
 
+/// Status tab, rendered entirely as a web view. Data items are presented as
+/// HTML; the RTL-SDR task pipeline is drawn as an inline SVG flow diagram.
+/// The view rebuilds a `StatusSnapshot` from the observable controllers and
+/// hands it to `StatusWebView`, which pushes it into the page.
 struct StatusView: View {
+    var sdrController: SDRController
     var audioServer: LiveAudioServerClient
-    @State private var selectedFrequency: Frequency?
-    @State private var isPlaying = false
-
-    @State private var testFrequencyMHz: String = "89.1"
-    @State private var testPipeline: TaskPipelineManager?
-    @State private var testStatus: String = ""
-    private let testPort = 8081
-    private var testStreamURL: URL {
-        URL(string: "http://localhost:\(testPort)/stream.mp3")!
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let frequency = selectedFrequency {
-                StationHeaderView(frequency: frequency)
-                Divider()
-            }
-
-            ScrollView {
-                VStack(spacing: 16) {
-                    GroupBox("Signal") {
-                        SignalMeterView()
-                            .padding(.vertical, 4)
-                    }
-
-                    GroupBox("Playback") {
-                        HStack(spacing: 24) {
-                            Button(isPlaying ? "Stop" : "Play",
-                                   systemImage: isPlaying ? "stop.fill" : "play.fill") {
-                                isPlaying.toggle()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-
-                            Spacer()
-
-                            Button("Record", systemImage: "record.circle") {}
-                                .buttonStyle(.bordered)
-                                .disabled(!isPlaying)
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    GroupBox("Stream") {
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text("Server")
-                                Spacer()
-                                Circle()
-                                    .fill(audioServer.isRunning ? .green : .red)
-                                    .frame(width: 8, height: 8)
-                                Text(audioServer.isRunning ? "Live" : "Offline")
-                                    .foregroundStyle(.secondary)
-                            }
-                            HStack {
-                                Label("\(audioServer.listenerCount) listener\(audioServer.listenerCount == 1 ? "" : "s")",
-                                      systemImage: "person.2")
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    GroupBox("FM Test (mono, port \(testPort))") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Frequency (MHz):")
-                                TextField("89.1", text: $testFrequencyMHz)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: 120)
-                                    .disabled(testPipeline != nil)
-                            }
-                            HStack(spacing: 12) {
-                                Button(testPipeline == nil ? "Start" : "Stop",
-                                       systemImage: testPipeline == nil ? "play.fill" : "stop.fill") {
-                                    if testPipeline == nil { startFMTest() } else { stopFMTest() }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                if testPipeline != nil {
-                                    Link("Open stream", destination: testStreamURL)
-                                }
-                                Spacer()
-                            }
-                            if !testStatus.isEmpty {
-                                Text(testStatus)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .padding()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        StatusWebView(snapshot: snapshot)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func startFMTest() {
-        guard testPipeline == nil else { return }
-        guard let mhz = Double(testFrequencyMHz), mhz > 0 else {
-            testStatus = "Invalid frequency."
-            return
-        }
+    /// Builds the snapshot from current controller state. Reading the observable
+    /// properties here ties the view's updates to tuning, pipeline, and stream
+    /// changes, so `StatusWebView` is re-pushed whenever any of them change.
+    private var snapshot: StatusSnapshot {
+        let active = sdrController.taskMode != .stopped
 
-        let helpers = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers")
-        let rtlPath = helpers.appendingPathComponent("rtl_fm_localradio").path
-        let lasPath = helpers.appendingPathComponent("LiveAudioServer").path
-        let fm = FileManager.default
-        guard fm.isExecutableFile(atPath: rtlPath) else {
-            testStatus = "Helper missing: \(rtlPath)"
-            return
-        }
-        guard fm.isExecutableFile(atPath: lasPath) else {
-            testStatus = "Helper missing: \(lasPath)"
-            return
-        }
-
-        let pipeline = TaskPipelineManager()
-
-        let rtl = pipeline.makeTaskItem(pathToExecutable: rtlPath, functionName: "rtl_fm")
-        rtl.addArgument("-f"); rtl.addArgument("\(mhz)M")
-        rtl.addArgument("-M"); rtl.addArgument("fm")
-        rtl.addArgument("-s"); rtl.addArgument("200000")
-        rtl.addArgument("-r"); rtl.addArgument("48000")
-        rtl.addArgument("-")
-        pipeline.add(rtl)
-
-        let las = pipeline.makeTaskItem(pathToExecutable: lasPath, functionName: "LiveAudioServer")
-        las.addArgument("--rate"); las.addArgument("48000")
-        las.addArgument("--channels"); las.addArgument("1")
-        las.addArgument("-p"); las.addArgument("\(testPort)")
-        pipeline.add(las)
-
-        do {
-            try pipeline.start()
-            testPipeline = pipeline
-            testStatus = "Running. Stream: \(testStreamURL.absoluteString)"
-        } catch {
-            testStatus = "Start failed: \(error)"
-        }
+        var snap = StatusSnapshot(
+            serverRunning: audioServer.isRunning,
+            listenerCount: audioServer.listenerCount,
+            statusFunction: sdrController.statusFunction,
+            stationName: sdrController.stationName,
+            frequencyDisplay: sdrController.frequencyDisplay,
+            modulation: sdrController.modulation.uppercased(),
+            samplingMode: active ? (sdrController.directSamplingQBranch ? "Direct sampling (Q-branch)" : "Standard") : "",
+            squelchLevel: active ? "\(sdrController.squelchLevel)" : "",
+            tunerGain: active ? String(format: "%g dB", sdrController.tunerGain) : "",
+            tunerAGC: sdrController.tunerAGC,
+            sampleRate: active && sdrController.sampleRate > 0 ? "\(sdrController.sampleRate) Hz" : "",
+            audioOutputFilter: sdrController.audioOutputFilter,
+            options: sdrController.options
+        )
+        snap.stages = pipelineStages()
+        snap.signalLevel = normalizedSignal(sdrController.signalLevel)
+        return snap
     }
 
-    private func stopFMTest() {
-        testPipeline?.terminate()
-        testPipeline = nil
-        testStatus = "Stopped."
+    /// Maps rtl_fm's raw RMS signal level (0–32767, int16 full scale) to the
+    /// meter's 0–1 range on a dBFS scale: −60 dBFS reads empty, 0 dBFS reads full.
+    private func normalizedSignal(_ rms: Int) -> Double {
+        guard rms > 0 else { return 0 }
+        let db = 20.0 * log10(Double(rms) / 32767.0)   // ≤ 0
+        let floorDB = -60.0
+        return min(max((db - floorDB) / -floorDB, 0), 1)
+    }
+
+    /// Maps the live pipeline's task items into renderable stages, then appends
+    /// the LiveAudioServer sink the terminal PCMUDPSender feeds over UDP.
+    private func pipelineStages() -> [StatusSnapshot.Stage] {
+        let items = sdrController.radioTaskPipelineManager.taskItems
+        guard !items.isEmpty else { return [] }
+
+        var stages: [StatusSnapshot.Stage] = items.enumerated().map { index, item in
+            let pid = item.process?.processIdentifier ?? 0
+            let running = item.process?.isRunning ?? false
+            return StatusSnapshot.Stage(
+                name: item.functionName,
+                detail: running ? "PID \(pid)" : "stopped",
+                path: item.path,
+                args: item.argsArray,
+                running: running,
+                link: index == 0 ? "" : "pipe"
+            )
+        }
+
+        stages.append(StatusSnapshot.Stage(
+            name: "LiveAudioServer",
+            detail: audioServer.isRunning ? "live" : "offline",
+            path: "UDP PCM input → HTTP/AAC stream",
+            args: [],
+            running: audioServer.isRunning,
+            link: "UDP :\(sdrController.udpInputPort)"
+        ))
+        return stages
     }
 }

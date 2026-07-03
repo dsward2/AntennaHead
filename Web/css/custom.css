@@ -640,3 +640,62 @@ html {
     -webkit-text-size-adjust: none;
     touch-action: manipulation;
 }
+
+
+/* Custom-task pipeline graphical overview (index above the stage editors).
+   Mirrors the SwiftUI Status view's SVG flow diagram. */
+.ct-pipeline {
+    overflow-x: auto;
+    padding: 4px 2px 8px;
+    margin-bottom: 12px;
+}
+.ct-pipeline .ct-idle {
+    color: #6e6e73;
+    font-style: italic;
+    margin: 6px 2px;
+}
+.ct-pipeline rect.ct-node {
+    fill: #f5f9ff;
+    stroke: #0a84ff;
+    stroke-width: 1.5;
+}
+.ct-pipeline g.ct-pnode { cursor: pointer; }
+.ct-pipeline g.ct-pnode:hover rect.ct-node { fill: #e6f1ff; }
+.ct-pipeline text.ct-node-index {
+    fill: #6e6e73;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.ct-pipeline text.ct-node-name {
+    fill: #1c1c1e;
+    font-size: 13px;
+    font-weight: 600;
+}
+.ct-pipeline line.ct-arrow { stroke: #8e8e93; stroke-width: 1.5; }
+.ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
+.ct-pipeline text.ct-link-label {
+    fill: #6e6e73;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.ct-back-link {
+    display: block;
+    text-align: right;
+    font-size: 11px;
+    text-decoration: none;
+    margin-bottom: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .ct-pipeline rect.ct-node { fill: #25303f; stroke: #409cff; }
+    .ct-pipeline g.ct-pnode:hover rect.ct-node { fill: #2e3d52; }
+    .ct-pipeline text.ct-node-name { fill: #f2f2f7; }
+    .ct-pipeline text.ct-node-index,
+    .ct-pipeline text.ct-link-label,
+    .ct-pipeline .ct-idle { fill: #9e9ea3; color: #9e9ea3; }
+    .ct-pipeline line.ct-arrow { stroke: #8e8e93; }
+    .ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
+}
