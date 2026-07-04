@@ -7,7 +7,13 @@ final class LiveAudioServerClient {
     var isRunning: Bool = false
     var nowPlaying: NowPlaying = .empty
 
-    private let baseURL: URL
+    /// LiveAudioServer's HTTP port. Updated from `startServices()` whenever
+    /// port settings change; polled URLs are rebuilt from it, so a change
+    /// takes effect on the next poll. Same racy-but-benign access pattern as
+    /// `credentials` below.
+    var port: Int
+
+    private var baseURL: URL { URL(string: "http://localhost:\(port)")! }
     private var statusTask: Task<Void, Never>?
 
     /// Active Basic-auth credentials applied to every outbound request, or
@@ -18,7 +24,7 @@ final class LiveAudioServerClient {
     var credentials: HTTPAuthCredentials.Credentials?
 
     init(port: Int = 8080) {
-        self.baseURL = URL(string: "http://localhost:\(port)")!
+        self.port = port
     }
 
     func startPolling() {
@@ -51,8 +57,12 @@ final class LiveAudioServerClient {
         var request = URLRequest(url: url)
         attachAuth(to: &request)
         guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let status = try? JSONDecoder().decode(ServerStatus.self, from: data) else { return }
-        listenerCount = status.listeners
+              let status = try? JSONDecoder().decode(ServerStatus.self, from: data) else {
+            isRunning = false
+            listenerCount = 0
+            return
+        }
+        listenerCount = (status.mp3Clients ?? 0) + (status.m4aClients ?? 0)
         isRunning = true
     }
 
@@ -71,7 +81,11 @@ extension LiveAudioServerClient {
         static let empty = NowPlaying(title: "", artist: "", station: "")
     }
 
+    /// Subset of LAS's /status.json (`{"mp3Clients":N,"m4aClients":N,...}`).
+    /// Fields are optional so a count LAS stops reporting reads as 0 instead
+    /// of failing the whole decode (which would show the server as offline).
     private struct ServerStatus: Decodable {
-        var listeners: Int
+        var mp3Clients: Int?
+        var m4aClients: Int?
     }
 }

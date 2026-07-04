@@ -150,6 +150,7 @@ struct ContentView: View {
         httpServer.sqlite = .shared
         httpServer.start(tlsIdentity: identity, auth: auth, webConfig: webConfig)
         audioServer.credentials = auth
+        audioServer.port = Int(ports.streamingHTTP)
 
         lasProcess.start(auth: auth, tls: tlsConfig, outputBitrate: outputBitrate,
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
