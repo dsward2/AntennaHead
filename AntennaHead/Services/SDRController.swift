@@ -225,7 +225,7 @@ final class SDRController {
         publishCustomTaskStatus(name: task.taskName)
 
         var items: [TaskItem] = stages.map { stage in
-            let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: stage.path,
+            let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: Self.resolveToolPath(stage.path),
                                                              functionName: task.taskName)
             for arg in stage.arguments { item.addArgument(arg) }
             return item
@@ -256,6 +256,21 @@ final class SDRController {
     private struct CustomTaskStage {
         let path: String
         let arguments: [String]
+    }
+
+    /// Resolves a custom-task stage's executable. Bare tool names (from the
+    /// editor's Tool pop-up) map to the bundled Contents/Helpers executable or
+    /// a whitelisted system tool; absolute/relative paths pass through as-is.
+    static func resolveToolPath(_ path: String) -> String {
+        guard !path.isEmpty, !path.contains("/") else { return path }
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(path)")
+        if FileManager.default.isExecutableFile(atPath: helper.path) {
+            return helper.path
+        }
+        if let system = AntennaHeadHTTPServer.systemToolPaths[path] {
+            return system
+        }
+        return path
     }
 
     /// Parses `task_json` (`{"tasks":[{"path":..,"arguments":[..]}]}`) into stages.

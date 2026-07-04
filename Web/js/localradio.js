@@ -212,19 +212,47 @@ function ctEsc(s) {
     .replace(/'/g, '&#39;').replace(/"/g, '&quot;');
 }
 
+// Stops WebKit's smart quotes/dashes and autocorrect from mangling
+// command-line text ("--text" would otherwise become an em dash).
+var ctVerbatimAttrs = "autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'";
+
 function customTaskArgRowHTML(v) {
-  return "<div class='task-arg-row'><input class='task-arg' type='text' value='" + ctEsc(v) + "' style='width:80%;'> "
+  return "<div class='task-arg-row'><input class='task-arg' type='text' " + ctVerbatimAttrs + " value='" + ctEsc(v) + "' style='width:80%;'> "
     + "<input class='button' type='button' value='-' onclick='removeCustomTaskArgument(this);'></div>";
+}
+
+// Tool names for the stage editor's pop-up, provided by the server in the
+// #task-stages data-tools attribute (bundled helpers + system tools).
+function customTaskToolNames() {
+  var c = document.getElementById('task-stages');
+  var data = c ? c.getAttribute('data-tools') : '';
+  return data ? data.split(',') : [];
 }
 
 function customTaskStageHTML(path, args) {
   if (!args || args.length === 0) { args = ['']; }
   var rows = '';
   for (var i = 0; i < args.length; i++) { rows += customTaskArgRowHTML(args[i]); }
+
+  // A bare tool name selects that tool; a "/" path (or unknown name) uses the
+  // Custom path text field.
+  var tools = customTaskToolNames();
+  var isKnown = path !== '' && path.indexOf('/') < 0 && tools.indexOf(path) >= 0;
+  var selected = (path === '') ? (tools.length ? tools[0] : '__custom__')
+                               : (isKnown ? path : '__custom__');
+  var options = '';
+  for (var t = 0; t < tools.length; t++) {
+    options += "<option value='" + ctEsc(tools[t]) + "'" + (tools[t] === selected ? " selected" : "") + ">"
+      + ctEsc(tools[t]) + "</option>";
+  }
+  options += "<option value='__custom__'" + (selected === '__custom__' ? " selected" : "") + ">Custom path…</option>";
+  var pathStyle = (selected === '__custom__') ? "" : " style='display:none;'";
+
   return "<div class='task-stage' style='border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:10px;'>"
     + "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
-    + "<label>Executable path</label>"
-    + "<input class='task-path u-full-width' type='text' value='" + ctEsc(path) + "' placeholder='/path/to/tool'>"
+    + "<label>Tool</label>"
+    + "<select class='task-tool u-full-width' onchange='customTaskToolChanged(this);'>" + options + "</select>"
+    + "<input class='task-path u-full-width' type='text' " + ctVerbatimAttrs + " value='" + ctEsc(path) + "' placeholder='/path/to/tool'" + pathStyle + ">"
     + "<label>Arguments</label><div class='task-args'>" + rows + "</div>"
     + "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
     + "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
@@ -242,6 +270,23 @@ function removeCustomTaskStage(btn) {
   var st = btn.closest('.task-stage');
   if (st) { st.parentNode.removeChild(st); }
   buildCustomTaskPipelineOverview();
+}
+
+// Tool pop-up changed: reveal the custom-path field only for "Custom path…"
+// and refresh the graphical overview's stage names.
+function customTaskToolChanged(sel) {
+  var st = sel.closest('.task-stage');
+  var pathEl = st ? st.querySelector('.task-path') : null;
+  if (pathEl) { pathEl.style.display = (sel.value === '__custom__') ? '' : 'none'; }
+  buildCustomTaskPipelineOverview();
+}
+
+// Effective executable for a stage: the selected tool name, or the custom path.
+function customTaskStagePath(stageEl) {
+  var sel = stageEl.querySelector('.task-tool');
+  if (sel && sel.value !== '__custom__') { return sel.value; }
+  var pathEl = stageEl.querySelector('.task-path');
+  return pathEl ? pathEl.value.trim() : '';
 }
 
 // Inserts an empty stage directly above this one, so a new intermediate stage
@@ -287,8 +332,7 @@ function buildCustomTaskPipelineOverview() {
   for (var i = 0; i < stageEls.length; i++) {
     // Give each stage a stable anchor id so nodes can scroll to it.
     stageEls[i].id = 'task-stage-' + i;
-    var pathEl = stageEls[i].querySelector('.task-path');
-    names.push(ctStageName(pathEl ? pathEl.value : ''));
+    names.push(ctStageName(customTaskStagePath(stageEls[i])));
   }
   if (!names.length) {
     host.innerHTML = "<p class='ct-idle'>No pipeline stages yet — add a stage below.</p>";
@@ -349,8 +393,7 @@ function buildCustomTaskJSON() {
   var tasks = [];
   var stages = document.querySelectorAll('#task-stages .task-stage');
   for (var i = 0; i < stages.length; i++) {
-    var pathEl = stages[i].querySelector('.task-path');
-    var path = pathEl ? pathEl.value.trim() : '';
+    var path = customTaskStagePath(stages[i]);
     if (path.length === 0) { continue; }
     var args = [];
     var argEls = stages[i].querySelectorAll('.task-arg');

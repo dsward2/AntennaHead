@@ -19,6 +19,7 @@ struct WebRadioView: NSViewRepresentable {
         let webView = WKWebView()
         webView.customUserAgent = "AntennaHead/1.0"
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         context.coordinator.startObservingReload(of: webView)
         return webView
     }
@@ -30,7 +31,7 @@ struct WebRadioView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var credentials: HTTPAuthCredentials.Credentials?
         private weak var webView: WKWebView?
 
@@ -50,6 +51,18 @@ struct WebRadioView: NSViewRepresentable {
 
         @objc private func reloadWebView() {
             webView?.reload()
+        }
+
+        /// `target="_blank"` links (Pipeline Tools docs, Credits): WKWebView
+        /// can't open windows itself, so hand the URL to the default browser.
+        func webView(_ webView: WKWebView,
+                     createWebViewWith configuration: WKWebViewConfiguration,
+                     for navigationAction: WKNavigationAction,
+                     windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                NSWorkspace.shared.open(url)
+            }
+            return nil
         }
 
         func webView(_ webView: WKWebView,

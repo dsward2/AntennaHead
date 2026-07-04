@@ -529,7 +529,7 @@ final class AntennaHeadHTTPServer {
         }
         s += "</select>"
         s += "<label for='audio_output_filter'>Sox Audio Output Filter:</label>"
-        s += "<input class='twelve columns value-prop' type='text' id='audio_output_filter' name='audio_output_filter' value='vol 1' "
+        s += "<input class='twelve columns value-prop' type='text' \(Self.verbatimInputAttributes) id='audio_output_filter' name='audio_output_filter' value='vol 1' "
         s += "title='Applied by the Sox audio tool to the final output. Default &quot;vol 1&quot;. Do not set a &quot;rate&quot; here — the sample rate is fixed at 48000.'>"
         s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
         s += "onclick=\"deviceListenButtonClicked(getElementById('deviceForm'));\" "
@@ -584,6 +584,7 @@ final class AntennaHeadHTTPServer {
         s += "</tbody></table>"
         s += "<form action='javascript:loadContent(&quot;editcustomtask.html&quot;)'>"
         s += "<br>&nbsp;<br>\n<input class='twelve columns button button-primary' type='submit' value='Add New Custom Task'></form>"
+        s += "<br><a href='pipelinetools.html' target='_blank'>Pipeline Tools documentation</a><br>&nbsp;<br>"
         s += "<br>&nbsp;<br></section></div>"
         return s
     }
@@ -596,7 +597,7 @@ final class AntennaHeadHTTPServer {
         let isEditing = task.id != nil
 
         func text(_ label: String, _ name: String, _ value: String, type: String = "text") -> String {
-            "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+            "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
                 + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'>"
         }
 
@@ -610,11 +611,15 @@ final class AntennaHeadHTTPServer {
         s += text("Input Buffer Size:", "input_buffer_size", "\(task.inputBufferSize)", type: "number")
         s += text("AudioConverter Buffer Size:", "audioconverter_buffer_size", "\(task.audioconverterBufferSize)", type: "number")
         s += text("AudioQueue Buffer Size:", "audioqueue_buffer_size", "\(task.audioqueueBufferSize)", type: "number")
-        s += "<label>Task Pipeline — executables piped left → right (each stage's stdout feeds the next):</label>"
+        s += "<label>Task Pipeline — executables piped left → right (each stage's stdout feeds the next) "
+        s += "(<a href='pipelinetools.html' target='_blank'>tool documentation</a>):</label>"
         // Graphical index of the pipeline. Built/refreshed by JS (initCustomTaskEditor
         // in localradio.js); clicking a node scrolls to that stage's editor below.
         s += "<a id='pipeline-overview'></a><div id='pipeline-overview-graphic' class='ct-pipeline'></div>"
-        s += "<div id='task-stages'>\(customTaskStagesHTML(task.taskJson))</div>"
+        // data-tools feeds the JS mirror of customTaskStageHTML (new stages
+        // added client-side need the same Tool pop-up options).
+        let toolsAttribute = htmlAttribute(customTaskToolNames().joined(separator: ","))
+        s += "<div id='task-stages' data-tools='\(toolsAttribute)'>\(customTaskStagesHTML(task.taskJson))</div>"
         s += "<input class='button' type='button' value='+ Add Stage' onclick='addCustomTaskStage();'>"
         // JS gathers the stage/argument fields into this hidden field on submit.
         s += "<input type='hidden' name='task_json' id='task_json_hidden' value=''>"
@@ -637,10 +642,32 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
+    /// Tool names offered by the stage editor's Tool pop-up: the bundled
+    /// Contents/Helpers executables plus whitelisted system tools. Stored as
+    /// bare names in `task_json`; `SDRController.resolveToolPath` maps them
+    /// back to real paths when the pipeline starts.
+    nonisolated static let systemToolPaths = ["nc": "/usr/bin/nc"]
+
+    nonisolated private func customTaskToolNames() -> [String] {
+        var names: Set<String> = []
+        let helpersURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers")
+        if let entries = try? FileManager.default.contentsOfDirectory(at: helpersURL, includingPropertiesForKeys: nil) {
+            for url in entries
+            where FileManager.default.isExecutableFile(atPath: url.path) && !url.lastPathComponent.hasSuffix(".dylib") {
+                names.insert(url.lastPathComponent)
+            }
+        }
+        // The streaming sink is managed by the app itself; pipelines reach it
+        // over UDP (PCMUDPSender), so it makes no sense as a stage.
+        names.remove("LiveAudioServer")
+        names.formUnion(Self.systemToolPaths.keys)
+        return names.sorted()
+    }
+
     /// Renders the structured task-pipeline editor from `task_json`. One block
-    /// per pipe stage (executable path + argument list). The matching JS in
-    /// localradio.js adds/removes stages/arguments and serializes them back to
-    /// `task_json` on save, so the markup here and there must stay in sync.
+    /// per pipe stage (tool pop-up / custom path + argument list). The matching
+    /// JS in localradio.js adds/removes stages/arguments and serializes them
+    /// back to `task_json` on save, so the markup here and there must stay in sync.
     @MainActor private func customTaskStagesHTML(_ json: String) -> String {
         var stages: [(path: String, args: [String])] = []
         if let data = json.data(using: .utf8),
@@ -653,19 +680,37 @@ final class AntennaHeadHTTPServer {
             }
         }
         if stages.isEmpty { stages = [("", [])] }
-        return stages.map { customTaskStageHTML(path: $0.path, args: $0.args) }.joined()
+        let tools = customTaskToolNames()
+        return stages.map { customTaskStageHTML(path: $0.path, args: $0.args, tools: tools) }.joined()
     }
 
-    nonisolated private func customTaskStageHTML(path: String, args: [String]) -> String {
+    /// Attributes that stop WebKit's smart quotes/dashes and autocorrect from
+    /// mangling command-line text ("--text" would otherwise become an em dash).
+    nonisolated static let verbatimInputAttributes =
+        "autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'"
+
+    nonisolated private func customTaskStageHTML(path: String, args: [String], tools: [String]) -> String {
         var argRows = ""
         for arg in (args.isEmpty ? [""] : args) {
-            argRows += "<div class='task-arg-row'><input class='task-arg' type='text' value='\(htmlAttribute(arg))' style='width:80%;'> "
+            argRows += "<div class='task-arg-row'><input class='task-arg' type='text' \(Self.verbatimInputAttributes) value='\(htmlAttribute(arg))' style='width:80%;'> "
             argRows += "<input class='button' type='button' value='-' onclick='removeCustomTaskArgument(this);'></div>"
         }
+        // A bare name in `path` selects that tool; anything with a "/" (or an
+        // unknown name) falls back to the Custom path text field.
+        let isKnownTool = !path.isEmpty && !path.contains("/") && tools.contains(path)
+        let selected = path.isEmpty ? (tools.first ?? "__custom__") : (isKnownTool ? path : "__custom__")
+
         var s = "<div class='task-stage' style='border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:10px;'>"
         s += "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
-        s += "<label>Executable path</label>"
-        s += "<input class='task-path u-full-width' type='text' value='\(htmlAttribute(path))' placeholder='/path/to/tool'>"
+        s += "<label>Tool</label>"
+        s += "<select class='task-tool u-full-width' onchange='customTaskToolChanged(this);'>"
+        for tool in tools {
+            s += "<option value='\(htmlAttribute(tool))'\(tool == selected ? " selected" : "")>\(htmlText(tool))</option>"
+        }
+        s += "<option value='__custom__'\(selected == "__custom__" ? " selected" : "")>Custom path…</option>"
+        s += "</select>"
+        let pathStyle = selected == "__custom__" ? "" : " style='display:none;'"
+        s += "<input class='task-path u-full-width' type='text' \(Self.verbatimInputAttributes) value='\(htmlAttribute(path))' placeholder='/path/to/tool'\(pathStyle)>"
         s += "<label>Arguments</label><div class='task-args'>\(argRows)</div>"
         s += "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
         s += "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
@@ -710,7 +755,7 @@ final class AntennaHeadHTTPServer {
 
         func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
             let stepAttr = step.map { " step='\($0)'" } ?? ""
-            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
                 + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
@@ -858,7 +903,7 @@ final class AntennaHeadHTTPServer {
 
         func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
             let stepAttr = step.map { " step='\($0)'" } ?? ""
-            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' "
+            return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
                 + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
@@ -985,7 +1030,7 @@ final class AntennaHeadHTTPServer {
                   type: String = "text", step: String? = nil) -> String {
             let idAttr = elementID.map { " id='\($0)'" } ?? ""
             let stepAttr = step.map { " step='\($0)'" } ?? ""
-            return "<label>\(label)<input class='u-full-width' type='\(type)'\(idAttr) "
+            return "<label>\(label)<input class='u-full-width' type='\(type)'\(idAttr) \(Self.verbatimInputAttributes) "
                 + "name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)></label>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {

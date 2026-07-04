@@ -27,6 +27,14 @@
 		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8D32FF6506300BA711A /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB8D22FF6506300BA711A /* AudioInputCapture */; };
 		0EAEB8DB2FF65A7000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB9332FF77F0400BA711A /* PCMUDPReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB9322FF77F0400BA711A /* PCMUDPReceiver */; };
+		0EAEB9352FF782BD00BA711A /* PCMUDPReceiver in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9342FF782BD00BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB9382FF78E5700BA711A /* PCMMixer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB9372FF78E5700BA711A /* PCMMixer */; };
+		0EAEB93A2FF7922800BA711A /* PCMMixer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9392FF7922800BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB93D2FF796B800BA711A /* PCMSpeechSynth in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB93C2FF796B800BA711A /* PCMSpeechSynth */; };
+		0EAEB93F2FF797DF00BA711A /* PCMSpeechSynth in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB93E2FF797DF00BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB9422FF887C400BA711A /* AUProcessor in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEB9412FF887C400BA711A /* AUProcessor */; };
+		0EAEB9442FF8895100BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9432FF8895100BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -73,12 +81,16 @@
 			dstSubfolderSpec = 1;
 			files = (
 				0EAEB8DB2FF65A7000BA711A /* AudioInputCapture in CopyFiles */,
-				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
-				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
+				0EAEB9442FF8895100BA711A /* AUProcessor in CopyFiles */,
+				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
+				0EAEB9352FF782BD00BA711A /* PCMUDPReceiver in CopyFiles */,
 				0EAEB86A2FF233EC00BA711A /* PCMUDPSender in CopyFiles */,
 				0EAEB6722FECE82000BA711A /* PCMPassthrough in CopyFiles */,
+				0EAEB93F2FF797DF00BA711A /* PCMSpeechSynth in CopyFiles */,
+				0EAEB93A2FF7922800BA711A /* PCMMixer in CopyFiles */,
+				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
+				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
 				0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */,
-				0ECF511C2FD92720006943DA /* LiveAudioServer in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +143,10 @@
 		0EAEB8D72FF65A3200BA711A /* arm64-apple-macos.swiftmodule */ = {isa = PBXFileReference; lastKnownFileType = file; path = "arm64-apple-macos.swiftmodule"; sourceTree = "<group>"; };
 		0EAEB8D82FF65A3200BA711A /* arm64-apple-macos.abi.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "arm64-apple-macos.abi.json"; sourceTree = "<group>"; };
 		0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */ = {isa = PBXFileReference; lastKnownFileType = text; path = AudioInputCapture; sourceTree = BUILT_PRODUCTS_DIR; };
+		0EAEB9342FF782BD00BA711A /* PCMUDPReceiver */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = PCMUDPReceiver; sourceTree = "<group>"; };
+		0EAEB9392FF7922800BA711A /* PCMMixer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = PCMMixer; sourceTree = "<group>"; };
+		0EAEB93E2FF797DF00BA711A /* PCMSpeechSynth */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMSpeechSynth; path = "Packages/PCMSpeechSynth/.build/arm64-apple-macosx/release/PCMSpeechSynth"; sourceTree = "<group>"; };
+		0EAEB9432FF8895100BA711A /* AUProcessor */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = AUProcessor; path = "Packages/AUProcessor/.build/arm64-apple-macosx/release/AUProcessor"; sourceTree = "<group>"; };
 		0ECF511B2FD92707006943DA /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
 		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -165,12 +181,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0EAEB9382FF78E5700BA711A /* PCMMixer in Frameworks */,
 				0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */,
 				0EAEB8D32FF6506300BA711A /* AudioInputCapture in Frameworks */,
+				0EAEB9332FF77F0400BA711A /* PCMUDPReceiver in Frameworks */,
 				0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */,
 				0EAEB66D2FECE41D00BA711A /* PCMPassthrough in Frameworks */,
 				0ECF51072FD87EB4006943DA /* X509 in Frameworks */,
+				0EAEB9422FF887C400BA711A /* AUProcessor in Frameworks */,
 				0ECF58D62FDB7F7F006943DA /* libusb-1.0.0.dylib in Frameworks */,
+				0EAEB93D2FF796B800BA711A /* PCMSpeechSynth in Frameworks */,
 				0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */,
 				0EAEB8652FF2326F00BA711A /* PCMUDPSender in Frameworks */,
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
@@ -240,7 +260,9 @@
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
 				0EAEB8DA2FF65A7000BA711A /* AudioInputCapture */,
 				0ECF511B2FD92707006943DA /* LiveAudioServer */,
+				0EAEB9392FF7922800BA711A /* PCMMixer */,
 				0EAEB8692FF233EC00BA711A /* PCMUDPSender */,
+				0EAEB9342FF782BD00BA711A /* PCMUDPReceiver */,
 				0EAEB6702FECE80100BA711A /* PCMPassthrough */,
 			);
 			name = Frameworks;
@@ -249,6 +271,8 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
+				0EAEB9432FF8895100BA711A /* AUProcessor */,
+				0EAEB93E2FF797DF00BA711A /* PCMSpeechSynth */,
 				0EAEB8D92FF65A3200BA711A /* AudioInputCapture.swiftmodule */,
 				0EAEB8602FF22E9F00BA711A /* Package.swift */,
 				0EAEB8622FF22EF900BA711A /* PCMUDPSender */,
@@ -325,6 +349,10 @@
 				0EAEB66C2FECE41D00BA711A /* PCMPassthrough */,
 				0EAEB8642FF2326F00BA711A /* PCMUDPSender */,
 				0EAEB8D22FF6506300BA711A /* AudioInputCapture */,
+				0EAEB9322FF77F0400BA711A /* PCMUDPReceiver */,
+				0EAEB9372FF78E5700BA711A /* PCMMixer */,
+				0EAEB93C2FF796B800BA711A /* PCMSpeechSynth */,
+				0EAEB9412FF887C400BA711A /* AUProcessor */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -436,6 +464,10 @@
 				0EAEB66B2FECE41D00BA711A /* XCLocalSwiftPackageReference "Packages/PCMPassthrough" */,
 				0EAEB85F2FF22DDC00BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPSender" */,
 				0EAEB8D12FF6506300BA711A /* XCLocalSwiftPackageReference "Packages/AudioInputCapture" */,
+				0EAEB9312FF77F0400BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPReceiver" */,
+				0EAEB9362FF78E5700BA711A /* XCLocalSwiftPackageReference "Packages/PCMMixer" */,
+				0EAEB93B2FF796B800BA711A /* XCLocalSwiftPackageReference "Packages/PCMSpeechSynth" */,
+				0EAEB9402FF887C400BA711A /* XCLocalSwiftPackageReference "Packages/AUProcessor" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -1007,6 +1039,22 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/AudioInputCapture;
 		};
+		0EAEB9312FF77F0400BA711A /* XCLocalSwiftPackageReference "Packages/PCMUDPReceiver" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PCMUDPReceiver;
+		};
+		0EAEB9362FF78E5700BA711A /* XCLocalSwiftPackageReference "Packages/PCMMixer" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PCMMixer;
+		};
+		0EAEB93B2FF796B800BA711A /* XCLocalSwiftPackageReference "Packages/PCMSpeechSynth" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PCMSpeechSynth;
+		};
+		0EAEB9402FF887C400BA711A /* XCLocalSwiftPackageReference "Packages/AUProcessor" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/AUProcessor;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -1057,6 +1105,22 @@
 		0EAEB8D22FF6506300BA711A /* AudioInputCapture */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AudioInputCapture;
+		};
+		0EAEB9322FF77F0400BA711A /* PCMUDPReceiver */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PCMUDPReceiver;
+		};
+		0EAEB9372FF78E5700BA711A /* PCMMixer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PCMMixer;
+		};
+		0EAEB93C2FF796B800BA711A /* PCMSpeechSynth */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PCMSpeechSynth;
+		};
+		0EAEB9412FF887C400BA711A /* AUProcessor */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AUProcessor;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;
