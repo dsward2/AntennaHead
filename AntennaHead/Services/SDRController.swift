@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PipelineRunner
 
 /// Builds and drives the RTL-SDR audio pipeline, ported from LocalRadio's
 /// Objective-C `SDRController`.
@@ -226,7 +227,7 @@ final class SDRController {
 
         var items: [TaskItem] = stages.map { stage in
             let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: Self.resolveToolPath(stage.path),
-                                                             functionName: task.taskName)
+                                                             functionName: URL(fileURLWithPath: stage.path).lastPathComponent)
             for arg in stage.arguments { item.addArgument(arg) }
             return item
         }

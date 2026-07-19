@@ -18,8 +18,27 @@ struct TLSSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Text("AntennaHead provides HTTP service by default. You can optionally enable HTTPS by configuring a TLS certificate, and optionally require a username and password login by enabling HTTP Authentication — both using the settings below.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Certificate") {
-                LabeledContent("Status") {
+                Toggle("Enable HTTPS", isOn: Binding(
+                    get: { tlsManager.isHTTPSEnabled },
+                    set: { newValue in
+                        tlsManager.isHTTPSEnabled = newValue
+                        NotificationCenter.default.post(
+                            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+                    }
+                ))
+                if !tlsManager.isHTTPSEnabled {
+                    Text("HTTPS is disabled. The certificate is retained and HTTPS can be re-enabled at any time.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Certificate Status") {
                     Text(tlsManager.identity == nil ? "Not loaded" : "Loaded")
                         .foregroundStyle(tlsManager.identity == nil ? Color.secondary : Color.green)
                 }

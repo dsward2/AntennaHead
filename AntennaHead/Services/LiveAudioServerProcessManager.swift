@@ -59,10 +59,11 @@ final class LiveAudioServerProcessManager {
     private var serverProcess: Process?
     private var userInitiatedStop = false
 
-    /// Auth/TLS/bitrate captured at last start so `restart()` can reapply them.
+    /// Auth/TLS/bitrate/recording captured at last start so `restart()` can reapply them.
     private var currentAuth: HTTPAuthCredentials.Credentials?
     private var currentTLS: TLSConfig?
     private var currentOutputBitrate = 128_000
+    private var currentRecordingPath: URL?
 
     /// Bonjour (mDNS) name LAS advertises its HTTP/HTTPS listeners under on
     /// the LAN (LAS `--bonjour`), so players can discover the audio stream.
@@ -87,12 +88,14 @@ final class LiveAudioServerProcessManager {
     /// separately by `SDRController`, which never restarts LAS — so listeners
     /// survive retunes. `outputBitrate` (bits/sec) applies to both encoders.
     func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?, outputBitrate: Int = 128_000,
-               httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort) {
+               httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort,
+               recordingPath: URL? = nil) {
         stop()
 
         currentAuth = auth
         currentTLS = tls
         currentOutputBitrate = outputBitrate
+        currentRecordingPath = recordingPath
         self.httpPort = Int(httpPort)
         self.udpInputPort = udpInputPort
 
@@ -120,6 +123,9 @@ final class LiveAudioServerProcessManager {
             "--aac-bitrate", "\(outputBitrate / 1000)",
             "--bonjour", Self.bonjourName
         ]
+        if let recordingPath {
+            serverArgs.append(contentsOf: ["--record-aac", recordingPath.path])
+        }
         if let tls {
             serverArgs.append(contentsOf: ["--tls-identity", tls.identityPath,
                                            "--tls-password", tls.password,
@@ -203,6 +209,22 @@ final class LiveAudioServerProcessManager {
     func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
         stop()
         start(auth: auth, tls: tls, outputBitrate: currentOutputBitrate,
-              httpPort: UInt16(httpPort), udpInputPort: udpInputPort)
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
+              recordingPath: currentRecordingPath)
+    }
+
+    /// Restarts LiveAudioServer with `--record-aac` pointed at `path`.
+    func startRecording(at path: URL) {
+        start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
+              recordingPath: path)
+    }
+
+    /// Restarts LiveAudioServer without a recording output (stops the current recording).
+    func stopRecording() {
+        guard currentRecordingPath != nil else { return }
+        start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
+              recordingPath: nil)
     }
 }

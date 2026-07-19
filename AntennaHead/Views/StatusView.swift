@@ -1,4 +1,5 @@
 import SwiftUI
+import PipelineRunner
 
 /// Status tab, rendered entirely as a web view. Data items are presented as
 /// HTML; the RTL-SDR task pipeline is drawn as an inline SVG flow diagram.

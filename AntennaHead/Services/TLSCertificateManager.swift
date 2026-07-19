@@ -40,9 +40,16 @@ final class TLSCertificateManager {
 
     private let certLabel = "AntennaHead TLS Identity"
     private let keyApplicationTag = "com.dsward.AntennaHead.tlsKey"
+    private static let httpsEnabledKey = "AntennaHead.httpsEnabled"
 
     private(set) var identity: sec_identity_t?
     private(set) var lastError: Error?
+
+    /// Whether to start HTTPS listeners. The certificate is retained when false
+    /// so it can be re-enabled without regenerating.
+    var isHTTPSEnabled: Bool = UserDefaults.standard.object(forKey: httpsEnabledKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isHTTPSEnabled, forKey: Self.httpsEnabledKey) }
+    }
 
     /// Returns the in-memory identity, loading or generating one if needed.
     func currentIdentity() throws -> sec_identity_t {

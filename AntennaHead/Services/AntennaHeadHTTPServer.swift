@@ -58,6 +58,7 @@ final class AntennaHeadHTTPServer {
         var aacMount: String = "/stream.m4a"
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
+        var controlBoothEnabled: Bool = false
     }
 
     private var httpListener: NWListener?
@@ -445,9 +446,26 @@ final class AntennaHeadHTTPServer {
                               extra: ["FREQUENCY_LISTEN_BUTTON_CLICKED_RESULT": "OK",
                                       "LISTEN_BUTTON_CLICKED_RESULT": "OK"])
 
+        case "/controlbooth.html":
+            return htmlFragmentResponse(controlBoothPageHTML())
+
         default:
             return nil
         }
+    }
+
+    @MainActor private func controlBoothPageHTML() -> String {
+        let isRunning = ControlBoothClient.isControlBoothRunning
+        let statusText = isRunning ? "Running" : "Not running"
+        let statusColor = isRunning ? "green" : "#cc0000"
+        var s = "<div class='container'><section class='header'>"
+        s += "<h2 class='title'>LocalRadio</h2>"
+        s += "<h3 class='title'>ControlBooth Remote Control</h3>"
+        s += "<p>AntennaHead can be controlled remotely by the ControlBooth app on this Mac.</p>"
+        s += "<p>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('controlbooth.html');\"><br>&nbsp;<br>"
+        s += "</section></div>"
+        return s
     }
 
     /// `%%FAVORITES_TABLE%%` — ported from `generateFavoritesString`.
@@ -1377,6 +1395,21 @@ final class AntennaHeadHTTPServer {
             dict["DEVICE_ICON"]     = loadSVG(named: "devices")
             dict["GEAR_ICON"]       = loadSVG(named: "gear")
             dict["INFO_ICON"]       = loadSVG(named: "info")
+            if webConfig.controlBoothEnabled {
+                dict["CONTROLBOOTH_ROW"] = """
+                    <div class="value-prop row">
+                        <div class="six columns value-prop">
+                            \(loadSVG(named: "controlbooth"))
+                            <div class="value-prop">
+                                <a class="button button-primary" onclick="loadContent('controlbooth.html')" title="Click the ControlBooth button to see remote control status.">ControlBooth</a>
+                            </div>
+                            Remote control via ControlBooth.
+                        </div>
+                    </div>
+                    """
+            } else {
+                dict["CONTROLBOOTH_ROW"] = ""
+            }
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "LocalRadio-animation")
         default:

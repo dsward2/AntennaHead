@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var sdrController = SDRController(
         udpInputPort: LiveAudioServerProcessManager.defaultUDPInputPort)
     @State private var rtlsdrDeviceFound = true
+    // ControlBooth's AppleEvents control channel ('AntH' Strt/Stop/Runs).
+    @State private var controlBoothEvents: ControlBoothEventReceiver?
 
     private var webURL: URL {
         URL(string: "http://localhost:\(httpServer.port)")!
@@ -24,27 +26,23 @@ struct ContentView: View {
         URL(string: "http://\(HostInfo.shareableHost()):\(httpServer.httpPort)")!
     }
 
-    /// LAN-reachable HTTPS web UI URL; only offered when TLS is running.
-    private var shareableHTTPSWebURL: URL {
-        URL(string: "https://\(HostInfo.shareableHost()):\(httpServer.httpsPort)")!
-    }
 
     var body: some View {
-        TabView {
-            WebRadioView(url: webURL, credentials: authCredentials.effective)
-                .tabItem { Label("LocalRadio", systemImage: "antenna.radiowaves.left.and.right") }
+        VStack(spacing: 0) {
+            // Ported from LocalRadio: the web UI URL in large Courier type at the
+            // top of the window; clicking opens it in the default browser.
+            Button {
+                NSWorkspace.shared.open(shareableWebURL)
+            } label: {
+                Text(shareableWebURL.absoluteString)
+                    .font(.custom("Courier", size: 20))
+            }
+            .buttonStyle(.plain)
+            .help("Open \(shareableWebURL.absoluteString) in the default web browser")
+            .padding(.top, 8)
+            .padding(.bottom, 4)
 
-            WebRadioView(url: liveAudioServerURL, credentials: authCredentials.effective)
-                .tabItem { Label("LiveAudioServer", systemImage: "dot.radiowaves.up.forward") }
-
-            StatusView(sdrController: sdrController, audioServer: audioServer)
-                .tabItem { Label("Status", systemImage: "waveform") }
-
-            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController)
-                .tabItem { Label("Configuration", systemImage: "gearshape") }
-
-            TLSSettingsView(tlsManager: tlsManager, authCredentials: authCredentials)
-                .tabItem { Label("Security", systemImage: "lock.shield") }
+            tabs
         }
         .frame(minWidth: 800, minHeight: 540)
         .toolbar {
@@ -55,15 +53,13 @@ struct ContentView: View {
                     Label("Share Web URL", systemImage: "square.and.arrow.up")
                 }
                 .help("Share the LocalRadio web interface URL (\(shareableWebURL.absoluteString))")
-                if httpServer.httpsEnabled {
-                    ShareLink(item: shareableHTTPSWebURL) {
-                        Label("Share HTTPS Web URL", systemImage: "square.and.arrow.up.circle")
-                    }
-                    .help("Share the HTTPS web interface URL (\(shareableHTTPSWebURL.absoluteString))")
-                }
             }
         }
         .onAppear {
+            if controlBoothEvents == nil {
+                controlBoothEvents = ControlBoothEventReceiver(sdrController: sdrController,
+                                                               lasManager: lasProcess)
+            }
             startServices()
             audioServer.startPolling()
             rtlsdrDeviceFound = RTLSDRUSBDevice.isConnected()
@@ -118,8 +114,27 @@ struct ContentView: View {
         }
     }
 
+    private var tabs: some View {
+        TabView {
+            WebRadioView(url: webURL, credentials: authCredentials.effective)
+                .tabItem { Label("LocalRadio", systemImage: "antenna.radiowaves.left.and.right") }
+
+            StatusView(sdrController: sdrController, audioServer: audioServer)
+                .tabItem { Label("Status", systemImage: "waveform") }
+
+            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController)
+                .tabItem { Label("Configuration", systemImage: "gearshape") }
+
+            TLSSettingsView(tlsManager: tlsManager, authCredentials: authCredentials)
+                .tabItem { Label("Security", systemImage: "lock.shield") }
+
+            WebRadioView(url: liveAudioServerURL, credentials: authCredentials.effective)
+                .tabItem { Label("LiveAudioServer", systemImage: "dot.radiowaves.up.forward") }
+        }
+    }
+
     private func startServices() {
-        let identity = try? tlsManager.currentIdentity()
+        let identity = tlsManager.isHTTPSEnabled ? (try? tlsManager.currentIdentity()) : nil
         let auth = authCredentials.effective
 
         // System-wide settings (output bitrate + ports), editable from the web
@@ -128,7 +143,7 @@ struct ContentView: View {
         let ports = PortSettings.load()
 
         let tlsConfig: LiveAudioServerProcessManager.TLSConfig?
-        if let exported = try? tlsManager.exportedIdentity() {
+        if tlsManager.isHTTPSEnabled, let exported = try? tlsManager.exportedIdentity() {
             tlsConfig = .init(identityPath: exported.url.path, password: exported.password,
                               port: Int(ports.streamingHTTPS))
         } else {
@@ -139,11 +154,15 @@ struct ContentView: View {
         httpServer.httpsPort = ports.webHTTPS
         sdrController.updatePorts(udpInput: ports.audioUDP, statusUDP: ports.statusUDP)
 
+        let controlBoothEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"
+
         // The web UI's audio player points at LiveAudioServer's AAC stream.
         let webConfig = AntennaHeadHTTPServer.WebConfig(
             streamHTTPPort: Int(ports.streamingHTTP),
             streamHTTPSPort: tlsConfig?.port,
-            aacBitrate: outputBitrate
+            aacBitrate: outputBitrate,
+            controlBoothEnabled: controlBoothEnabled
         )
         // Let web routes read favorites and drive tuning.
         httpServer.sdrController = sdrController

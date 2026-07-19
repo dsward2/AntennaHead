@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Configuration tab, mirroring LocalRadio's Configuration tab: grouped boxes
 /// showing the web-host ports, helper ports, and AAC settings, plus
@@ -14,18 +15,19 @@ struct ConfigurationView: View {
     /// LAS doesn't expose its TLS port, so show the configured value.
     @State private var streamingHTTPSPort = PortSettings.default.streamingHTTPS
     @State private var showingEditSheet = false
+    @State private var controlBoothEnabled = false
+    @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
+
+    private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
+    private static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
 
     var body: some View {
         Form {
             Section("AntennaHead Web Host") {
                 portRow("AntennaHead Web Server HTTP Port:", Int(httpServer.httpPort))
-                if httpServer.httpsEnabled {
-                    portRow("AntennaHead Web Server HTTPS Port:", Int(httpServer.httpsPort))
-                }
+                httpsPortRow("AntennaHead Web Server HTTPS Port:", Int(httpServer.httpsPort))
                 portRow("Streaming Server HTTP Port:", lasProcess.httpPort)
-                if httpServer.httpsEnabled {
-                    portRow("Streaming Server HTTPS Port:", Int(streamingHTTPSPort))
-                }
+                httpsPortRow("Streaming Server HTTPS Port:", Int(streamingHTTPSPort))
             }
 
             Section("Other Ports") {
@@ -37,6 +39,26 @@ struct ConfigurationView: View {
                 LabeledContent("Bitrate:") {
                     Text("\(outputBitrate / 1000) kbps")
                         .monospacedDigit()
+                }
+            }
+
+            Section("ControlBooth") {
+                Toggle("Enable remote control with ControlBooth app", isOn: $controlBoothEnabled)
+                    .onChange(of: controlBoothEnabled) { _, _ in
+                        saveControlBoothSettings()
+                        NotificationCenter.default.post(
+                            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+                    }
+                HStack {
+                    Text("App Path:")
+                    TextField(text: $controlBoothAppPath,
+                              prompt: Text("/Applications/ControlBooth.app")) { EmptyView() }
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(saveControlBoothSettings)
+                    Button("Set Path") {
+                        chooseControlBoothApp()
+                    }
                 }
             }
 
@@ -66,9 +88,45 @@ struct ConfigurationView: View {
         }
     }
 
+    private func httpsPortRow(_ label: String, _ port: Int) -> some View {
+        LabeledContent(label) {
+            if httpServer.httpsEnabled {
+                Text(String(port))
+                    .monospacedDigit()
+            } else {
+                Text("(Not enabled)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func reloadSettings() {
         outputBitrate = AntennaHeadHTTPServer.storedOutputBitrate(sqlite: .shared)
         streamingHTTPSPort = PortSettings.load().streamingHTTPS
+        let enabled = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothEnabledKey)) ?? nil
+        controlBoothEnabled = enabled == "1"
+        let storedPath = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothPathKey)) ?? nil
+        controlBoothAppPath = storedPath ?? "/Applications/ControlBooth.app"
+    }
+
+    private func saveControlBoothSettings() {
+        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            controlBoothEnabled ? "1" : "0", forKey: Self.controlBoothEnabledKey)
+        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            controlBoothAppPath, forKey: Self.controlBoothPathKey)
+    }
+
+    private func chooseControlBoothApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.applicationBundle]
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.message = "Choose the ControlBooth application"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        controlBoothAppPath = url.path
+        saveControlBoothSettings()
     }
 
     /// Opens the Application Support folder holding the database and exported
