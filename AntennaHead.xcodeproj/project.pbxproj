@@ -21,14 +21,14 @@
 		0EAEB8CC2FF3BBD100BA711A /* libmpg123.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8CD2FF3BBD100BA711A /* libopus.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9D82FFA9EF100BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D12FFA9EF100BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9D92FFA9EF100BA711A /* PCMUDPSender in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D22FFA9EF100BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9DA2FFA9EF100BA711A /* PCMUDPReceiver in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D32FFA9EF100BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9DB2FFA9EF100BA711A /* PCMMixer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D42FFA9EF100BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9DC2FFA9EF100BA711A /* PCMSpeechSynth in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D52FFA9EF100BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9DD2FFA9EF100BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D62FFA9EF100BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB9DE2FFA9EF100BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D72FFA9EF100BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EA48A1E300DF3D30030FD73 /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EA48A1D300DF3D30030FD73 /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0132FFB000000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0112FFB000000BA711A /* PCMUDPSender in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0122FFB000000BA711A /* PCMUDPReceiver in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0142FFB000000BA711A /* PCMMixer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0152FFB000000BA711A /* PCMSpeechSynth in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
 		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
@@ -79,14 +79,14 @@
 				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
 				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
 				0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */,
-				0EAEB9D82FFA9EF100BA711A /* PCMPassthrough in CopyFiles */,
-				0EAEB9D92FFA9EF100BA711A /* PCMUDPSender in CopyFiles */,
-				0EAEB9DA2FFA9EF100BA711A /* PCMUDPReceiver in CopyFiles */,
-				0EAEB9DB2FFA9EF100BA711A /* PCMMixer in CopyFiles */,
-				0EAEB9DC2FFA9EF100BA711A /* PCMSpeechSynth in CopyFiles */,
-				0EAEB9DD2FFA9EF100BA711A /* AudioInputCapture in CopyFiles */,
-				0EAEB9DE2FFA9EF100BA711A /* AUProcessor in CopyFiles */,
-				0EA48A1E300DF3D30030FD73 /* FMDeemphasis in CopyFiles */,
+				0EFDB0132FFB000000BA711A /* PCMPassthrough in CopyFiles */,
+				0EFDB0112FFB000000BA711A /* PCMUDPSender in CopyFiles */,
+				0EFDB0122FFB000000BA711A /* PCMUDPReceiver in CopyFiles */,
+				0EFDB0142FFB000000BA711A /* PCMMixer in CopyFiles */,
+				0EFDB0152FFB000000BA711A /* PCMSpeechSynth in CopyFiles */,
+				0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */,
+				0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */,
+				0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -116,7 +116,6 @@
 
 /* Begin PBXFileReference section */
 		0EA488A3300DD6D70030FD73 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
-		0EA48A1D300DF3D30030FD73 /* FMDeemphasis */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = FMDeemphasis; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/FMDeemphasis"; sourceTree = "<group>"; };
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
 		0EAEB8B72FF3BA2700BA711A /* stereodemux */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = stereodemux; sourceTree = "<group>"; };
@@ -131,13 +130,6 @@
 		0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libmpg123.0.dylib; sourceTree = "<group>"; };
 		0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libopus.0.dylib; sourceTree = "<group>"; };
 		0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libvorbis.0.dylib; sourceTree = "<group>"; };
-		0EAEB9D12FFA9EF100BA711A /* PCMPassthrough */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMPassthrough; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/PCMPassthrough"; sourceTree = "<group>"; };
-		0EAEB9D22FFA9EF100BA711A /* PCMUDPSender */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMUDPSender; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/PCMUDPSender"; sourceTree = "<group>"; };
-		0EAEB9D32FFA9EF100BA711A /* PCMUDPReceiver */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMUDPReceiver; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/PCMUDPReceiver"; sourceTree = "<group>"; };
-		0EAEB9D42FFA9EF100BA711A /* PCMMixer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMMixer; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/PCMMixer"; sourceTree = "<group>"; };
-		0EAEB9D52FFA9EF100BA711A /* PCMSpeechSynth */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = PCMSpeechSynth; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/PCMSpeechSynth"; sourceTree = "<group>"; };
-		0EAEB9D62FFA9EF100BA711A /* AudioInputCapture */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = AudioInputCapture; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/AudioInputCapture"; sourceTree = "<group>"; };
-		0EAEB9D72FFA9EF100BA711A /* AUProcessor */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = AUProcessor; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/AUProcessor"; sourceTree = "<group>"; };
 		0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = LiveAudioServer; sourceTree = "<group>"; };
 		0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libusb-1.0.0.dylib"; sourceTree = "<group>"; };
 		0EF469B62FCE8911001510D3 /* AntennaHead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AntennaHead.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -228,15 +220,7 @@
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
 				0EAEB8B72FF3BA2700BA711A /* stereodemux */,
 				0EAEB6772FED562F00BA711A /* sox */,
-				0EAEB9D62FFA9EF100BA711A /* AudioInputCapture */,
-				0EAEB9D72FFA9EF100BA711A /* AUProcessor */,
-				0EA48A1D300DF3D30030FD73 /* FMDeemphasis */,
 				0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */,
-				0EAEB9D42FFA9EF100BA711A /* PCMMixer */,
-				0EAEB9D12FFA9EF100BA711A /* PCMPassthrough */,
-				0EAEB9D52FFA9EF100BA711A /* PCMSpeechSynth */,
-				0EAEB9D32FFA9EF100BA711A /* PCMUDPReceiver */,
-				0EAEB9D22FFA9EF100BA711A /* PCMUDPSender */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -316,6 +300,14 @@
 				0ECF51272FDA8FF5006943DA /* GRDB */,
 				AA000002AA000002AA000002 /* librtlsdr */,
 				0EAEBB192FFAD5F300BA711A /* PipelineRunner */,
+				0EFDB0012FFB000000BA711A /* PCMUDPSender */,
+				0EFDB0022FFB000000BA711A /* PCMUDPReceiver */,
+				0EFDB0032FFB000000BA711A /* PCMPassthrough */,
+				0EFDB0042FFB000000BA711A /* PCMMixer */,
+				0EFDB0052FFB000000BA711A /* PCMSpeechSynth */,
+				0EFDB0062FFB000000BA711A /* AUProcessor */,
+				0EFDB0072FFB000000BA711A /* AudioInputCapture */,
+				0EFDB0082FFB000000BA711A /* FMDeemphasis */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -1061,6 +1053,46 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */;
 			productName = librtlsdr;
+		};
+		0EFDB0012FFB000000BA711A /* PCMUDPSender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMUDPSender;
+		};
+		0EFDB0022FFB000000BA711A /* PCMUDPReceiver */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMUDPReceiver;
+		};
+		0EFDB0032FFB000000BA711A /* PCMPassthrough */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMPassthrough;
+		};
+		0EFDB0042FFB000000BA711A /* PCMMixer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMMixer;
+		};
+		0EFDB0052FFB000000BA711A /* PCMSpeechSynth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMSpeechSynth;
+		};
+		0EFDB0062FFB000000BA711A /* AUProcessor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = AUProcessor;
+		};
+		0EFDB0072FFB000000BA711A /* AudioInputCapture */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = AudioInputCapture;
+		};
+		0EFDB0082FFB000000BA711A /* FMDeemphasis */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = FMDeemphasis;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
