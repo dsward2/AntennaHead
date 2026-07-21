@@ -409,16 +409,27 @@ final class SDRController {
         // FM-stereo stations decode the multiplex into L/R via stereodemux,
         // which then feeds sox as 2-channel; everything else stays mono into sox
         // (which upmixes to dual-mono on output).
-        let isStereo = tuning.modulation == "fm" && tuning.stereoFlag
+        // The stereo L-R DSB-SC subcarrier spans 23–53 kHz, so stereodemux
+        // requires a sample rate above 106 kHz (Nyquist for 53 kHz). Below that
+        // the subcarrier is aliased away and stereo decoding produces noise.
+        let isStereo = (tuning.modulation == "fm" || tuning.modulation == "wfm")
+                    && tuning.stereoFlag
+                    && tuning.sampleRate > 106_000
+        // wfm = wide/broadcast FM: apply de-emphasis after sox at 48 kHz so the
+        // filter runs on clean audio-rate samples, not the raw FM multiplex.
+        let isBroadcastFM = tuning.modulation == "wfm"
 
         let source = makeRTLSDRSourceTaskItem(tuning)
         let stereoDemux = isStereo ? makeStereoDemuxTaskItem(tuning) : nil
         let resample = makeResampleTaskItem(inputRate: tuning.sampleRate,
                                             inputChannels: isStereo ? 2 : 1,
                                             audioOutputFilter: tuning.audioOutputFilter)
+        let deemphasis = isBroadcastFM ? makeDeemphasisTaskItem() : nil
         let udpSender = makeUDPSenderTaskItem()
 
-        guard let source, let resample, let udpSender, !(isStereo && stereoDemux == nil) else {
+        guard let source, let resample, let udpSender,
+              !(isStereo && stereoDemux == nil),
+              !(isBroadcastFM && deemphasis == nil) else {
             taskMode = .stopped
             activeFrequencyID = nil
             return  // lastError already set by the failing builder
@@ -427,6 +438,7 @@ final class SDRController {
         radioTaskPipelineManager.add(source)
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
+        if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
         radioTaskPipelineManager.add(udpSender)
 
         do {
@@ -527,6 +539,24 @@ final class SDRController {
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
                                                          functionName: "stereodemux")
         item.addArgument("-r"); item.addArgument(tuning.sampleRate)
+        return item
+    }
+
+    /// FMDeemphasis stage: first-order IIR de-emphasis (75 µs, U.S. standard)
+    /// applied at 48 kHz after sox resampling, one stage before PCMUDPSender.
+    /// Used for wfm (broadcast FM) only.
+    private func makeDeemphasisTaskItem() -> TaskItem? {
+        let path = helperPath("FMDeemphasis")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("FMDeemphasis helper missing at \(path)")
+            print("SDRController: FMDeemphasis helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
+                                                         functionName: "FMDeemphasis")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--tau"); item.addArgument("75.0")
         return item
     }
 

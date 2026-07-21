@@ -28,6 +28,7 @@
 		0EAEB9DC2FFA9EF100BA711A /* PCMSpeechSynth in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D52FFA9EF100BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB9DD2FFA9EF100BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D62FFA9EF100BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB9DE2FFA9EF100BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB9D72FFA9EF100BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EA48A1E300DF3D30030FD73 /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EA48A1D300DF3D30030FD73 /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
 		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
@@ -85,6 +86,7 @@
 				0EAEB9DC2FFA9EF100BA711A /* PCMSpeechSynth in CopyFiles */,
 				0EAEB9DD2FFA9EF100BA711A /* AudioInputCapture in CopyFiles */,
 				0EAEB9DE2FFA9EF100BA711A /* AUProcessor in CopyFiles */,
+				0EA48A1E300DF3D30030FD73 /* FMDeemphasis in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +115,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0EA488A3300DD6D70030FD73 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		0EA48A1D300DF3D30030FD73 /* FMDeemphasis */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = FMDeemphasis; path = "../PipelineHelpers/.build/arm64-apple-macosx/release/FMDeemphasis"; sourceTree = "<group>"; };
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
 		0EAEB8B72FF3BA2700BA711A /* stereodemux */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = stereodemux; sourceTree = "<group>"; };
@@ -146,6 +150,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		0EA488A2300DD6B70030FD73 /* Docs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Docs;
+			sourceTree = "<group>";
+		};
 		0EF469B82FCE8911001510D3 /* AntennaHead */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = AntennaHead;
@@ -205,8 +214,6 @@
 		0ECF510F2FD914EB006943DA /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				0EAEB8B72FF3BA2700BA711A /* stereodemux */,
-				0EAEB6772FED562F00BA711A /* sox */,
 				0EAEB8C12FF3BB8700BA711A /* libFLAC.14.dylib */,
 				0EAEB8C42FF3BBD100BA711A /* libmp3lame.0.dylib */,
 				0EAEB8C62FF3BBD100BA711A /* libmpg123.0.dylib */,
@@ -219,8 +226,12 @@
 				0EAEB8BB2FF3BB1500BA711A /* libfec.dylib */,
 				0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */,
 				0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */,
+				0EAEB8B72FF3BA2700BA711A /* stereodemux */,
+				0EAEB6772FED562F00BA711A /* sox */,
 				0EAEB9D62FFA9EF100BA711A /* AudioInputCapture */,
 				0EAEB9D72FFA9EF100BA711A /* AUProcessor */,
+				0EA48A1D300DF3D30030FD73 /* FMDeemphasis */,
+				0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */,
 				0EAEB9D42FFA9EF100BA711A /* PCMMixer */,
 				0EAEB9D12FFA9EF100BA711A /* PCMPassthrough */,
 				0EAEB9D52FFA9EF100BA711A /* PCMSpeechSynth */,
@@ -233,7 +244,8 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
-				0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */,
+				0EA488A3300DD6D70030FD73 /* README.md */,
+				0EA488A2300DD6B70030FD73 /* Docs */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
 				0EA8DC4A2FD666B300D79877 /* Web */,
 				AA000015AA000015AA000015 /* rtl_fm_localradio_src */,

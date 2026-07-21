@@ -1908,6 +1908,10 @@ int main(int argc, char **argv)
 					demod.mode_demod = &usb_demod;}
 				if (strcmp("lsb", optarg) == 0) {
 					demod.mode_demod = &lsb_demod;}
+				if (strcmp("wfm",  optarg) == 0) {
+					demod.mode_demod = &fm_demod;}
+				if (strcmp("nfm",  optarg) == 0) {
+					demod.mode_demod = &fm_demod;}
 				if (strcmp("wbfm",  optarg) == 0) {
 					controller.wb_mode = 1;
 					demod.mode_demod = &fm_demod;
@@ -1980,6 +1984,7 @@ int main(int argc, char **argv)
 
 		if (demod.deemph) {
 			demod.deemph_a = (int)round(1.0/((1.0-exp(-1.0/(demod.rate_out * 75e-6)))));
+			fprintf(stderr, "De-emphasis enabled (75 us, U.S. standard).\n");
 		}
 
 		/* Set the tuner gain */
