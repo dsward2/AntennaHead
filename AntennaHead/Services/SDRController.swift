@@ -55,6 +55,11 @@ final class SDRController {
     private static let outputChannels = 2
 
     private let sqliteController: SQLiteController
+    /// Set by ContentView after both controllers exist. The AirPlay receiver
+    /// shares this controller's UDP input port, so any radio pipeline starting
+    /// here must stop it first (mirrored by AirPlayReceiverProcessManager
+    /// stopping the radio pipeline before it starts).
+    weak var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
     /// UDP port the terminal PCMUDPSender stage targets (LiveAudioServer's input).
     /// Configurable via `updatePorts`; used when the next pipeline is built.
     private(set) var udpInputPort: UInt16
@@ -168,6 +173,7 @@ final class SDRController {
     /// LiveAudioServer contract), so sox only applies the output filter.
     func startTasksForDevice(deviceName: String, deviceAudioOutputFilter: String) {
         Self.sweepOrphanedHelpers()
+        airPlayReceiverProcessManager?.stop()
         if radioTaskPipelineManager.status == .running {
             radioTaskPipelineManager.terminate()
         }
@@ -220,6 +226,7 @@ final class SDRController {
         }
 
         Self.sweepOrphanedHelpers()
+        airPlayReceiverProcessManager?.stop()
         if radioTaskPipelineManager.status == .running {
             radioTaskPipelineManager.terminate()
         }
@@ -445,6 +452,7 @@ final class SDRController {
         // SIGKILL that skipped clean teardown) before launching rtl_fm, so a
         // stale process isn't still holding the RTL-SDR device.
         Self.sweepOrphanedHelpers()
+        airPlayReceiverProcessManager?.stop()
 
         if radioTaskPipelineManager.status == .running {
             radioTaskPipelineManager.terminate()

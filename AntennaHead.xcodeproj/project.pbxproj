@@ -50,6 +50,7 @@
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
 		AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */ = {isa = PBXBuildFile; fileRef = AA00000BAA00000BAA00000B /* rtl_fm_localradio */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000018AA000018AA000018 /* rtl_convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000017AA000017AA000017 /* rtl_convenience.c */; };
+		0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBD022FFAE00000BA711A /* AirPlayReceiver */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -192,6 +193,7 @@
 				0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */,
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 				0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */,
+				0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -298,6 +300,7 @@
 				0ECF51142FD91FC7006943DA /* CopyFiles */,
 				0ECF511D2FD946E9006943DA /* Run Script - Fix LiveAudioServer Helper rpath */,
 				0ECF58D72FDB8021006943DA /* Embed Frameworks */,
+				0EAEBD042FFAE00000BA711A /* Embed AirPlayReceiver Helper */,
 			);
 			buildRules = (
 			);
@@ -324,6 +327,7 @@
 				0EFDB0062FFB000000BA711A /* AUProcessor */,
 				0EFDB0072FFB000000BA711A /* AudioInputCapture */,
 				0EFDB0082FFB000000BA711A /* FMDeemphasis */,
+				0EAEBD022FFAE00000BA711A /* AirPlayReceiver */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -433,6 +437,7 @@
 				0ECF51262FDA8FF5006943DA /* XCRemoteSwiftPackageReference "GRDB" */,
 				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */,
 				0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */,
+				0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -473,6 +478,43 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		0EAEBD042FFAE00000BA711A /* Embed AirPlayReceiver Helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/shairport-sync",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libconfig.11.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libcrypto.3.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libiconv.2.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libintl.8.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libpopt.0.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libsoxr.0.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libssl.3.dylib",
+				"$(BUILT_PRODUCTS_DIR)/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources/Frameworks/libz.1.dylib",
+			);
+			name = "Embed AirPlayReceiver Helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Helpers/shairport-sync",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libconfig.11.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libcrypto.3.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libiconv.2.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libintl.8.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libpopt.0.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libsoxr.0.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libssl.3.dylib",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks/libz.1.dylib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n# shairport-sync and its dylibs are already ad-hoc signed by\n# scripts/build-shairport-sync.sh at vendor time; cp preserves that\n# signature. Both re-codesigning and directory-globbing here would need\n# filesystem access the script-phase sandbox (ENABLE_USER_SCRIPT_SANDBOXING)\n# denies since only the exact declared input/output paths are permitted.\n# AntennaHead already vendors sox itself via the CopyFiles phase, so it\n# doesn't need handling here the way ControlBooth's equivalent phase does.\nBUNDLE=\"${BUILT_PRODUCTS_DIR}/AirPlayReceiver_AirPlayReceiver.bundle/Contents/Resources/Resources\"\nHELPERS_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Helpers\"\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Frameworks\"\nmkdir -p \"${HELPERS_DIR}\" \"${FRAMEWORKS_DIR}\"\n\ncp -f \"${BUNDLE}/shairport-sync\" \"${HELPERS_DIR}/shairport-sync\"\nchmod +x \"${HELPERS_DIR}/shairport-sync\"\n\nfor name in libconfig.11.dylib libcrypto.3.dylib libiconv.2.dylib libintl.8.dylib libpopt.0.dylib libsoxr.0.dylib libssl.3.dylib libz.1.dylib; do\n  cp -f \"${BUNDLE}/Frameworks/${name}\" \"${FRAMEWORKS_DIR}/${name}\"\ndone\n";
+		};
 		0ECF511D2FD946E9006943DA /* Run Script - Fix LiveAudioServer Helper rpath */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -992,6 +1034,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/dsward2/AirPlayReceiver";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 		0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dsward2/PipelineHelpers";
@@ -1035,6 +1085,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0EAEBD022FFAE00000BA711A /* AirPlayReceiver */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */;
+			productName = AirPlayReceiver;
+		};
 		0EAEBB192FFAD5F300BA711A /* PipelineRunner */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;

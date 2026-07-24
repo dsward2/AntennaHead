@@ -10,6 +10,7 @@ struct ConfigurationView: View {
     var httpServer: AntennaHeadHTTPServer
     var lasProcess: LiveAudioServerProcessManager
     var sdrController: SDRController
+    var airPlayReceiverProcessManager: AirPlayReceiverProcessManager
 
     @State private var outputBitrate = AntennaHeadHTTPServer.defaultOutputBitrate
     /// LAS doesn't expose its TLS port, so show the configured value.
@@ -18,11 +19,15 @@ struct ConfigurationView: View {
     @State private var controlBoothEnabled = false
     @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
     @State private var launchControlBoothOnStartup = false
+    @State private var airPlayReceiverEnabled = false
+    @State private var airPlayReceiverDeviceName = "AntennaHead"
 
     private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
     static let controlBoothAutoLaunchKey = "AntennaHeadControlBoothAutoLaunch"
     static let controlBoothBookmarkKey = "AntennaHeadControlBoothBookmark"
+    private static let airPlayReceiverEnabledKey = "AntennaHeadAirPlayReceiverEnabled"
+    private static let airPlayReceiverDeviceNameKey = "AntennaHeadAirPlayReceiverDeviceName"
 
     var body: some View {
         Form {
@@ -68,6 +73,36 @@ struct ConfigurationView: View {
                     .onChange(of: launchControlBoothOnStartup) { _, _ in
                         saveControlBoothSettings()
                     }
+            }
+
+            Section {
+                Toggle("Enable AirPlay Receiver", isOn: $airPlayReceiverEnabled)
+                    .onChange(of: airPlayReceiverEnabled) { _, _ in
+                        saveAirPlayReceiverSettings()
+                        NotificationCenter.default.post(
+                            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+                    }
+                HStack {
+                    Text("Device Name:")
+                    TextField(text: $airPlayReceiverDeviceName, prompt: Text("AntennaHead")) { EmptyView() }
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(saveAirPlayReceiverSettings)
+                }
+                if airPlayReceiverEnabled {
+                    LabeledContent("Status:", value: airPlayReceiverProcessManager.isRunning ? "Running" : "Stopped")
+                    if let lastError = airPlayReceiverProcessManager.lastError {
+                        Text("\(lastError)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("AirPlay Receiver")
+            } footer: {
+                Text("Only one AirPlay receiver can be active on this Mac at a time — macOS's own built-in one (System Settings → General → AirDrop & Handoff), ControlBooth's, or this one — since all of them use RTSP port 5000. Starting a radio tuning or an AirPlay stream stops the other — they share the same audio pipeline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -135,6 +170,10 @@ struct ConfigurationView: View {
         }
         let autoLaunch = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
         launchControlBoothOnStartup = autoLaunch == "1"
+        let airPlayEnabled = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.airPlayReceiverEnabledKey)) ?? nil
+        airPlayReceiverEnabled = airPlayEnabled == "1"
+        let storedDeviceName = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
+        airPlayReceiverDeviceName = storedDeviceName ?? "AntennaHead"
     }
 
     private func saveControlBoothSettings() {
@@ -144,6 +183,13 @@ struct ConfigurationView: View {
             controlBoothAppPath, forKey: Self.controlBoothPathKey)
         try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
             launchControlBoothOnStartup ? "1" : "0", forKey: Self.controlBoothAutoLaunchKey)
+    }
+
+    private func saveAirPlayReceiverSettings() {
+        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            airPlayReceiverEnabled ? "1" : "0", forKey: Self.airPlayReceiverEnabledKey)
+        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            airPlayReceiverDeviceName, forKey: Self.airPlayReceiverDeviceNameKey)
     }
 
     private func chooseControlBoothApp() {

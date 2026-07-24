@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var lasProcess = LiveAudioServerProcessManager()
     @State private var sdrController = SDRController(
         udpInputPort: LiveAudioServerProcessManager.defaultUDPInputPort)
+    @State private var airPlayReceiverProcessManager = AirPlayReceiverProcessManager()
     @State private var rtlsdrDeviceFound = true
     // ControlBooth's AppleEvents control channel ('AntH' Strt/Stop/Runs).
     @State private var controlBoothEvents: ControlBoothEventReceiver?
@@ -60,6 +61,8 @@ struct ContentView: View {
                 controlBoothEvents = ControlBoothEventReceiver(sdrController: sdrController,
                                                                lasManager: lasProcess)
             }
+            airPlayReceiverProcessManager.sdrController = sdrController
+            sdrController.airPlayReceiverProcessManager = airPlayReceiverProcessManager
             startServices()
             audioServer.startPolling()
             rtlsdrDeviceFound = RTLSDRUSBDevice.isConnected()
@@ -122,7 +125,8 @@ struct ContentView: View {
             StatusView(sdrController: sdrController, audioServer: audioServer)
                 .tabItem { Label("Status", systemImage: "waveform") }
 
-            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController)
+            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController,
+                             airPlayReceiverProcessManager: airPlayReceiverProcessManager)
                 .tabItem { Label("Configuration", systemImage: "gearshape") }
 
             TLSSettingsView(tlsManager: tlsManager, authCredentials: authCredentials)
@@ -174,10 +178,21 @@ struct ContentView: View {
 
         lasProcess.start(auth: auth, tls: tlsConfig, outputBitrate: outputBitrate,
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
+
+        let airPlayReceiverEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
+        if airPlayReceiverEnabled {
+            let deviceName = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+                forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
+            airPlayReceiverProcessManager.start(deviceName: deviceName, udpInputPort: ports.audioUDP)
+        } else {
+            airPlayReceiverProcessManager.stop()
+        }
     }
 
     private func teardownServices() {
         sdrController.terminateTasks()
+        airPlayReceiverProcessManager.stop()
         httpServer.stop()
         audioServer.stopPolling()
         lasProcess.stop()
