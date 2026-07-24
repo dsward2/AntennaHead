@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import Network
+import PipelineRunner
 
 private extension Dictionary where Key == String, Value == Any {
     /// String value for a key, coercing JSON numbers to their string form.
@@ -315,6 +317,21 @@ final class AntennaHeadHTTPServer {
             }
             return okResponse()
 
+        case "/customtaskpipelinetotext.html":
+            // "Copy Stage"/"Copy Pipeline": body is `{"tasks":[{"path":...,
+            // "arguments":[...]}, ...]}` (what buildCustomTaskJSON() produces);
+            // response is the `|`-joined CLI text.
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "text/plain; charset=utf-8"],
+                                body: Data(cliTextFromTasks(request.body).utf8))
+
+        case "/customtasktexttopipeline.html":
+            // "Paste Stage"/"Paste Pipeline": body is the pasted CLI text;
+            // response is `{"tasks":[...]}` for the JS to rebuild stage rows from.
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json"],
+                                body: tasksFromCLIText(request.body))
+
         case "/frequencylistenbuttonclicked.html":
             // Ad-hoc tune from the web Tuner. Body is a JSON *object*
             // {frequency, sample_rate, tuner_gain, stereo_flag, modulation}.
@@ -449,6 +466,24 @@ final class AntennaHeadHTTPServer {
         case "/controlbooth.html":
             return htmlFragmentResponse(controlBoothPageHTML())
 
+        case "/controlboothlistenbuttonclicked.html":
+            if let name = formFields(fromBody: request.body)["pipeline_select"], !name.isEmpty {
+                // Start AntennaHead's receiver first so PCMUDPReceiver is bound
+                // on port 6019 before ControlBooth's PCMUDPSender begins sending.
+                sdrController?.startControlBoothListening(name: name)
+                try? ControlBoothClient.startPipeline(named: name)
+            }
+            return okResponse()
+
+        case "/controlboothstop.html":
+            try? ControlBoothClient.stopAllPipelines()
+            sdrController?.terminateTasks()
+            return htmlFragmentResponse(controlBoothPageHTML())
+
+        case "/controlboothlaunched.html":
+            launchControlBooth()
+            return htmlFragmentResponse(controlBoothPageHTML())
+
         default:
             return nil
         }
@@ -460,12 +495,57 @@ final class AntennaHeadHTTPServer {
         let statusColor = isRunning ? "green" : "#cc0000"
         var s = "<div class='container'><section class='header'>"
         s += "<h2 class='title'>LocalRadio</h2>"
-        s += "<h3 class='title'>ControlBooth Remote Control</h3>"
+        s += "<h3 class='title' id='listen_title'>ControlBooth Remote Control</h3>"
         s += "<p>AntennaHead can be controlled remotely by the ControlBooth app on this Mac.</p>"
         s += "<p>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        if isRunning {
+            let pipelines = (try? ControlBoothClient.pipelines()) ?? []
+            if pipelines.isEmpty {
+                s += "<p>No pipelines configured in ControlBooth.</p>"
+            } else {
+                s += "<form class='controlbooth_form' id='controlBoothForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+                s += "<label for='pipeline_select'>Select Pipeline:</label>"
+                s += "<select name='pipeline_select' class='twelve columns value-prop' title='Select a ControlBooth pipeline to listen to.'>"
+                for p in pipelines {
+                    s += "<option value='\(htmlAttribute(p))'>\(htmlText(p))</option>"
+                }
+                s += "</select>"
+                s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+                s += "onclick=\"controlBoothListenButtonClicked(getElementById('controlBoothForm'));\" "
+                s += "title='Start listening to the selected ControlBooth pipeline.'>"
+                s += "</form><br>&nbsp;<br>"
+                s += "<form action='javascript:loadContent(&quot;controlboothstop.html&quot;)'>"
+                s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
+            }
+        } else {
+            s += "<form action='javascript:loadContent(&quot;controlboothlaunched.html&quot;)'>"
+            s += "<input class='twelve columns button button-primary' type='submit' value='Launch ControlBooth'>"
+            s += "</form><br>&nbsp;<br>"
+        }
         s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('controlbooth.html');\"><br>&nbsp;<br>"
         s += "</section></div>"
         return s
+    }
+
+    /// Launches the ControlBooth app using the security-scoped bookmark saved
+    /// by ConfigurationView's file picker, falling back to the stored path.
+    @MainActor private func launchControlBooth() {
+        if let base64 = (try? sqlite?.localRadioAppSettingsValue(forKey: "AntennaHeadControlBoothBookmark")) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                NSWorkspace.shared.open(url)
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                return
+            }
+        }
+        let path = ((try? sqlite?.localRadioAppSettingsValue(forKey: "AntennaHeadControlBoothAppPath")) ?? nil)
+            ?? "/Applications/ControlBooth.app"
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// `%%FAVORITES_TABLE%%` — ported from `generateFavoritesString`.
@@ -638,7 +718,11 @@ final class AntennaHeadHTTPServer {
         // added client-side need the same Tool pop-up options).
         let toolsAttribute = htmlAttribute(customTaskToolNames().joined(separator: ","))
         s += "<div id='task-stages' data-tools='\(toolsAttribute)'>\(customTaskStagesHTML(task.taskJson))</div>"
-        s += "<input class='button' type='button' value='+ Add Stage' onclick='addCustomTaskStage();'>"
+        s += "<input class='button' type='button' value='+ Add Stage' onclick='addCustomTaskStage();'> "
+        s += "<input class='button' type='button' value='Copy Pipeline' onclick='copyCustomTaskPipeline();' "
+        s += "title='Copy all stages as | -joined CLI text'> "
+        s += "<input class='button' type='button' value='Paste Pipeline' onclick='pasteCustomTaskPipeline();' "
+        s += "title='Replace all stages from CLI text on the clipboard'>"
         // JS gathers the stage/argument fields into this hidden field on submit.
         s += "<input type='hidden' name='task_json' id='task_json_hidden' value=''>"
         s += "<br>&nbsp;<br><input class='twelve columns button button-primary' type='submit' value='Save Changes'>"
@@ -662,9 +746,22 @@ final class AntennaHeadHTTPServer {
 
     /// Tool names offered by the stage editor's Tool pop-up: the bundled
     /// Contents/Helpers executables plus whitelisted system tools. Stored as
-    /// bare names in `task_json`; `SDRController.resolveToolPath` maps them
-    /// back to real paths when the pipeline starts.
+    /// bare names in `task_json`; `resolveToolPath` maps them back to real
+    /// paths when the pipeline starts or when exporting CLI text.
     nonisolated static let systemToolPaths = ["nc": "/usr/bin/nc"]
+
+    /// Resolves a bare tool name to its full executable path. Bare names
+    /// (no "/") check `Contents/Helpers` first, then the system-tool
+    /// whitelist; paths already containing "/" pass through unchanged.
+    nonisolated static func resolveToolPath(_ path: String) -> String {
+        guard !path.isEmpty, !path.contains("/") else { return path }
+        let helper = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/\(path)")
+        if FileManager.default.isExecutableFile(atPath: helper.path) {
+            return helper.path
+        }
+        return systemToolPaths[path] ?? path
+    }
 
     nonisolated private func customTaskToolNames() -> [String] {
         var names: Set<String> = []
@@ -732,7 +829,11 @@ final class AntennaHeadHTTPServer {
         s += "<label>Arguments</label><div class='task-args'>\(argRows)</div>"
         s += "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
         s += "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
-        s += "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'>"
+        s += "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'> "
+        s += "<input class='button' type='button' value='Copy Stage' onclick='copyCustomTaskStage(this);' "
+        s += "title='Copy this stage as CLI text'> "
+        s += "<input class='button' type='button' value='Paste Stage' onclick='pasteCustomTaskStage(this);' "
+        s += "title='Replace this stage from CLI text on the clipboard'>"
         s += "</div>"
         return s
     }
@@ -1238,6 +1339,31 @@ final class AntennaHeadHTTPServer {
               let obj = try? JSONSerialization.jsonObject(with: body),
               let dict = obj as? [String: Any] else { return [:] }
         return dict
+    }
+
+    /// `{"tasks":[{"path":...,"arguments":[...]}, ...]}` → `|`-joined CLI text.
+    /// The parsing/quoting rules themselves live once, in PipelineHelpers'
+    /// `CLIStageText`, shared with ControlBooth — this just adapts the shape
+    /// the web UI already gathers (`buildCustomTaskJSON()` in localradio.js).
+    nonisolated private func cliTextFromTasks(_ body: Data) -> String {
+        guard let parsed = try? JSONSerialization.jsonObject(with: body),
+              let obj = parsed as? [String: Any],
+              let tasks = obj["tasks"] as? [[String: Any]] else { return "" }
+        let stages = tasks.map { t -> CLIStage in
+            let path = Self.resolveToolPath((t["path"] as? String) ?? "")
+            let args = (t["arguments"] as? [Any])?.compactMap { $0 as? String } ?? []
+            return CLIStage(path: path, arguments: args)
+        }
+        return CLIStageText.export(pipeline: stages)
+    }
+
+    /// Pasted CLI text → `{"tasks":[{"path":...,"arguments":[...]}, ...]}`.
+    nonisolated private func tasksFromCLIText(_ body: Data) -> Data {
+        let text = String(data: body, encoding: .utf8) ?? ""
+        let tasks = CLIStageText.importPipeline(text).map {
+            ["path": $0.path, "arguments": $0.arguments] as [String: Any]
+        }
+        return (try? JSONSerialization.data(withJSONObject: ["tasks": tasks])) ?? Data(#"{"tasks":[]}"#.utf8)
     }
 
     nonisolated private func okResponse() -> HTTPResponse {

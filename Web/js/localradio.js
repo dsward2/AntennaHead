@@ -256,7 +256,11 @@ function customTaskStageHTML(path, args) {
     + "<label>Arguments</label><div class='task-args'>" + rows + "</div>"
     + "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
     + "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
-    + "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'>"
+    + "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'> "
+    + "<input class='button' type='button' value='Copy Stage' onclick='copyCustomTaskStage(this);' "
+    + "title='Copy this stage as CLI text'> "
+    + "<input class='button' type='button' value='Paste Stage' onclick='pasteCustomTaskStage(this);' "
+    + "title='Replace this stage from CLI text on the clipboard'>"
     + "</div>";
 }
 
@@ -403,6 +407,111 @@ function buildCustomTaskJSON() {
     tasks.push({ path: path, arguments: args });
   }
   return JSON.stringify({ tasks: tasks });
+}
+
+
+// ---- Copy/paste a stage (or the whole pipeline) as CLI text ----
+// The quoting and `|`-splitting rules live once, server-side, in
+// PipelineHelpers' CLIStageText (shared with ControlBooth); these two
+// endpoints are thin wrappers around it, so this file only gathers/rebuilds
+// DOM state and never re-implements the parsing itself.
+
+// Clipboard access needs a secure context (https, or localhost); fall back to
+// a prompt dialog everywhere else so Copy/Paste still work over plain http.
+function ctCopyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(function () { window.prompt('Copy this text:', text); });
+  } else {
+    window.prompt('Copy this text:', text);
+  }
+}
+
+function ctPasteText(callback) {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    navigator.clipboard.readText().then(callback).catch(function () {
+      var text = window.prompt('Paste CLI text:');
+      if (text !== null) { callback(text); }
+    });
+  } else {
+    var text = window.prompt('Paste CLI text:');
+    if (text !== null) { callback(text); }
+  }
+}
+
+function ctExportTasks(tasks, callback) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function () {
+    if (xhttp.readyState === 4 && xhttp.status === 200) { callback(xhttp.responseText); }
+  };
+  xhttp.open('POST', 'customtaskpipelinetotext.html', true);
+  xhttp.setRequestHeader('Content-Type', 'application/json');
+  xhttp.send(JSON.stringify({ tasks: tasks }));
+}
+
+function ctImportText(text, callback) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function () {
+    if (xhttp.readyState === 4 && xhttp.status === 200) {
+      var tasks = [];
+      try { tasks = (JSON.parse(xhttp.responseText).tasks) || []; } catch (e) {}
+      callback(tasks);
+    }
+  };
+  xhttp.open('POST', 'customtasktexttopipeline.html', true);
+  xhttp.setRequestHeader('Content-Type', 'text/plain');
+  xhttp.send(text);
+}
+
+function ctStageTasks(stageEl) {
+  var args = [];
+  var argEls = stageEl.querySelectorAll('.task-arg');
+  for (var j = 0; j < argEls.length; j++) {
+    if (argEls[j].value.length > 0) { args.push(argEls[j].value); }
+  }
+  return { path: customTaskStagePath(stageEl), arguments: args };
+}
+
+function copyCustomTaskStage(btn) {
+  var st = btn.closest('.task-stage');
+  if (!st) { return; }
+  ctExportTasks([ctStageTasks(st)], ctCopyText);
+}
+
+// Pasted text may itself be a whole `|`-joined pipeline (e.g. copied from
+// ControlBooth's own Copy Pipeline); every resulting stage replaces this one
+// slot in order, so pasting a multi-stage pipeline into one slot still works.
+function pasteCustomTaskStage(btn) {
+  var st = btn.closest('.task-stage');
+  if (!st) { return; }
+  ctPasteText(function (text) {
+    ctImportText(text, function (tasks) {
+      if (!tasks.length) { return; }
+      var html = '';
+      for (var i = 0; i < tasks.length; i++) { html += customTaskStageHTML(tasks[i].path, tasks[i].arguments); }
+      st.insertAdjacentHTML('beforebegin', html);
+      st.parentNode.removeChild(st);
+      buildCustomTaskPipelineOverview();
+    });
+  });
+}
+
+function copyCustomTaskPipeline() {
+  var tasks = JSON.parse(buildCustomTaskJSON()).tasks;
+  ctExportTasks(tasks, ctCopyText);
+}
+
+function pasteCustomTaskPipeline() {
+  ctPasteText(function (text) {
+    ctImportText(text, function (tasks) {
+      var c = document.getElementById('task-stages');
+      if (!c) { return; }
+      if (!tasks.length) { tasks = [{ path: '', arguments: [''] }]; }
+      var html = '';
+      for (var i = 0; i < tasks.length; i++) { html += customTaskStageHTML(tasks[i].path, tasks[i].arguments); }
+      c.innerHTML = html;
+      buildCustomTaskPipelineOverview();
+    });
+  });
 }
 
 
@@ -1174,6 +1283,28 @@ function customTaskListenButtonClicked(form)
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
+}
+
+
+function controlBoothListenButtonClicked(form)
+{
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "controlboothlistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.send(jsonData);
+
+  window.top.postMessage("startaudio", "*");
 }
 
 

@@ -65,6 +65,53 @@ struct WebRadioView: NSViewRepresentable {
             return nil
         }
 
+        /// Handles `window.prompt()` calls from the Custom Task copy/paste buttons.
+        /// Copy: writes text directly to the clipboard and shows a read-only confirmation.
+        /// Paste: shows an editable view pre-filled with clipboard contents.
+        func webView(_ webView: WKWebView,
+                     runJavaScriptTextInputPanelWithPrompt prompt: String,
+                     defaultText: String?,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping (String?) -> Void) {
+            let isCopy = prompt.hasPrefix("Copy")
+            let text = defaultText ?? ""
+
+            if isCopy {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = isCopy ? "CLI Text Copied to Clipboard" : prompt
+            alert.addButton(withTitle: "OK")
+            if !isCopy { alert.addButton(withTitle: "Cancel") }
+
+            let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 72))
+            scrollView.hasVerticalScroller = true
+            scrollView.borderType = .bezelBorder
+            let textView = NSTextView()
+            textView.isEditable = !isCopy
+            textView.isSelectable = true
+            textView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            textView.isVerticallyResizable = true
+            textView.isHorizontallyResizable = false
+            textView.textContainer?.widthTracksTextView = true
+            textView.autoresizingMask = [.width]
+            textView.string = isCopy ? text : (NSPasteboard.general.string(forType: .string) ?? "")
+            scrollView.documentView = textView
+            alert.accessoryView = scrollView
+
+            if let window = webView.window {
+                alert.beginSheetModal(for: window) { response in
+                    completionHandler(!isCopy && response == .alertFirstButtonReturn ? textView.string : nil)
+                }
+            } else {
+                let response = alert.runModal()
+                completionHandler(!isCopy && response == .alertFirstButtonReturn ? textView.string : nil)
+            }
+        }
+
         func webView(_ webView: WKWebView,
                      didReceive challenge: URLAuthenticationChallenge,
                      completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

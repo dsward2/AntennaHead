@@ -60,20 +60,21 @@ final class ControlBoothEventReceiver: NSObject {
                          message: "'start listening' requires a custom-task name.")
                 return
             }
-            guard let id = customTaskID(named: name) else {
-                setError(on: reply, code: Self.errAENoSuchObject,
-                         message: "AntennaHead has no custom task named '\(name)'.")
-                return
-            }
-            do {
-                try sdrController.startTasksForCustomTask(id: id)
-                // startTasksForCustomTask reports pipeline launch failures via
-                // lastError instead of throwing.
-                if let error = sdrController.lastError {
+            if let id = customTaskID(named: name) {
+                do {
+                    try sdrController.startTasksForCustomTask(id: id)
+                    // startTasksForCustomTask reports pipeline launch failures via
+                    // lastError instead of throwing.
+                    if let error = sdrController.lastError {
+                        setError(on: reply, code: Self.errAEEventFailed, message: "\(error)")
+                    }
+                } catch {
                     setError(on: reply, code: Self.errAEEventFailed, message: "\(error)")
                 }
-            } catch {
-                setError(on: reply, code: Self.errAEEventFailed, message: "\(error)")
+            } else {
+                // No local custom task with this name: ControlBooth sends PCM
+                // directly to LAS, so just update AntennaHead's status/mode.
+                sdrController.startControlBoothListening(name: name)
             }
         }
     }

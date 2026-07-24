@@ -1,9 +1,38 @@
 import SwiftUI
+import AppKit
 
 @main
 struct AntennaHeadApp: App {
     init() {
         _ = AppDatabase.shared
+        launchControlBoothIfConfigured()
+    }
+
+    private func launchControlBoothIfConfigured() {
+        let shouldLaunch = (try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: ConfigurationView.controlBoothAutoLaunchKey)) == "1"
+        guard shouldLaunch else { return }
+
+        // Try security-scoped bookmark first (required for sandbox access to non-standard locations)
+        if let base64 = (try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: ConfigurationView.controlBoothBookmarkKey)) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                NSWorkspace.shared.open(url)
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                return
+            }
+        }
+
+        // Fall back to plain path (works for /Applications and other sandbox-accessible locations)
+        let rawPath = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: ConfigurationView.controlBoothPathKey)) ?? nil) ?? ""
+        let path = rawPath.isEmpty ? "/Applications/ControlBooth.app" : rawPath
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
     var body: some Scene {
@@ -11,6 +40,9 @@ struct AntennaHeadApp: App {
             ContentView()
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                AboutWindowCommand()
+            }
             CommandGroup(replacing: .newItem) {}
             // Port of LocalRadio's Commands menu. (Show Custom Tasks Window is
             // intentionally absent — custom tasks live in the web UI here.)
@@ -23,10 +55,25 @@ struct AntennaHeadApp: App {
             }
         }
 
+        Window("About AntennaHead", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+
         Window("FCC Station Search", id: "fcc-search") {
             FCCSearchView()
         }
         .defaultSize(width: 480, height: 560)
+    }
+}
+
+struct AboutWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About AntennaHead") {
+            openWindow(id: "about")
+        }
     }
 }
 

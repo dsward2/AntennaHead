@@ -20,6 +20,8 @@ struct PortSettings: Equatable {
     var statusUDP: UInt16 = 6021
     /// UDP port LiveAudioServer receives pipeline PCM on.
     var audioUDP: UInt16 = 6020
+    /// UDP port AntennaHead's PCMUDPReceiver listens on for PCM sent by ControlBooth.
+    var controlBoothUDP: UInt16 = 6019
 
     static let `default` = PortSettings()
 
@@ -29,7 +31,8 @@ struct PortSettings: Equatable {
         (\.streamingHTTP, "AntennaHeadStreamingServerHTTPPort"),
         (\.streamingHTTPS, "AntennaHeadStreamingServerHTTPSPort"),
         (\.statusUDP, "AntennaHeadStatusPort"),
-        (\.audioUDP, "AntennaHeadAudioPort")
+        (\.audioUDP, "AntennaHeadAudioPort"),
+        (\.controlBoothUDP, "AntennaHeadControlBoothPort")
     ]
 
     /// Stored ports, falling back to the defaults for missing/invalid values.

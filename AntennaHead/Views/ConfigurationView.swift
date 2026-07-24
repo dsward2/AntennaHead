@@ -17,9 +17,12 @@ struct ConfigurationView: View {
     @State private var showingEditSheet = false
     @State private var controlBoothEnabled = false
     @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
+    @State private var launchControlBoothOnStartup = false
 
     private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
-    private static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
+    static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
+    static let controlBoothAutoLaunchKey = "AntennaHeadControlBoothAutoLaunch"
+    static let controlBoothBookmarkKey = "AntennaHeadControlBoothBookmark"
 
     var body: some View {
         Form {
@@ -33,6 +36,7 @@ struct ConfigurationView: View {
             Section("Other Ports") {
                 portRow("Status Port (UDP):", Int(sdrController.statusUDPPort))
                 portRow("Audio Port (UDP):", Int(sdrController.udpInputPort))
+                portRow("ControlBooth Receive Port (UDP):", Int(sdrController.controlBoothReceivePort))
             }
 
             Section("AAC Settings") {
@@ -60,6 +64,10 @@ struct ConfigurationView: View {
                         chooseControlBoothApp()
                     }
                 }
+                Toggle("Launch ControlBooth when AntennaHead starts", isOn: $launchControlBoothOnStartup)
+                    .onChange(of: launchControlBoothOnStartup) { _, _ in
+                        saveControlBoothSettings()
+                    }
             }
 
             Section {
@@ -105,8 +113,28 @@ struct ConfigurationView: View {
         streamingHTTPSPort = PortSettings.load().streamingHTTPS
         let enabled = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothEnabledKey)) ?? nil
         controlBoothEnabled = enabled == "1"
-        let storedPath = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothPathKey)) ?? nil
-        controlBoothAppPath = storedPath ?? "/Applications/ControlBooth.app"
+        var resolvedFromBookmark = false
+        if let base64 = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothBookmarkKey)) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                controlBoothAppPath = url.path
+                resolvedFromBookmark = true
+                if isStale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                               includingResourceValuesForKeys: nil,
+                                                               relativeTo: nil) {
+                    try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+                        fresh.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
+                }
+            }
+        }
+        if !resolvedFromBookmark {
+            let storedPath = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothPathKey)) ?? nil
+            controlBoothAppPath = storedPath.flatMap { $0.isEmpty ? nil : $0 } ?? "/Applications/ControlBooth.app"
+        }
+        let autoLaunch = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
+        launchControlBoothOnStartup = autoLaunch == "1"
     }
 
     private func saveControlBoothSettings() {
@@ -114,6 +142,8 @@ struct ConfigurationView: View {
             controlBoothEnabled ? "1" : "0", forKey: Self.controlBoothEnabledKey)
         try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
             controlBoothAppPath, forKey: Self.controlBoothPathKey)
+        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            launchControlBoothOnStartup ? "1" : "0", forKey: Self.controlBoothAutoLaunchKey)
     }
 
     private func chooseControlBoothApp() {
@@ -126,6 +156,12 @@ struct ConfigurationView: View {
         panel.message = "Choose the ControlBooth application"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         controlBoothAppPath = url.path
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil) {
+            try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+                data.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
+        }
         saveControlBoothSettings()
     }
 

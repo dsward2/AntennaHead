@@ -109,8 +109,8 @@ struct ContentView: View {
                 frequencyHz: hz,
                 sampleRate: note.userInfo?["sampleRate"] as? Int ?? 170_000,
                 tunerGain: note.userInfo?["tunerGain"] as? Double ?? 49.6,
-                stereo: false,
-                modulation: "fm")
+                stereo: note.userInfo?["stereo"] as? Bool ?? true,
+                modulation: "wfm")
         }
     }
 
@@ -152,7 +152,8 @@ struct ContentView: View {
 
         httpServer.httpPort = ports.webHTTP
         httpServer.httpsPort = ports.webHTTPS
-        sdrController.updatePorts(udpInput: ports.audioUDP, statusUDP: ports.statusUDP)
+        sdrController.updatePorts(udpInput: ports.audioUDP, statusUDP: ports.statusUDP,
+                                   controlBoothReceive: ports.controlBoothUDP)
 
         let controlBoothEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
             forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"

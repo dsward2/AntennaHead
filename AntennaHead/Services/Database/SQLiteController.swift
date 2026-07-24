@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 final class SQLiteController {
-    static let shared = SQLiteController(database: .shared)
+    nonisolated(unsafe) static let shared = SQLiteController(database: .shared)
 
     private let database: AppDatabase
 

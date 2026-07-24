@@ -7,7 +7,7 @@ import SwiftUI
 struct FCCSearchView: View {
     /// Posted when the Listen button is clicked; ContentView owns the
     /// SDRController and starts the tune. userInfo: frequencyHz, sampleRate,
-    /// tunerGain (the FCC window is a separate scene without the controller).
+    /// tunerGain, stereo (the FCC window is a separate scene without the controller).
     static let listenNotification = Notification.Name("FCCSearchView.listen")
 
     @State private var zipCode = ""
@@ -15,6 +15,7 @@ struct FCCSearchView: View {
     @State private var radiusUnits: RadiusUnits = .miles
     @State private var sampleRate = 170_000
     @State private var tunerGain = 49.6
+    @State private var stereo = true
 
     @State private var results: [FCCStationRecord] = []
     @State private var selection: FCCStationRecord.ID?
@@ -56,6 +57,7 @@ struct FCCSearchView: View {
                         Text("25.4").tag(25.4)
                         Text("49.6").tag(49.6)
                     }
+                    Toggle("Stereo", isOn: $stereo)
                 }
                 Section {
                     HStack {
@@ -150,7 +152,8 @@ struct FCCSearchView: View {
         NotificationCenter.default.post(name: Self.listenNotification, object: nil, userInfo: [
             "frequencyHz": station.frequencyHz,
             "sampleRate": sampleRate,
-            "tunerGain": tunerGain
+            "tunerGain": tunerGain,
+            "stereo": stereo
         ])
     }
 
@@ -181,7 +184,9 @@ struct FCCSearchView: View {
         record.frequency = station.frequencyHz
         record.sampleRate = sampleRate
         record.tunerGain = tunerGain
-        record.audioOutputFilter = "vol 1 deemph dither -s"
+        record.modulation = "wfm"
+        record.stereoFlag = stereo
+        record.audioOutputFilter = "vol 1"
         record.oversampling = sampleRate > 85_000 ? 2 : 4
 
         if record.id != nil {

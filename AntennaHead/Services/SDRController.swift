@@ -61,6 +61,8 @@ final class SDRController {
     /// Local UDP port rtl_fm's `-c` status feed (frequency + RMS signal level)
     /// is sent to, captured by `statusListener`. Shown on the Configuration tab.
     private(set) var statusUDPPort: UInt16
+    /// UDP port PCMUDPReceiver listens on for PCM datagrams from ControlBooth.
+    private(set) var controlBoothReceivePort: UInt16 = 6019
     private var statusListener: RTLSDRStatusListener?
 
     let radioTaskPipelineManager = TaskPipelineManager()
@@ -97,8 +99,9 @@ final class SDRController {
     /// Applies the configured UDP ports (Configuration sheet). The audio port
     /// takes effect when the next pipeline is built; a changed status port
     /// recreates the rtl_fm status listener immediately.
-    func updatePorts(udpInput: UInt16, statusUDP: UInt16) {
+    func updatePorts(udpInput: UInt16, statusUDP: UInt16, controlBoothReceive: UInt16 = 6019) {
         udpInputPort = udpInput
+        controlBoothReceivePort = controlBoothReceive
         guard statusUDP != statusUDPPort else { return }
         statusUDPPort = statusUDP
         statusListener?.stop()
@@ -259,19 +262,11 @@ final class SDRController {
         let arguments: [String]
     }
 
-    /// Resolves a custom-task stage's executable. Bare tool names (from the
-    /// editor's Tool pop-up) map to the bundled Contents/Helpers executable or
-    /// a whitelisted system tool; absolute/relative paths pass through as-is.
+    /// Resolves a custom-task stage's executable path. Delegates to the
+    /// canonical implementation in `AntennaHeadHTTPServer` so the logic
+    /// stays in one place for both launch-time resolution and CLI export.
     static func resolveToolPath(_ path: String) -> String {
-        guard !path.isEmpty, !path.contains("/") else { return path }
-        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(path)")
-        if FileManager.default.isExecutableFile(atPath: helper.path) {
-            return helper.path
-        }
-        if let system = AntennaHeadHTTPServer.systemToolPaths[path] {
-            return system
-        }
-        return path
+        AntennaHeadHTTPServer.resolveToolPath(path)
     }
 
     /// Parses `task_json` (`{"tasks":[{"path":..,"arguments":[..]}]}`) into stages.
@@ -299,6 +294,57 @@ final class SDRController {
         audioOutputFilter = ""
         tunerAGC = false
         directSamplingQBranch = false
+    }
+
+    /// Start a PCMUDPReceiver → PCMUDPSender bridge pipeline that receives PCM
+    /// datagrams from ControlBooth on `controlBoothReceivePort` and relays them
+    /// to LiveAudioServer on `udpInputPort`. Also updates published status so
+    /// the UI reflects that ControlBooth is the active source.
+    func startControlBoothListening(name: String) {
+        Self.sweepOrphanedHelpers()
+        if radioTaskPipelineManager.status == .running {
+            radioTaskPipelineManager.terminate()
+        }
+        taskMode = .customTask
+        activeFrequencyID = nil
+        statusFunction = "ControlBooth: \(name)"
+        stationName = name
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        lastError = nil
+
+        guard let receiver = makeUDPReceiverTaskItem(),
+              let sender = makeUDPSenderTaskItem() else { return }
+        radioTaskPipelineManager.add(receiver)
+        radioTaskPipelineManager.add(sender)
+        do {
+            try radioTaskPipelineManager.start()
+        } catch {
+            lastError = error
+            print("SDRController: failed to start ControlBooth receive pipeline - \(error)")
+            taskMode = .stopped
+        }
+    }
+
+    private func makeUDPReceiverTaskItem() -> TaskItem? {
+        let path = helperPath("PCMUDPReceiver")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("PCMUDPReceiver helper missing at \(path)")
+            print("SDRController: PCMUDPReceiver helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
+                                                         functionName: "PCMUDPReceiver")
+        item.addArgument("--port"); item.addArgument(Int(controlBoothReceivePort))
+        item.addArgument("--exit-with-parent")
+        return item
     }
 
     func terminateTasks() {
