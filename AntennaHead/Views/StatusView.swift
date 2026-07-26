@@ -37,7 +37,21 @@ struct StatusView: View {
         )
         snap.stages = pipelineStages()
         snap.signalLevel = normalizedSignal(sdrController.signalLevel)
+        snap.pipelineLastStarted = Self.timeString(sdrController.radioTaskPipelineManager.lastStartedAt)
+        snap.pipelineLastStopped = Self.timeString(sdrController.radioTaskPipelineManager.lastStoppedAt)
         return snap
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+
+    private static func timeString(_ date: Date?) -> String {
+        guard let date else { return "" }
+        return timeFormatter.string(from: date)
     }
 
     /// Maps rtl_fm's raw RMS signal level (0–32767, int16 full scale) to the

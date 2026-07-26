@@ -24,6 +24,10 @@ struct StatusSnapshot: Codable, Equatable {
     var audioOutputFilter: String = ""
     var options: String = ""
 
+    /// Local time the pipeline was last started/stopped, pre-formatted for display ("—" if never).
+    var pipelineLastStarted: String = ""
+    var pipelineLastStopped: String = ""
+
     var stages: [Stage] = []
 
     struct Stage: Codable, Equatable {
@@ -289,6 +293,8 @@ private extension StatusWebView {
 
     <section class="card full">
       <h2>Pipeline</h2>
+      <div class="row"><span class="lbl">Last Started</span><span class="val" id="pipelineStarted">—</span></div>
+      <div class="row"><span class="lbl">Last Stopped</span><span class="val" id="pipelineStopped">—</span></div>
       <div id="pipeline"></div>
     </section>
   </div>
@@ -405,6 +411,8 @@ function applyStatus(s){
   setText('sampleRate', s.sampleRate);
   setText('audioFilter', s.audioOutputFilter);
   setText('options', s.options);
+  setText('pipelineStarted', s.pipelineLastStarted);
+  setText('pipelineStopped', s.pipelineLastStopped);
   var fill = document.getElementById('signalFill');
   if (fill) fill.style.width = Math.round((s.signalLevel || 0) * 100) + '%';
   // The signal level pushes updates several times a second; only rebuild the
