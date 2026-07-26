@@ -20,6 +20,11 @@ final class AntennaHeadHTTPServer {
     var httpsPort: UInt16 = 8094
     private(set) var isRunning = false
     private(set) var httpsEnabled = false
+    /// Set when a listener's bind actually fails (e.g. port still held by the
+    /// previous instance) — NWListener reports this asynchronously via its
+    /// stateUpdateHandler, so without this `isRunning` would otherwise claim
+    /// success even when nothing is actually listening.
+    private(set) var lastError: Error?
 
     /// Retained for compatibility with code that reads `httpServer.port`.
     var port: UInt16 { httpPort }
@@ -48,6 +53,7 @@ final class AntennaHeadHTTPServer {
     /// them by awaiting a MainActor hop (see `appStateResponse`).
     var sdrController: SDRController?
     var sqlite: SQLiteController?
+    var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
 
     /// Stream configuration needed to render the `%%AUDIO_PLAYER%%` token. Points
     /// at the continuously-running LiveAudioServer, which serves the audio the web
@@ -61,6 +67,7 @@ final class AntennaHeadHTTPServer {
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
         var controlBoothEnabled: Bool = false
+        var airPlayReceiverEnabled: Bool = false
     }
 
     private var httpListener: NWListener?
@@ -71,6 +78,7 @@ final class AntennaHeadHTTPServer {
                auth: HTTPAuthCredentials.Credentials? = nil,
                webConfig: WebConfig) {
         stop()
+        lastError = nil
         do {
             httpListener = try makeListener(port: httpPort, tlsIdentity: nil, auth: auth, webConfig: webConfig)
             httpListener?.start(queue: queue)
@@ -116,7 +124,30 @@ final class AntennaHeadHTTPServer {
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection, auth: auth, isSecure: isSecure, webConfig: webConfig)
         }
+        listener.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                self?.handleListenerState(state, isSecure: isSecure)
+            }
+        }
         return listener
+    }
+
+    /// Surfaces a bind failure (e.g. `POSIXErrorCode.EADDRINUSE` from the
+    /// previous listener not having released the port yet) instead of leaving
+    /// `isRunning` claiming success while nothing is actually listening.
+    @MainActor private func handleListenerState(_ state: NWListener.State, isSecure: Bool) {
+        switch state {
+        case .failed(let error):
+            lastError = error
+            if isSecure {
+                httpsEnabled = false
+            } else {
+                isRunning = false
+            }
+            print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") listener failed: \(error)")
+        default:
+            break
+        }
     }
 
     nonisolated private func handle(_ connection: NWConnection, auth: HTTPAuthCredentials.Credentials?, isSecure: Bool, webConfig: WebConfig) {
@@ -484,9 +515,54 @@ final class AntennaHeadHTTPServer {
             launchControlBooth()
             return htmlFragmentResponse(controlBoothPageHTML())
 
+        case "/airplay.html":
+            return htmlFragmentResponse(airPlayPageHTML())
+
+        case "/airplaylistenbuttonclicked.html":
+            let deviceName = ((try? sqlite?.localRadioAppSettingsValue(
+                forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
+            sdrController?.startAirPlayListening(deviceName: deviceName)
+            return htmlFragmentResponse(airPlayPageHTML())
+
+        case "/airplaystop.html":
+            sdrController?.terminateTasks()
+            return htmlFragmentResponse(airPlayPageHTML())
+
         default:
             return nil
         }
+    }
+
+    /// Mirrors `controlBoothPageHTML()`: shows whether the AirPlay Receiver's
+    /// capture pipeline is running (enabled in the Configuration tab) and, if
+    /// so, offers a Listen button that bridges it to the live stream via
+    /// `SDRController.startAirPlayListening`. Clicking Listen again after
+    /// switching to another source just reconnects it — the capture pipeline
+    /// itself never stops on its own.
+    @MainActor private func airPlayPageHTML() -> String {
+        let isRunning = airPlayReceiverProcessManager?.isRunning ?? false
+        let statusText = isRunning ? "Running" : "Stopped"
+        let statusColor = isRunning ? "green" : "#cc0000"
+        var s = "<div class='container'><section class='header'>"
+        s += "<h2 class='title'>LocalRadio</h2>"
+        s += "<h3 class='title' id='listen_title'>AirPlay Receiver</h3>"
+        s += "<p>Stream audio here from an iPhone, iPad, or Mac via AirPlay.</p>"
+        s += "<p>AirPlay Receiver: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        if let lastError = airPlayReceiverProcessManager?.lastError {
+            s += "<p style='color:#cc0000'>\(htmlText("\(lastError)"))</p>"
+        }
+        if isRunning {
+            s += "<form action='javascript:loadContent(&quot;airplaylistenbuttonclicked.html&quot;)'>"
+            s += "<input class='twelve columns button button-primary' type='submit' value='Listen' "
+            s += "title='Route the AirPlay Receiver&#39;s audio to the live stream.'></form><br>&nbsp;<br>"
+            s += "<form action='javascript:loadContent(&quot;airplaystop.html&quot;)'>"
+            s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
+        } else {
+            s += "<p>Enable AirPlay Receiver in the Configuration tab first.</p>"
+        }
+        s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('airplay.html');\"><br>&nbsp;<br>"
+        s += "</section></div>"
+        return s
     }
 
     @MainActor private func controlBoothPageHTML() -> String {
@@ -1515,27 +1591,43 @@ final class AntennaHeadHTTPServer {
             dict["NAV_BAR"]      = navBarHTML()
             dict["AUDIO_PLAYER"] = audioPlayerHTML(host: host, isSecure: isSecure, webConfig: webConfig)
         case "index2.html":
-            dict["FAVORITES_ICON"]  = loadSVG(named: "favorites")
-            dict["CATEGORIES_ICON"] = loadSVG(named: "categories")
-            dict["TUNER_ICON"]      = loadSVG(named: "tuner")
-            dict["DEVICE_ICON"]     = loadSVG(named: "devices")
-            dict["GEAR_ICON"]       = loadSVG(named: "gear")
-            dict["INFO_ICON"]       = loadSVG(named: "info")
-            if webConfig.controlBoothEnabled {
-                dict["CONTROLBOOTH_ROW"] = """
-                    <div class="value-prop row">
+            func col(_ svg: String, onclick: String, title: String, label: String, description: String) -> String {
+                """
                         <div class="six columns value-prop">
-                            \(loadSVG(named: "controlbooth"))
+                            \(svg)
                             <div class="value-prop">
-                                <a class="button button-primary" onclick="loadContent('controlbooth.html')" title="Click the ControlBooth button to see remote control status.">ControlBooth</a>
+                                <a class="button button-primary" onclick="loadContent('\(onclick)')" title="\(title)">\(label)</a>
                             </div>
-                            Remote control via ControlBooth.
+                            \(description)
                         </div>
-                    </div>
-                    """
-            } else {
-                dict["CONTROLBOOTH_ROW"] = ""
+                """
             }
+            var items: [String] = [
+                col(loadSVG(named: "favorites"),   onclick: "favorites.html",  title: "Click the Favorites button to listen to your favorite stations.",                                                                    label: "Favorites",   description: "Listen to your favorite frequencies."),
+                col(loadSVG(named: "categories"),  onclick: "categories.html", title: "Click the Categories button to organize your favorite stations by category, and for high-speed scanning of multiple frequencies.",   label: "Categories",  description: "Organize and scan frequencies."),
+                col(loadSVG(named: "tuner"),       onclick: "tuner.html",      title: "Click the Tuner button to enter the frequency for a new station, and save it as a Favorite station.",                                label: "Tuner",       description: "Enter a new frequency and listen."),
+                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Use audio input devices or custom tasks."),
+            ]
+            if webConfig.controlBoothEnabled {
+                items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to see remote control status.", label: "ControlBooth", description: "Remote control via ControlBooth."))
+            }
+            if webConfig.airPlayReceiverEnabled {
+                items.append(col(loadSVG(named: "devices"), onclick: "airplay.html", title: "Click the AirPlay Receiver button to listen to audio streamed from an iPhone, iPad, or Mac.", label: "AirPlay Receiver", description: "Stream audio here via AirPlay."))
+            }
+            items.append(contentsOf: [
+                col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
+                col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about LocalRadio.",                                                           label: "Info",     description: "About LocalRadio."),
+            ])
+            var rows = ""
+            var i = 0
+            while i < items.count {
+                rows += "<div class=\"value-prop row\">\n"
+                rows += items[i]
+                if i + 1 < items.count { rows += "\n" + items[i + 1] }
+                rows += "\n</div>\n"
+                i += 2
+            }
+            dict["MENU_ROWS"] = rows
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "LocalRadio-animation")
         default:

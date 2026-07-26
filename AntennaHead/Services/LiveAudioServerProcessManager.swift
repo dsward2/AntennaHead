@@ -58,6 +58,10 @@ final class LiveAudioServerProcessManager {
     /// The LiveAudioServer (streaming/HTTP) process.
     private var serverProcess: Process?
     private var userInitiatedStop = false
+    /// Pending async launch; cancelled and replaced on each new `start()` call so
+    /// rapid successive calls (e.g. two notifications firing back-to-back) never
+    /// race to start two LAS instances simultaneously.
+    private var startTask: Task<Void, Never>?
 
     /// Auth/TLS/bitrate/recording captured at last start so `restart()` can reapply them.
     private var currentAuth: HTTPAuthCredentials.Credentials?
@@ -90,6 +94,10 @@ final class LiveAudioServerProcessManager {
     func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?, outputBitrate: Int = 128_000,
                httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort,
                recordingPath: URL? = nil) {
+        // Capture any running process before stop() clears the reference, so the
+        // async wait below can confirm port 8080/6020 are free before the new
+        // instance tries to bind them.
+        let dying = (serverProcess?.isRunning == true) ? serverProcess : nil
         stop()
 
         currentAuth = auth
@@ -99,6 +107,69 @@ final class LiveAudioServerProcessManager {
         self.httpPort = Int(httpPort)
         self.udpInputPort = udpInputPort
 
+        startTask?.cancel()
+        startTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            if let dying {
+                await Self.waitForExit(dying, timeout: 2.0)
+                guard !Task.isCancelled else { return }
+            }
+            await HelperProcessPreflight.waitForUDPPortFree(self.udpInputPort)
+            guard !Task.isCancelled else { return }
+            await HelperProcessPreflight.waitForTCPPortFree(UInt16(self.httpPort))
+            guard !Task.isCancelled else { return }
+            if let tlsPort = self.currentTLS?.port {
+                await HelperProcessPreflight.waitForTCPPortFree(UInt16(tlsPort))
+                guard !Task.isCancelled else { return }
+            }
+            self.launchServer()
+        }
+    }
+
+    func stop() {
+        startTask?.cancel()
+        startTask = nil
+        guard let proc = serverProcess, proc.isRunning else {
+            serverProcess = nil
+            isRunning = false
+            return
+        }
+        userInitiatedStop = true
+        proc.terminate()
+        serverProcess = nil
+        isRunning = false
+        // Wait for graceful exit off the main thread; SIGKILL after 2 seconds if needed.
+        Task.detached {
+            let deadline = Date().addingTimeInterval(2.0)
+            while proc.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+            }
+        }
+    }
+
+    func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
+        // Delegate entirely to start(), which handles stop-then-wait internally.
+        start(auth: auth, tls: tls, outputBitrate: currentOutputBitrate,
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
+              recordingPath: currentRecordingPath)
+    }
+
+    /// Non-blocking wait for a process to exit; SIGKILLs after the timeout.
+    private static func waitForExit(_ proc: Process, timeout: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while proc.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if proc.isRunning {
+            kill(proc.processIdentifier, SIGKILL)
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    private func launchServer() {
         let serverURL = executableURL
         guard FileManager.default.isExecutableFile(atPath: serverURL.path) else {
             lastError = LASError.executableMissing(serverURL.path)
@@ -119,19 +190,19 @@ final class LiveAudioServerProcessManager {
             "--rate", "\(Self.audioSampleRate)",
             "--channels", "\(Self.audioChannels)",
             // LAS takes kbps; the setting is stored in bits/sec.
-            "--mp3-bitrate", "\(outputBitrate / 1000)",
-            "--aac-bitrate", "\(outputBitrate / 1000)",
+            "--mp3-bitrate", "\(currentOutputBitrate / 1000)",
+            "--aac-bitrate", "\(currentOutputBitrate / 1000)",
             "--bonjour", Self.bonjourName
         ]
-        if let recordingPath {
+        if let recordingPath = currentRecordingPath {
             serverArgs.append(contentsOf: ["--record-aac", recordingPath.path])
         }
-        if let tls {
+        if let tls = currentTLS {
             serverArgs.append(contentsOf: ["--tls-identity", tls.identityPath,
                                            "--tls-password", tls.password,
                                            "--tls-port", "\(tls.port)"])
         }
-        if let auth {
+        if let auth = currentAuth {
             serverArgs.append(contentsOf: [
                 "--auth-user", auth.user,
                 "--auth-realm", auth.realm,
@@ -147,7 +218,10 @@ final class LiveAudioServerProcessManager {
         server.standardError = FileHandle.standardError
 
         var environment = ProcessInfo.processInfo.environment
-        if let auth {
+        // Strip DYLD_* variables injected by Xcode (e.g. __preview.dylib for Swift Previews);
+        // helper binaries crash with SIGABRT if they inherit DYLD_INSERT_LIBRARIES they can't load.
+        for key in environment.keys where key.hasPrefix("DYLD_") { environment.removeValue(forKey: key) }
+        if let auth = currentAuth {
             environment[Self.authPasswordEnvVar] = auth.password
         } else {
             environment.removeValue(forKey: Self.authPasswordEnvVar)
@@ -179,38 +253,6 @@ final class LiveAudioServerProcessManager {
             self.serverProcess = nil
             self.isRunning = false
         }
-    }
-
-    func stop() {
-        guard serverProcess?.isRunning ?? false else {
-            serverProcess = nil
-            isRunning = false
-            return
-        }
-        userInitiatedStop = true
-        terminate(serverProcess)
-        serverProcess = nil
-        isRunning = false
-    }
-
-    /// Terminates a process, escalating to SIGKILL if it does not exit promptly.
-    private func terminate(_ proc: Process?) {
-        guard let proc, proc.isRunning else { return }
-        proc.terminate()
-        let deadline = Date().addingTimeInterval(2.0)
-        while proc.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if proc.isRunning {
-            kill(proc.processIdentifier, SIGKILL)
-        }
-    }
-
-    func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
-        stop()
-        start(auth: auth, tls: tls, outputBitrate: currentOutputBitrate,
-              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
-              recordingPath: currentRecordingPath)
     }
 
     /// Restarts LiveAudioServer with `--record-aac` pointed at `path`.

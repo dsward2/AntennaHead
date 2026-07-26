@@ -55,11 +55,6 @@ final class SDRController {
     private static let outputChannels = 2
 
     private let sqliteController: SQLiteController
-    /// Set by ContentView after both controllers exist. The AirPlay receiver
-    /// shares this controller's UDP input port, so any radio pipeline starting
-    /// here must stop it first (mirrored by AirPlayReceiverProcessManager
-    /// stopping the radio pipeline before it starts).
-    weak var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
     /// UDP port the terminal PCMUDPSender stage targets (LiveAudioServer's input).
     /// Configurable via `updatePorts`; used when the next pipeline is built.
     private(set) var udpInputPort: UInt16
@@ -68,9 +63,19 @@ final class SDRController {
     private(set) var statusUDPPort: UInt16
     /// UDP port PCMUDPReceiver listens on for PCM datagrams from ControlBooth.
     private(set) var controlBoothReceivePort: UInt16 = 6019
+    /// UDP port PCMUDPReceiver listens on for PCM datagrams from the AirPlay
+    /// Receiver's own always-running capture pipeline (see
+    /// `AirPlayReceiverProcessManager`). Switching to another source just tears
+    /// down this relay bridge — the capture pipeline keeps running and sending
+    /// here regardless, so AirPlay listening can resume later without a fresh
+    /// AirPlay session.
+    private(set) var airPlayReceivePort: UInt16 = 6022
     private var statusListener: RTLSDRStatusListener?
 
     let radioTaskPipelineManager = TaskPipelineManager()
+    /// Pending async pipeline launch; cancelled and replaced whenever a new
+    /// pipeline is requested before the previous one has fully started.
+    private var pipelineStartTask: Task<Void, Never>?
 
     // MARK: Published status (replaces LocalRadio's AppKit IBOutlet status fields)
 
@@ -104,9 +109,10 @@ final class SDRController {
     /// Applies the configured UDP ports (Configuration sheet). The audio port
     /// takes effect when the next pipeline is built; a changed status port
     /// recreates the rtl_fm status listener immediately.
-    func updatePorts(udpInput: UInt16, statusUDP: UInt16, controlBoothReceive: UInt16 = 6019) {
+    func updatePorts(udpInput: UInt16, statusUDP: UInt16, controlBoothReceive: UInt16 = 6019, airPlayReceive: UInt16 = 6022) {
         udpInputPort = udpInput
         controlBoothReceivePort = controlBoothReceive
+        airPlayReceivePort = airPlayReceive
         guard statusUDP != statusUDPPort else { return }
         statusUDPPort = statusUDP
         statusListener?.stop()
@@ -172,11 +178,9 @@ final class SDRController {
     /// captures the named device and emits 48 kHz / 2-channel S16LE (the
     /// LiveAudioServer contract), so sox only applies the output filter.
     func startTasksForDevice(deviceName: String, deviceAudioOutputFilter: String) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
-        airPlayReceiverProcessManager?.stop()
-        if radioTaskPipelineManager.status == .running {
-            radioTaskPipelineManager.terminate()
-        }
+        radioTaskPipelineManager.terminate()
 
         taskMode = .device
         activeFrequencyID = nil
@@ -199,14 +203,7 @@ final class SDRController {
         radioTaskPipelineManager.add(resample)
         radioTaskPipelineManager.add(udpSender)
 
-        do {
-            try radioTaskPipelineManager.start()
-            lastError = nil
-        } catch {
-            lastError = error
-            print("SDRController: failed to start device pipeline - \(error)")
-            taskMode = .stopped
-        }
+        launchCurrentPipeline(dying: dying)
     }
 
     /// Listen to a custom task: a user-defined pipe of external executables
@@ -225,11 +222,9 @@ final class SDRController {
             throw SDRError.customTaskHasNoStages(id)
         }
 
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
-        airPlayReceiverProcessManager?.stop()
-        if radioTaskPipelineManager.status == .running {
-            radioTaskPipelineManager.terminate()
-        }
+        radioTaskPipelineManager.terminate()
 
         taskMode = .customTask
         activeFrequencyID = nil
@@ -254,14 +249,9 @@ final class SDRController {
         items.append(udpSender)
         items.forEach { radioTaskPipelineManager.add($0) }
 
-        do {
-            try radioTaskPipelineManager.start()
-            lastError = nil
-        } catch {
-            lastError = error
-            print("SDRController: failed to start custom-task pipeline - \(error)")
-            taskMode = .stopped
-        }
+        // waitForPort5000: custom tasks may include shairport-sync (port 5000),
+        // which conflicts if the AirPlay receiver hasn't fully released it yet.
+        launchCurrentPipeline(dying: dying, waitForPort5000: true)
     }
 
     private struct CustomTaskStage {
@@ -308,10 +298,9 @@ final class SDRController {
     /// to LiveAudioServer on `udpInputPort`. Also updates published status so
     /// the UI reflects that ControlBooth is the active source.
     func startControlBoothListening(name: String) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
-        if radioTaskPipelineManager.status == .running {
-            radioTaskPipelineManager.terminate()
-        }
+        radioTaskPipelineManager.terminate()
         taskMode = .customTask
         activeFrequencyID = nil
         statusFunction = "ControlBooth: \(name)"
@@ -327,20 +316,48 @@ final class SDRController {
         directSamplingQBranch = false
         lastError = nil
 
-        guard let receiver = makeUDPReceiverTaskItem(),
+        guard let receiver = makeUDPReceiverTaskItem(port: controlBoothReceivePort),
               let sender = makeUDPSenderTaskItem() else { return }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(sender)
-        do {
-            try radioTaskPipelineManager.start()
-        } catch {
-            lastError = error
-            print("SDRController: failed to start ControlBooth receive pipeline - \(error)")
-            taskMode = .stopped
-        }
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
     }
 
-    private func makeUDPReceiverTaskItem() -> TaskItem? {
+    /// Start a PCMUDPReceiver → PCMUDPSender bridge pipeline that picks up PCM
+    /// from the AirPlay Receiver's own always-running capture pipeline (on
+    /// `airPlayReceivePort`) and relays it to LiveAudioServer on `udpInputPort`.
+    /// Mirrors `startControlBoothListening`: switching to a *different* source
+    /// later just tears this bridge down via `terminateTasks()`/`launchCurrentPipeline`
+    /// — the AirPlay capture pipeline (shairport-sync/sox/PCMUDPSender) isn't
+    /// touched, so it keeps receiving silently and can be reconnected later by
+    /// calling this again.
+    func startAirPlayListening(deviceName: String) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        radioTaskPipelineManager.terminate()
+        taskMode = .customTask
+        activeFrequencyID = nil
+        statusFunction = "AirPlay Receiver: \(deviceName)"
+        stationName = deviceName
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        lastError = nil
+
+        guard let receiver = makeUDPReceiverTaskItem(port: airPlayReceivePort),
+              let sender = makeUDPSenderTaskItem() else { return }
+        radioTaskPipelineManager.add(receiver)
+        radioTaskPipelineManager.add(sender)
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
+    }
+
+    private func makeUDPReceiverTaskItem(port: UInt16) -> TaskItem? {
         let path = helperPath("PCMUDPReceiver")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("PCMUDPReceiver helper missing at \(path)")
@@ -349,17 +366,83 @@ final class SDRController {
         }
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
                                                          functionName: "PCMUDPReceiver")
-        item.addArgument("--port"); item.addArgument(Int(controlBoothReceivePort))
+        item.addArgument("--port"); item.addArgument(Int(port))
         item.addArgument("--exit-with-parent")
         return item
     }
 
     func terminateTasks() {
+        pipelineStartTask?.cancel()
+        pipelineStartTask = nil
         radioTaskPipelineManager.terminate()
         taskMode = .stopped
         activeFrequencyID = nil
         statusFunction = "No active tuning"
         signalLevel = 0
+    }
+
+    /// Waits for all processes to exit (polling `isRunning`), then SIGKILLs any
+    /// that outlast `timeout`. This is the SDR-controller equivalent of the same
+    /// helper in AirPlayReceiverController — ensures ports are free before the
+    /// replacement pipeline tries to bind them.
+    private static func waitForProcessesToExit(_ processes: [Process], timeout: TimeInterval = 2.5) async {
+        var alive = processes.filter { $0.isRunning }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !alive.isEmpty && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            alive = alive.filter { $0.isRunning }
+        }
+        for proc in alive { kill(proc.processIdentifier, SIGKILL) }
+        if !alive.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
+    }
+
+    /// Defers `radioTaskPipelineManager.start()` to an async Task that first
+    /// waits for `dying` processes to exit (avoiding port races on retune or
+    /// AirPlay↔radio transitions). Cancels any pending launch from a previous
+    /// call so rapid successive requests don't queue up stale pipelines.
+    ///
+    /// `waitForPort5000`: pass `true` for custom tasks that may include
+    /// shairport-sync, so the task waits for TCP port 5000 to be free after
+    /// stopping the AirPlay receiver.
+    ///
+    /// `waitForDyingProcesses`: skip when the pipeline being *started* is a
+    /// PCMUDPReceiver → PCMUDPSender bridge (ControlBooth/AirPlay listening) —
+    /// regardless of what `dying` was (a radio tuning, a device capture, another
+    /// bridge, …), since the bridge never contends for an exclusive OS resource
+    /// (RTL-SDR USB, a Core Audio device) the way rtl_fm/AudioInputCapture do,
+    /// and PCMUDPReceiver binds with SO_REUSEADDR. This trades the ~2.5s
+    /// worst-case wait for switch latency.
+    ///
+    /// KNOWN RISK (noted 2026-07-26, unverified in practice): skipping the wait
+    /// means the new PCMUDPReceiver can bind its port a few milliseconds before
+    /// the old one has actually exited (SIGTERM delivery + process teardown
+    /// isn't instantaneous). SO_REUSEADDR should make this harmless on macOS,
+    /// but if AirPlay/ControlBooth listening ever intermittently drops the
+    /// first moment of audio after switching sources, or logs a stray UDP bind
+    /// failure right after a Listen click, check here first.
+    private func launchCurrentPipeline(dying: [Process], waitForPort5000: Bool = false,
+                                       waitForDyingProcesses: Bool = true) {
+        pipelineStartTask?.cancel()
+        pipelineStartTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            if waitForDyingProcesses, !dying.isEmpty {
+                await Self.waitForProcessesToExit(dying)
+                guard !Task.isCancelled else { return }
+            }
+            if waitForPort5000 {
+                await HelperProcessPreflight.waitForTCPPortFree(5000, timeout: 2.0)
+                guard !Task.isCancelled else { return }
+            }
+            do {
+                try self.radioTaskPipelineManager.start()
+                self.lastError = nil
+            } catch {
+                self.lastError = error
+                self.taskMode = .stopped
+                self.activeFrequencyID = nil
+                print("SDRController: pipeline start failed: \(error)")
+            }
+        }
     }
 
     // MARK: Tuning resolution
@@ -448,15 +531,10 @@ final class SDRController {
     // MARK: Pipeline assembly
 
     private func startPipeline(with tuning: Tuning) {
-        // Clear any helpers orphaned by a previous session (e.g. an Xcode "Stop"
-        // SIGKILL that skipped clean teardown) before launching rtl_fm, so a
-        // stale process isn't still holding the RTL-SDR device.
+        // Capture dying processes before terminate() clears the references.
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
-        airPlayReceiverProcessManager?.stop()
-
-        if radioTaskPipelineManager.status == .running {
-            radioTaskPipelineManager.terminate()
-        }
+        radioTaskPipelineManager.terminate()
 
         publishStatus(tuning)
 
@@ -495,15 +573,7 @@ final class SDRController {
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
         radioTaskPipelineManager.add(udpSender)
 
-        do {
-            try radioTaskPipelineManager.start()
-            lastError = nil
-        } catch {
-            lastError = error
-            print("SDRController: failed to start pipeline - \(error)")
-            taskMode = .stopped
-            activeFrequencyID = nil
-        }
+        launchCurrentPipeline(dying: dying)
     }
 
     /// AudioInputCapture source stage: captures the named Core Audio input and
@@ -719,11 +789,11 @@ final class SDRController {
     private static func runningProcesses() -> [ProcessEntry] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
-        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
 
         let stride = MemoryLayout<kinfo_proc>.stride
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride)
-        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
+        guard sysctl(&mib, 3, &procs, &size, nil, 0) == 0 else { return [] }
 
         // The table can shrink between the sizing and fetching calls; trust the
         // byte count returned by the second call.

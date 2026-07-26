@@ -36,12 +36,18 @@ struct ConfigurationView: View {
                 httpsPortRow("AntennaHead Web Server HTTPS Port:", Int(httpServer.httpsPort))
                 portRow("Streaming Server HTTP Port:", lasProcess.httpPort)
                 httpsPortRow("Streaming Server HTTPS Port:", Int(streamingHTTPSPort))
+                if let lastError = httpServer.lastError {
+                    Text("\(lastError)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("Other Ports") {
                 portRow("Status Port (UDP):", Int(sdrController.statusUDPPort))
                 portRow("Audio Port (UDP):", Int(sdrController.udpInputPort))
                 portRow("ControlBooth Receive Port (UDP):", Int(sdrController.controlBoothReceivePort))
+                portRow("AirPlay Receive Port (UDP):", Int(sdrController.airPlayReceivePort))
             }
 
             Section("AAC Settings") {
@@ -77,10 +83,23 @@ struct ConfigurationView: View {
 
             Section {
                 Toggle("Enable AirPlay Receiver", isOn: $airPlayReceiverEnabled)
-                    .onChange(of: airPlayReceiverEnabled) { _, _ in
+                    .onChange(of: airPlayReceiverEnabled) { _, enabled in
                         saveAirPlayReceiverSettings()
-                        NotificationCenter.default.post(
-                            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+                        // Start/stop only the AirPlay capture pipeline — posting the
+                        // broad settingsDidChangeNotification here used to also
+                        // restart the web server and LiveAudioServer, racing their
+                        // ports against the just-torn-down listeners (see
+                        // AntennaHeadHTTPServer's silent bind-failure bug this
+                        // uncovered). The capture pipeline always targets its own
+                        // dedicated airPlayReceivePort, not LiveAudioServer's input
+                        // directly — use the web UI's AirPlay "Listen" button to
+                        // route it to the live stream.
+                        if enabled {
+                            airPlayReceiverProcessManager.start(deviceName: airPlayReceiverDeviceName,
+                                                                udpPort: sdrController.airPlayReceivePort)
+                        } else {
+                            airPlayReceiverProcessManager.stop()
+                        }
                     }
                 HStack {
                     Text("Device Name:")
@@ -100,7 +119,7 @@ struct ConfigurationView: View {
             } header: {
                 Text("AirPlay Receiver")
             } footer: {
-                Text("Only one AirPlay receiver can be active on this Mac at a time — macOS's own built-in one (System Settings → General → AirDrop & Handoff), ControlBooth's, or this one — since all of them use RTSP port 5000. Starting a radio tuning or an AirPlay stream stops the other — they share the same audio pipeline.")
+                Text("Only one AirPlay receiver can be active on this Mac at a time — macOS's own built-in one (System Settings → General → AirDrop & Handoff), ControlBooth's, or this one — since all of them use RTSP port 5000. Enabling it here just starts capture; it keeps receiving in the background even while another source (radio tuning, a device, etc.) is playing. Use the AirPlay Listen button in the web UI to route its audio to the live stream — switching to a different source only stops listening to it, not the capture itself.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

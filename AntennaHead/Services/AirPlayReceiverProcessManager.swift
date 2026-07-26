@@ -6,19 +6,17 @@ import AirPlayReceiver
 /// shape: a thin `@Observable` wrapper around the shared `AirPlayReceiverController`
 /// from the AirPlayReceiver package.
 ///
-/// Unlike LiveAudioServer, the AirPlay receiver shares LiveAudioServer's single
-/// UDP input port with `SDRController`'s radio pipeline — only one source can
-/// feed that port at a time, so starting one must stop the other. See
-/// `sdrController` below.
+/// This capture pipeline (shairport-sync -> sox -> PCMUDPSender) always sends
+/// to its own dedicated port (`PortSettings.airPlayUDP`), independent of
+/// whatever `SDRController` is currently listening to — it never touches
+/// LiveAudioServer's UDP input directly. `SDRController.startAirPlayListening`
+/// is what bridges this port to LiveAudioServer when the user picks AirPlay as
+/// the active source; switching to another source only tears down that bridge,
+/// so this pipeline keeps receiving (silently) and can be reconnected later.
 @MainActor
 @Observable
 final class AirPlayReceiverProcessManager {
     static let bonjourName = "AntennaHead"
-
-    /// Set by ContentView after both controllers exist, so starting the AirPlay
-    /// receiver can stop any active radio pipeline first (and vice versa, via
-    /// SDRController's own reference back to this manager).
-    weak var sdrController: SDRController?
 
     private let controller = AirPlayReceiverController(
         configuration: .init(deviceName: AirPlayReceiverProcessManager.bonjourName, udpPort: 0))
@@ -26,10 +24,14 @@ final class AirPlayReceiverProcessManager {
     var isRunning: Bool { controller.isRunning }
     var lastError: Error? { controller.lastError }
 
-    func start(deviceName: String, udpInputPort: UInt16) {
-        sdrController?.terminateTasks()
-        controller.updateConfiguration(.init(deviceName: deviceName, udpPort: udpInputPort))
-        controller.start()
+    func start(deviceName: String, udpPort: UInt16) {
+        let wasRunning = controller.isRunning
+        controller.updateConfiguration(.init(deviceName: deviceName, udpPort: udpPort))
+        // updateConfiguration() already restarts the pipeline when wasRunning; calling
+        // start() again would stop and relaunch it a second time, racing on port 5000.
+        if !wasRunning {
+            controller.start()
+        }
     }
 
     func stop() {

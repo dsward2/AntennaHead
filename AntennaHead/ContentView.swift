@@ -61,11 +61,12 @@ struct ContentView: View {
                 controlBoothEvents = ControlBoothEventReceiver(sdrController: sdrController,
                                                                lasManager: lasProcess)
             }
-            airPlayReceiverProcessManager.sdrController = sdrController
-            sdrController.airPlayReceiverProcessManager = airPlayReceiverProcessManager
-            startServices()
-            audioServer.startPolling()
             rtlsdrDeviceFound = RTLSDRUSBDevice.isConnected()
+            Task { @MainActor in
+                await HelperProcessPreflight.terminateOrphanedHelpers()
+                startServices()
+                audioServer.startPolling()
+            }
         }
         // Ported from LocalRadio's poseRTLSDRNotFoundAlert. Unlike LocalRadio,
         // services keep running — the RTL-SDR is only needed when tuning, and
@@ -138,6 +139,14 @@ struct ContentView: View {
     }
 
     private func startServices() {
+        defer {
+            // Reload both web views after the servers restart so existing pages
+            // don't get stuck with failed connections from the previous instance.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.5))
+                NotificationCenter.default.post(name: WebRadioView.reloadNotification, object: nil)
+            }
+        }
         let identity = tlsManager.isHTTPSEnabled ? (try? tlsManager.currentIdentity()) : nil
         let auth = authCredentials.effective
 
@@ -157,20 +166,25 @@ struct ContentView: View {
         httpServer.httpPort = ports.webHTTP
         httpServer.httpsPort = ports.webHTTPS
         sdrController.updatePorts(udpInput: ports.audioUDP, statusUDP: ports.statusUDP,
-                                   controlBoothReceive: ports.controlBoothUDP)
+                                   controlBoothReceive: ports.controlBoothUDP,
+                                   airPlayReceive: ports.airPlayUDP)
 
         let controlBoothEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
             forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"
+        let airPlayReceiverEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+            forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
 
         // The web UI's audio player points at LiveAudioServer's AAC stream.
         let webConfig = AntennaHeadHTTPServer.WebConfig(
             streamHTTPPort: Int(ports.streamingHTTP),
             streamHTTPSPort: tlsConfig?.port,
             aacBitrate: outputBitrate,
-            controlBoothEnabled: controlBoothEnabled
+            controlBoothEnabled: controlBoothEnabled,
+            airPlayReceiverEnabled: airPlayReceiverEnabled
         )
-        // Let web routes read favorites and drive tuning.
+        // Let web routes read favorites, drive tuning, and reflect AirPlay status.
         httpServer.sdrController = sdrController
+        httpServer.airPlayReceiverProcessManager = airPlayReceiverProcessManager
         httpServer.sqlite = .shared
         httpServer.start(tlsIdentity: identity, auth: auth, webConfig: webConfig)
         audioServer.credentials = auth
@@ -179,12 +193,10 @@ struct ContentView: View {
         lasProcess.start(auth: auth, tls: tlsConfig, outputBitrate: outputBitrate,
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
 
-        let airPlayReceiverEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
-            forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
         if airPlayReceiverEnabled {
             let deviceName = ((try? SQLiteController.shared.localRadioAppSettingsValue(
                 forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
-            airPlayReceiverProcessManager.start(deviceName: deviceName, udpInputPort: ports.audioUDP)
+            airPlayReceiverProcessManager.start(deviceName: deviceName, udpPort: ports.airPlayUDP)
         } else {
             airPlayReceiverProcessManager.stop()
         }

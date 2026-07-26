@@ -31,6 +31,7 @@
 		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
 		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBD022FFAE00000BA711A /* AirPlayReceiver */; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -50,7 +51,6 @@
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
 		AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */ = {isa = PBXBuildFile; fileRef = AA00000BAA00000BAA00000B /* rtl_fm_localradio */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000018AA000018AA000018 /* rtl_convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000017AA000017AA000017 /* rtl_convenience.c */; };
-		0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBD022FFAE00000BA711A /* AirPlayReceiver */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1034,17 +1034,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */ = {
+		0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/dsward2/AirPlayReceiver";
+			repositoryURL = "https://github.com/dsward2/PipelineHelpers";
 			requirement = {
 				branch = main;
 				kind = branch;
 			};
 		};
-		0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */ = {
+		0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/dsward2/PipelineHelpers";
+			repositoryURL = "https://github.com/dsward2/AirPlayReceiver";
 			requirement = {
 				branch = main;
 				kind = branch;
@@ -1085,15 +1085,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		0EAEBD022FFAE00000BA711A /* AirPlayReceiver */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */;
-			productName = AirPlayReceiver;
-		};
 		0EAEBB192FFAD5F300BA711A /* PipelineRunner */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
 			productName = PipelineRunner;
+		};
+		0EAEBD022FFAE00000BA711A /* AirPlayReceiver */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */;
+			productName = AirPlayReceiver;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;

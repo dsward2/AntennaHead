@@ -22,6 +22,11 @@ struct PortSettings: Equatable {
     var audioUDP: UInt16 = 6020
     /// UDP port AntennaHead's PCMUDPReceiver listens on for PCM sent by ControlBooth.
     var controlBoothUDP: UInt16 = 6019
+    /// UDP port the AirPlay Receiver's own capture pipeline (shairport-sync ->
+    /// sox -> PCMUDPSender) always sends to, independent of whatever's currently
+    /// being listened to. AntennaHead's PCMUDPReceiver only picks it up here —
+    /// and relays it on to `audioUDP` — while the AirPlay source is selected.
+    var airPlayUDP: UInt16 = 6022
 
     static let `default` = PortSettings()
 
@@ -32,7 +37,8 @@ struct PortSettings: Equatable {
         (\.streamingHTTPS, "AntennaHeadStreamingServerHTTPSPort"),
         (\.statusUDP, "AntennaHeadStatusPort"),
         (\.audioUDP, "AntennaHeadAudioPort"),
-        (\.controlBoothUDP, "AntennaHeadControlBoothPort")
+        (\.controlBoothUDP, "AntennaHeadControlBoothPort"),
+        (\.airPlayUDP, "AntennaHeadAirPlayReceivePort")
     ]
 
     /// Stored ports, falling back to the defaults for missing/invalid values.
