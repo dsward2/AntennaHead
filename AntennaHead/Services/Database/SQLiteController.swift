@@ -166,13 +166,13 @@ final class SQLiteController {
         try dbQueue.write { db in _ = try CustomTask.deleteOne(db, key: id) }
     }
 
-    // MARK: App config (local_radio_config)
+    // MARK: App config (app_config)
 
-    func localRadioAppSettingsValue(forKey key: String) throws -> String? {
+    func appSettingsValue(forKey key: String) throws -> String? {
         try dbQueue.read { db in try AppConfig.value(forKey: key, in: db) }
     }
 
-    func storeLocalRadioAppSettingsValue(_ value: String, forKey key: String) throws {
+    func storeAppSettingsValue(_ value: String, forKey key: String) throws {
         try dbQueue.write { db in try AppConfig.set(value, forKey: key, in: db) }
     }
 }

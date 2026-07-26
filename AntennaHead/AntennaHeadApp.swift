@@ -9,12 +9,12 @@ struct AntennaHeadApp: App {
     }
 
     private func launchControlBoothIfConfigured() {
-        let shouldLaunch = (try? SQLiteController.shared.localRadioAppSettingsValue(
+        let shouldLaunch = (try? SQLiteController.shared.appSettingsValue(
             forKey: ConfigurationView.controlBoothAutoLaunchKey)) == "1"
         guard shouldLaunch else { return }
 
         // Try security-scoped bookmark first (required for sandbox access to non-standard locations)
-        if let base64 = (try? SQLiteController.shared.localRadioAppSettingsValue(
+        if let base64 = (try? SQLiteController.shared.appSettingsValue(
             forKey: ConfigurationView.controlBoothBookmarkKey)) ?? nil,
            let data = Data(base64Encoded: base64) {
             var isStale = false
@@ -28,7 +28,7 @@ struct AntennaHeadApp: App {
         }
 
         // Fall back to plain path (works for /Applications and other sandbox-accessible locations)
-        let rawPath = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+        let rawPath = ((try? SQLiteController.shared.appSettingsValue(
             forKey: ConfigurationView.controlBoothPathKey)) ?? nil) ?? ""
         let path = rawPath.isEmpty ? "/Applications/ControlBooth.app" : rawPath
         guard FileManager.default.fileExists(atPath: path) else { return }

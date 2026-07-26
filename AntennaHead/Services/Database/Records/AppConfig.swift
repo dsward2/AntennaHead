@@ -6,7 +6,7 @@ struct AppConfig: Codable, Identifiable, Hashable, FetchableRecord, MutablePersi
     var configKey: String
     var configValue: String
 
-    static let databaseTableName = "local_radio_config"
+    static let databaseTableName = "app_config"
 
     enum CodingKeys: String, CodingKey {
         case id

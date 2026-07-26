@@ -30,6 +30,11 @@ final class AppDatabase {
         m.registerMigration("v1_skeleton") { _ in
             // Skeleton already ships the v1 schema and seed rows; nothing to do.
         }
+        m.registerMigration("v2_rename_local_radio_config") { db in
+            if try db.tableExists("local_radio_config") {
+                try db.rename(table: "local_radio_config", to: "app_config")
+            }
+        }
         return m
     }
 

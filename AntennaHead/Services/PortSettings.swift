@@ -1,6 +1,6 @@
 import Foundation
 
-/// System-wide port configuration, stored in `local_radio_config` and editable
+/// System-wide port configuration, stored in `app_config` and editable
 /// from the Configuration tab's "Change Configuration…" sheet (like LocalRadio).
 /// Saved values take effect when services restart (`settingsDidChangeNotification`).
 ///
@@ -45,7 +45,7 @@ struct PortSettings: Equatable {
     @MainActor static func load(sqlite: SQLiteController? = .shared) -> PortSettings {
         var settings = PortSettings()
         for (keyPath, key) in storageKeys {
-            if let stored = ((try? sqlite?.localRadioAppSettingsValue(forKey: key)) ?? nil),
+            if let stored = ((try? sqlite?.appSettingsValue(forKey: key)) ?? nil),
                let port = UInt16(stored), port > 0 {
                 settings[keyPath: keyPath] = port
             }
@@ -55,7 +55,7 @@ struct PortSettings: Equatable {
 
     @MainActor func store(sqlite: SQLiteController? = .shared) {
         for (keyPath, key) in Self.storageKeys {
-            try? sqlite?.storeLocalRadioAppSettingsValue("\(self[keyPath: keyPath])", forKey: key)
+            try? sqlite?.storeAppSettingsValue("\(self[keyPath: keyPath])", forKey: key)
         }
     }
 }

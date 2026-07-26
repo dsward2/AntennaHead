@@ -53,7 +53,7 @@ struct ContentView: View {
                 ShareLink(item: shareableWebURL) {
                     Label("Share Web URL", systemImage: "square.and.arrow.up")
                 }
-                .help("Share the LocalRadio web interface URL (\(shareableWebURL.absoluteString))")
+                .help("Share the AntennaHead web interface URL (\(shareableWebURL.absoluteString))")
             }
         }
         .onAppear {
@@ -77,7 +77,7 @@ struct ContentView: View {
         )) {
             Button("Continue") {}
             Button("More Info") {
-                NSWorkspace.shared.open(URL(string: "https://github.com/dsward2/LocalRadio")!)
+                NSWorkspace.shared.open(URL(string: "https://github.com/dsward2/AntennaHead")!)
             }
             Button("Quit", role: .destructive) {
                 NSApplication.shared.terminate(nil)
@@ -121,7 +121,7 @@ struct ContentView: View {
     private var tabs: some View {
         TabView {
             WebRadioView(url: webURL, credentials: authCredentials.effective)
-                .tabItem { Label("LocalRadio", systemImage: "antenna.radiowaves.left.and.right") }
+                .tabItem { Label("AntennaHead", systemImage: "antenna.radiowaves.left.and.right") }
 
             StatusView(sdrController: sdrController, audioServer: audioServer)
                 .tabItem { Label("Status", systemImage: "waveform") }
@@ -169,9 +169,9 @@ struct ContentView: View {
                                    controlBoothReceive: ports.controlBoothUDP,
                                    airPlayReceive: ports.airPlayUDP)
 
-        let controlBoothEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+        let controlBoothEnabled = ((try? SQLiteController.shared.appSettingsValue(
             forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"
-        let airPlayReceiverEnabled = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+        let airPlayReceiverEnabled = ((try? SQLiteController.shared.appSettingsValue(
             forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
 
         // The web UI's audio player points at LiveAudioServer's AAC stream.
@@ -194,7 +194,7 @@ struct ContentView: View {
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
 
         if airPlayReceiverEnabled {
-            let deviceName = ((try? SQLiteController.shared.localRadioAppSettingsValue(
+            let deviceName = ((try? SQLiteController.shared.appSettingsValue(
                 forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
             airPlayReceiverProcessManager.start(deviceName: deviceName, udpPort: ports.airPlayUDP)
         } else {

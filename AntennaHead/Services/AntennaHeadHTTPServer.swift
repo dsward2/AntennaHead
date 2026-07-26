@@ -34,7 +34,7 @@ final class AntennaHeadHTTPServer {
     /// output bitrate is baked into both `WebConfig` and the LAS launch args).
     static let settingsDidChangeNotification = Notification.Name("AntennaHeadHTTPServer.settingsDidChange")
 
-    /// `local_radio_config` key holding the system-wide stream output bitrate
+    /// `app_config` key holding the system-wide stream output bitrate
     /// in bits/sec (key name retained from LocalRadio's database).
     static let outputBitrateConfigKey = "AACBitrate"
     static let defaultOutputBitrate = 128_000
@@ -42,7 +42,7 @@ final class AntennaHeadHTTPServer {
 
     /// The stored output bitrate (bits/sec), falling back to the default.
     @MainActor static func storedOutputBitrate(sqlite: SQLiteController?) -> Int {
-        let stored = ((try? sqlite?.localRadioAppSettingsValue(forKey: outputBitrateConfigKey)) ?? nil)
+        let stored = ((try? sqlite?.appSettingsValue(forKey: outputBitrateConfigKey)) ?? nil)
             .flatMap(Int.init)
         guard let stored, outputBitrateOptions.contains(stored) else { return defaultOutputBitrate }
         return stored
@@ -326,7 +326,7 @@ final class AntennaHeadHTTPServer {
             // POST body is a JSON object {bitrate: "<bps>"} from applyAACSettings().
             let bitrate = Int(jsonObject(fromBody: request.body).string("bitrate"))
             if let bitrate, Self.outputBitrateOptions.contains(bitrate) {
-                try? sqlite?.storeLocalRadioAppSettingsValue("\(bitrate)", forKey: Self.outputBitrateConfigKey)
+                try? sqlite?.storeAppSettingsValue("\(bitrate)", forKey: Self.outputBitrateConfigKey)
                 NotificationCenter.default.post(name: Self.settingsDidChangeNotification, object: nil)
             }
             return okResponse()
@@ -519,7 +519,7 @@ final class AntennaHeadHTTPServer {
             return htmlFragmentResponse(airPlayPageHTML())
 
         case "/airplaylistenbuttonclicked.html":
-            let deviceName = ((try? sqlite?.localRadioAppSettingsValue(
+            let deviceName = ((try? sqlite?.appSettingsValue(
                 forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
             sdrController?.startAirPlayListening(deviceName: deviceName)
             return htmlFragmentResponse(airPlayPageHTML())
@@ -544,7 +544,7 @@ final class AntennaHeadHTTPServer {
         let statusText = isRunning ? "Running" : "Stopped"
         let statusColor = isRunning ? "green" : "#cc0000"
         var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>LocalRadio</h2>"
+        s += "<h2 class='title'>AntennaHead</h2>"
         s += "<h3 class='title' id='listen_title'>AirPlay Receiver</h3>"
         s += "<p>Stream audio here from an iPhone, iPad, or Mac via AirPlay.</p>"
         s += "<p>AirPlay Receiver: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
@@ -570,7 +570,7 @@ final class AntennaHeadHTTPServer {
         let statusText = isRunning ? "Running" : "Not running"
         let statusColor = isRunning ? "green" : "#cc0000"
         var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>LocalRadio</h2>"
+        s += "<h2 class='title'>AntennaHead</h2>"
         s += "<h3 class='title' id='listen_title'>ControlBooth Remote Control</h3>"
         s += "<p>AntennaHead can be controlled remotely by the ControlBooth app on this Mac.</p>"
         s += "<p>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
@@ -606,7 +606,7 @@ final class AntennaHeadHTTPServer {
     /// Launches the ControlBooth app using the security-scoped bookmark saved
     /// by ConfigurationView's file picker, falling back to the stored path.
     @MainActor private func launchControlBooth() {
-        if let base64 = (try? sqlite?.localRadioAppSettingsValue(forKey: "AntennaHeadControlBoothBookmark")) ?? nil,
+        if let base64 = (try? sqlite?.appSettingsValue(forKey: "AntennaHeadControlBoothBookmark")) ?? nil,
            let data = Data(base64Encoded: base64) {
             var isStale = false
             if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
@@ -617,7 +617,7 @@ final class AntennaHeadHTTPServer {
                 return
             }
         }
-        let path = ((try? sqlite?.localRadioAppSettingsValue(forKey: "AntennaHeadControlBoothAppPath")) ?? nil)
+        let path = ((try? sqlite?.appSettingsValue(forKey: "AntennaHeadControlBoothAppPath")) ?? nil)
             ?? "/Applications/ControlBooth.app"
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
@@ -680,7 +680,7 @@ final class AntennaHeadHTTPServer {
     // MARK: Settings page (system-wide output bitrate)
 
     /// `%%AAC_BITRATE_SELECT%%` — `<option>`s for the output bitrate pop-up,
-    /// with the stored `local_radio_config` value selected.
+    /// with the stored `app_config` value selected.
     @MainActor private func outputBitrateSelectOptionsHTML() -> String {
         let current = Self.storedOutputBitrate(sqlite: sqlite)
         var s = ""
@@ -747,7 +747,7 @@ final class AntennaHeadHTTPServer {
     @MainActor private func customTasksManagerHTML() -> String {
         let tasks = (try? sqlite?.allCustomTaskRecords()) ?? []
         var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>LocalRadio</h2><h3 class='title'>Custom Tasks</h3>"
+        s += "<h2 class='title'>AntennaHead</h2><h3 class='title'>Custom Tasks</h3>"
         s += "<table class='u-full-width'><thead><tr><th>ID</th><th>Task</th></tr></thead><tbody>"
         for t in tasks {
             guard let id = t.id else { continue }
@@ -776,7 +776,7 @@ final class AntennaHeadHTTPServer {
         }
 
         var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>LocalRadio</h2><h3 class='title'>\(isEditing ? "Edit Custom Task" : "Add New Custom Task")</h3>"
+        s += "<h2 class='title'>AntennaHead</h2><h3 class='title'>\(isEditing ? "Edit Custom Task" : "Add New Custom Task")</h3>"
         s += "<form id='customTaskEditForm' onsubmit='event.preventDefault(); return storeCustomTaskRecord(this);' method='POST'>"
         if let taskID = task.id { s += "<input type='hidden' name='id' value='\(taskID)'>" }
         s += text("Task Name:", "task_name", task.taskName)
@@ -788,7 +788,7 @@ final class AntennaHeadHTTPServer {
         s += "<label>Task Pipeline — executables piped left → right (each stage's stdout feeds the next) "
         s += "(<a href='pipelinetools.html' target='_blank'>tool documentation</a>):</label>"
         // Graphical index of the pipeline. Built/refreshed by JS (initCustomTaskEditor
-        // in localradio.js); clicking a node scrolls to that stage's editor below.
+        // in antennahead.js); clicking a node scrolls to that stage's editor below.
         s += "<a id='pipeline-overview'></a><div id='pipeline-overview-graphic' class='ct-pipeline'></div>"
         // data-tools feeds the JS mirror of customTaskStageHTML (new stages
         // added client-side need the same Tool pop-up options).
@@ -857,7 +857,7 @@ final class AntennaHeadHTTPServer {
 
     /// Renders the structured task-pipeline editor from `task_json`. One block
     /// per pipe stage (tool pop-up / custom path + argument list). The matching
-    /// JS in localradio.js adds/removes stages/arguments and serializes them
+    /// JS in antennahead.js adds/removes stages/arguments and serializes them
     /// back to `task_json` on save, so the markup here and there must stay in sync.
     @MainActor private func customTaskStagesHTML(_ json: String) -> String {
         var stages: [(path: String, args: [String])] = []
@@ -1214,7 +1214,7 @@ final class AntennaHeadHTTPServer {
 
     /// `%%EDIT_FAVORITE_NAME%%` + `%%EDIT_FAVORITE%%` — the favorite edit form.
     /// Field `name`s match the `frequency` table columns and the client-side
-    /// validator in `localradio.js`; Save posts to `storefrequency.html` and
+    /// validator in `antennahead.js`; Save posts to `storefrequency.html` and
     /// Delete to `deletefrequency.html` (both handled by `appStateResponse`).
     @MainActor private func editFavorite(id: Int64) -> (name: String, item: String) {
         guard let f = (try? sqlite?.frequencyRecord(forID: id)) ?? nil else {
@@ -1420,7 +1420,7 @@ final class AntennaHeadHTTPServer {
     /// `{"tasks":[{"path":...,"arguments":[...]}, ...]}` → `|`-joined CLI text.
     /// The parsing/quoting rules themselves live once, in PipelineHelpers'
     /// `CLIStageText`, shared with ControlBooth — this just adapts the shape
-    /// the web UI already gathers (`buildCustomTaskJSON()` in localradio.js).
+    /// the web UI already gathers (`buildCustomTaskJSON()` in antennahead.js).
     nonisolated private func cliTextFromTasks(_ body: Data) -> String {
         guard let parsed = try? JSONSerialization.jsonObject(with: body),
               let obj = parsed as? [String: Any],
@@ -1616,7 +1616,7 @@ final class AntennaHeadHTTPServer {
             }
             items.append(contentsOf: [
                 col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
-                col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about LocalRadio.",                                                           label: "Info",     description: "About LocalRadio."),
+                col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about AntennaHead.",                                                           label: "Info",     description: "About AntennaHead."),
             ])
             var rows = ""
             var i = 0
@@ -1629,7 +1629,7 @@ final class AntennaHeadHTTPServer {
             }
             dict["MENU_ROWS"] = rows
         case "info.html":
-            dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "LocalRadio-animation")
+            dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         default:
             break
         }

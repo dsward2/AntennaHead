@@ -165,10 +165,10 @@ struct ConfigurationView: View {
     private func reloadSettings() {
         outputBitrate = AntennaHeadHTTPServer.storedOutputBitrate(sqlite: .shared)
         streamingHTTPSPort = PortSettings.load().streamingHTTPS
-        let enabled = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothEnabledKey)) ?? nil
+        let enabled = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothEnabledKey)) ?? nil
         controlBoothEnabled = enabled == "1"
         var resolvedFromBookmark = false
-        if let base64 = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothBookmarkKey)) ?? nil,
+        if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothBookmarkKey)) ?? nil,
            let data = Data(base64Encoded: base64) {
             var isStale = false
             if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
@@ -178,36 +178,36 @@ struct ConfigurationView: View {
                 if isStale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
                                                                includingResourceValuesForKeys: nil,
                                                                relativeTo: nil) {
-                    try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+                    try? SQLiteController.shared.storeAppSettingsValue(
                         fresh.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
                 }
             }
         }
         if !resolvedFromBookmark {
-            let storedPath = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothPathKey)) ?? nil
+            let storedPath = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothPathKey)) ?? nil
             controlBoothAppPath = storedPath.flatMap { $0.isEmpty ? nil : $0 } ?? "/Applications/ControlBooth.app"
         }
-        let autoLaunch = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
+        let autoLaunch = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
         launchControlBoothOnStartup = autoLaunch == "1"
-        let airPlayEnabled = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.airPlayReceiverEnabledKey)) ?? nil
+        let airPlayEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverEnabledKey)) ?? nil
         airPlayReceiverEnabled = airPlayEnabled == "1"
-        let storedDeviceName = (try? SQLiteController.shared.localRadioAppSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
+        let storedDeviceName = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
         airPlayReceiverDeviceName = storedDeviceName ?? "AntennaHead"
     }
 
     private func saveControlBoothSettings() {
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             controlBoothEnabled ? "1" : "0", forKey: Self.controlBoothEnabledKey)
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             controlBoothAppPath, forKey: Self.controlBoothPathKey)
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             launchControlBoothOnStartup ? "1" : "0", forKey: Self.controlBoothAutoLaunchKey)
     }
 
     private func saveAirPlayReceiverSettings() {
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             airPlayReceiverEnabled ? "1" : "0", forKey: Self.airPlayReceiverEnabledKey)
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             airPlayReceiverDeviceName, forKey: Self.airPlayReceiverDeviceNameKey)
     }
 
@@ -224,7 +224,7 @@ struct ConfigurationView: View {
         if let data = try? url.bookmarkData(options: .withSecurityScope,
                                              includingResourceValuesForKeys: nil,
                                              relativeTo: nil) {
-            try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+            try? SQLiteController.shared.storeAppSettingsValue(
                 data.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
         }
         saveControlBoothSettings()
@@ -317,7 +317,7 @@ private struct EditConfigurationSheet: View {
 
     private func save() {
         ports.store()
-        try? SQLiteController.shared.storeLocalRadioAppSettingsValue(
+        try? SQLiteController.shared.storeAppSettingsValue(
             "\(outputBitrate)", forKey: AntennaHeadHTTPServer.outputBitrateConfigKey)
         // ContentView observes this and restarts services with the new settings.
         NotificationCenter.default.post(
