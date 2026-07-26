@@ -1612,7 +1612,7 @@ final class AntennaHeadHTTPServer {
                 items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to see remote control status.", label: "ControlBooth", description: "Remote control via ControlBooth."))
             }
             if webConfig.airPlayReceiverEnabled {
-                items.append(col(loadSVG(named: "devices"), onclick: "airplay.html", title: "Click the AirPlay Receiver button to listen to audio streamed from an iPhone, iPad, or Mac.", label: "AirPlay Receiver", description: "Stream audio here via AirPlay."))
+                items.append(col(loadSVG(named: "airplay"), onclick: "airplay.html", title: "Click the AirPlay Receiver button to listen to audio streamed from an iPhone, iPad, or Mac.", label: "AirPlay Receiver", description: "Stream audio here via AirPlay."))
             }
             items.append(contentsOf: [
                 col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
