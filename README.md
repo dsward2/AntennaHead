@@ -47,8 +47,10 @@ SPM dependencies are fetched automatically on first build. No `brew` or manual t
 | LiveAudioServer stream | HTTPS | 8443 |
 | RTL-SDR status feed | UDP | 6021 |
 | Pipeline audio input | UDP | 6020 |
+| ControlBooth audio input | UDP | 6019 |
+| AirPlay receiver audio input | UDP | 6022 |
 
-All ports are configurable from the **Configuration** tab → **Change Configuration…** sheet. Changes restart the streaming servers.
+All ports are configurable from the **Configuration** tab → **Change Configuration…** sheet, except ControlBooth audio input and AirPlay receiver audio input, which are stored in the same settings database but not currently exposed in that sheet. Changes restart the streaming servers.
 
 ## Features
 
