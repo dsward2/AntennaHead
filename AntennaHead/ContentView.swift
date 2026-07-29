@@ -123,7 +123,7 @@ struct ContentView: View {
             WebRadioView(url: webURL, credentials: authCredentials.effective)
                 .tabItem { Label("AntennaHead", systemImage: "antenna.radiowaves.left.and.right") }
 
-            StatusView(sdrController: sdrController, audioServer: audioServer)
+            StatusView(sdrController: sdrController, audioServer: audioServer, lasProcess: lasProcess)
                 .tabItem { Label("Status", systemImage: "waveform") }
 
             ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController,

@@ -50,4 +50,11 @@ enum HostInfo {
     static func shareableHost() -> String {
         lanIPAddress() ?? bonjourHostName() ?? "localhost"
     }
+
+    /// True for hostnames that only resolve back to whichever device is
+    /// asking — meaningless once handed to a different device (e.g. an
+    /// AirPlay receiver fetching a stream URL directly).
+    static func isLoopback(_ host: String) -> Bool {
+        host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
 }

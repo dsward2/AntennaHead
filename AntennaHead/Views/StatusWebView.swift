@@ -30,6 +30,16 @@ struct StatusSnapshot: Codable, Equatable {
 
     var stages: [Stage] = []
 
+    /// Plain-text task dump — same format as ControlBooth's pipeline text view
+    /// (`TaskPipelineManager.tasksInfoString()`), shown under the SVG diagram.
+    var pipelineText: String = ""
+
+    /// The live pipeline's stages as `|`-joined CLI text (via `CLIStageText`,
+    /// from the PipelineHelpers package shared with ControlBooth) — what the
+    /// "Copy Pipeline" button copies. Pastes directly into a ControlBooth
+    /// pipeline's stage list.
+    var pipelineCLIText: String = ""
+
     struct Stage: Codable, Equatable {
         var name: String
         /// Secondary line, e.g. "PID 1234".
@@ -66,6 +76,7 @@ struct StatusWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
+        webView.isInspectable = true
         webView.navigationDelegate = context.coordinator
         webView.loadHTMLString(Self.htmlShell, baseURL: nil)
         return webView
@@ -82,13 +93,27 @@ struct StatusWebView: NSViewRepresentable {
         func apply(_ json: String, to webView: WKWebView) {
             latestJSON = json
             guard isLoaded else { return }
-            webView.evaluateJavaScript("applyStatus(\(json));", completionHandler: nil)
+            evaluate(json, in: webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isLoaded = true
             if let json = latestJSON {
-                webView.evaluateJavaScript("applyStatus(\(json));", completionHandler: nil)
+                evaluate(json, in: webView)
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("StatusWebView navigation failed: \(error)")
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("StatusWebView provisional navigation failed: \(error)")
+        }
+
+        private func evaluate(_ json: String, in webView: WKWebView) {
+            webView.evaluateJavaScript("applyStatus(\(json));") { _, error in
+                if let error { print("StatusWebView JS error: \(error)") }
             }
         }
     }
@@ -209,6 +234,40 @@ private extension StatusWebView {
   }
   #pipeline { overflow-x: auto; padding-top: 2px; }
   .idle { color: var(--muted); margin: 8px 2px; }
+  .pipeline-text {
+    margin: 12px 2px 2px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--meter-track);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .pipeline-text:empty { display: none; }
+  .copy-btn {
+    display: inline-block;
+    margin: 10px 2px 2px;
+    padding: 6px 14px;
+    border: none;
+    border-radius: 7px;
+    background: var(--accent);
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .copy-btn:disabled {
+    background: var(--meter-track);
+    color: var(--muted);
+    cursor: default;
+  }
+  .copy-btn:not(:disabled):hover { opacity: 0.85; }
   /* SVG pipeline */
   rect.node { fill: var(--node); stroke: var(--node-border); stroke-width: 1.5; }
   rect.node.stopped { stroke: var(--node-stopped-border); }
@@ -296,6 +355,8 @@ private extension StatusWebView {
       <div class="row"><span class="lbl">Last Started</span><span class="val" id="pipelineStarted">—</span></div>
       <div class="row"><span class="lbl">Last Stopped</span><span class="val" id="pipelineStopped">—</span></div>
       <div id="pipeline"></div>
+      <pre id="pipelineText" class="pipeline-text"></pre>
+      <button id="copyPipelineBtn" class="copy-btn" onclick="copyPipelineText()" disabled title="Copy the pipeline as `|`-joined CLI text — paste it into a ControlBooth pipeline's stage list.">Copy Pipeline</button>
     </section>
   </div>
 
@@ -394,6 +455,23 @@ function hideTip(){
   document.getElementById('tip').style.display = 'none';
 }
 
+// Classic hidden-textarea copy: works inside a WKWebView loaded via
+// loadHTMLString (null origin), where navigator.clipboard.writeText can be
+// refused for lacking a secure context.
+function copyPipelineText(){
+  var text = window.__pipelineCLIText || '';
+  if (!text) return;
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
 function applyStatus(s){
   var live = !!s.serverRunning;
   var dot = document.getElementById('serverDot');
@@ -413,6 +491,11 @@ function applyStatus(s){
   setText('options', s.options);
   setText('pipelineStarted', s.pipelineLastStarted);
   setText('pipelineStopped', s.pipelineLastStopped);
+  var textEl = document.getElementById('pipelineText');
+  if (textEl) textEl.textContent = s.pipelineText || '';
+  window.__pipelineCLIText = s.pipelineCLIText || '';
+  var copyBtn = document.getElementById('copyPipelineBtn');
+  if (copyBtn) copyBtn.disabled = !s.pipelineCLIText;
   var fill = document.getElementById('signalFill');
   if (fill) fill.style.width = Math.round((s.signalLevel || 0) * 100) + '%';
   // The signal level pushes updates several times a second; only rebuild the

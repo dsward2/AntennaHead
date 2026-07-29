@@ -64,6 +64,12 @@ final class AntennaHeadHTTPServer {
         var streamHTTPSPort: Int? = nil
         /// LiveAudioServer AAC (ADTS in MPEG-4) mount; Safari-friendly.
         var aacMount: String = "/stream.m4a"
+        /// LiveAudioServer's live HLS playlist mount — segmented, so it has
+        /// real per-segment Content-Length framing unlike the raw ADTS
+        /// stream. AirPlay 2 receivers that fetch the audio URL directly
+        /// (e.g. Apple TV) appear to need this rather than an open-ended
+        /// live byte stream.
+        var hlsMount: String = "/hls/index.m3u8"
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
         var controlBoothEnabled: Bool = false
@@ -74,11 +80,31 @@ final class AntennaHeadHTTPServer {
     private var httpsListener: NWListener?
     nonisolated private let queue = DispatchQueue(label: "com.dsward.AntennaHead.HTTPServer", qos: .userInitiated)
 
+    /// Params from the most recent `start()`, kept so a bind retry can rebuild
+    /// just the failed listener without disturbing the other one.
+    private var lastTLSIdentity: sec_identity_t?
+    private var lastAuth: HTTPAuthCredentials.Credentials?
+    private var lastWebConfig: WebConfig?
+
+    /// A previous instance's listener socket can still be draining when a new
+    /// instance starts (or a settings-triggered restart races the old
+    /// listener's teardown), so the first bind attempt can transiently fail
+    /// with `EADDRINUSE`. Retry a few times with backoff before giving up.
+    private static let maxBindRetries = 5
+    private static let bindRetryBaseDelay = 0.3
+    private var httpRetryAttempt = 0
+    private var httpsRetryAttempt = 0
+
     func start(tlsIdentity: sec_identity_t? = nil,
                auth: HTTPAuthCredentials.Credentials? = nil,
                webConfig: WebConfig) {
         stop()
         lastError = nil
+        httpRetryAttempt = 0
+        httpsRetryAttempt = 0
+        lastTLSIdentity = tlsIdentity
+        lastAuth = auth
+        lastWebConfig = webConfig
         do {
             httpListener = try makeListener(port: httpPort, tlsIdentity: nil, auth: auth, webConfig: webConfig)
             httpListener?.start(queue: queue)
@@ -135,9 +161,26 @@ final class AntennaHeadHTTPServer {
     /// Surfaces a bind failure (e.g. `POSIXErrorCode.EADDRINUSE` from the
     /// previous listener not having released the port yet) instead of leaving
     /// `isRunning` claiming success while nothing is actually listening.
+    /// `EADDRINUSE` specifically is retried with backoff (see `scheduleRetry`)
+    /// since it's usually transient; other failures surface immediately.
     @MainActor private func handleListenerState(_ state: NWListener.State, isSecure: Bool) {
         switch state {
+        case .ready:
+            if isSecure {
+                httpsRetryAttempt = 0
+                httpsEnabled = true
+            } else {
+                httpRetryAttempt = 0
+                isRunning = true
+            }
+            lastError = nil
         case .failed(let error):
+            let attempt = isSecure ? httpsRetryAttempt : httpRetryAttempt
+            if isEADDRINUSE(error), attempt < Self.maxBindRetries {
+                print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") bind failed (\(error)); retrying (attempt \(attempt + 1)/\(Self.maxBindRetries))")
+                scheduleRetry(isSecure: isSecure)
+                return
+            }
             lastError = error
             if isSecure {
                 httpsEnabled = false
@@ -147,6 +190,46 @@ final class AntennaHeadHTTPServer {
             print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") listener failed: \(error)")
         default:
             break
+        }
+    }
+
+    private func isEADDRINUSE(_ error: Error) -> Bool {
+        guard let nwError = error as? NWError, case .posix(let code) = nwError else { return false }
+        return code == .EADDRINUSE
+    }
+
+    private func scheduleRetry(isSecure: Bool) {
+        if isSecure {
+            httpsRetryAttempt += 1
+        } else {
+            httpRetryAttempt += 1
+        }
+        let attempt = isSecure ? httpsRetryAttempt : httpRetryAttempt
+        let delay = Self.bindRetryBaseDelay * Double(attempt)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            self?.retryListener(isSecure: isSecure)
+        }
+    }
+
+    /// Rebuilds and rebinds just the listener that failed, leaving the other
+    /// one (if any) untouched.
+    private func retryListener(isSecure: Bool) {
+        guard let webConfig = lastWebConfig else { return }
+        do {
+            if isSecure {
+                guard let tlsIdentity = lastTLSIdentity else { return }
+                httpsListener?.cancel()
+                httpsListener = try makeListener(port: httpsPort, tlsIdentity: tlsIdentity, auth: lastAuth, webConfig: webConfig)
+                httpsListener?.start(queue: queue)
+            } else {
+                httpListener?.cancel()
+                httpListener = try makeListener(port: httpPort, tlsIdentity: nil, auth: lastAuth, webConfig: webConfig)
+                httpListener?.start(queue: queue)
+            }
+        } catch {
+            lastError = error
+            print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") retry bind failed: \(error)")
         }
     }
 
@@ -499,6 +582,12 @@ final class AntennaHeadHTTPServer {
 
         case "/controlboothlistenbuttonclicked.html":
             if let name = formFields(fromBody: request.body)["pipeline_select"], !name.isEmpty {
+                // Stop whatever ControlBooth pipeline is already running before
+                // switching — otherwise the old and new pipelines' audio overlap
+                // until the user separately clicks Stop. stopAllPipelines() waits
+                // for ControlBooth's reply, so the old pipeline has actually
+                // stopped before we start AntennaHead's receiver below.
+                try? ControlBoothClient.stopAllPipelines()
                 // Start AntennaHead's receiver first so PCMUDPReceiver is bound
                 // on port 6019 before ControlBooth's PCMUDPSender begins sending.
                 sdrController?.startControlBoothListening(name: name)
@@ -1655,15 +1744,22 @@ final class AntennaHeadHTTPServer {
         """
     }
 
-    /// `<audio>` element pointing at the LiveAudioServer AAC stream. Uses the
-    /// same hostname the client used to reach this page, on LiveAudioServer's
-    /// HTTP(S) port, so it resolves from phones on the LAN.
+    /// `<audio>` element pointing at LiveAudioServer's live HLS playlist. Uses
+    /// the same hostname the client used to reach this page, on
+    /// LiveAudioServer's HTTP(S) port, so it resolves from phones on the LAN.
     nonisolated private func audioPlayerHTML(host: String, isSecure: Bool, webConfig: WebConfig) -> String {
         let scheme = isSecure ? "https" : "http"
         let port = isSecure ? (webConfig.streamHTTPSPort ?? webConfig.streamHTTPPort) : webConfig.streamHTTPPort
-        let src = "\(scheme)://\(host):\(port)\(webConfig.aacMount)"
-        // HE-AAC (low bitrate) advertises as audio/aacp; AAC-LC as audio/aac.
-        let format = webConfig.aacBitrate < 64_000 ? "aacp" : "aac"
+        // AntennaHead's own embedded WKWebView tabs load this page via
+        // http://localhost, so `host` here is literally "localhost". That's
+        // fine for playback relayed locally (HomePod/AirPlay 1), but AirPlay 2
+        // receivers that support "buffered" playback (e.g. Apple TV) can fetch
+        // the stream URL themselves instead — and "localhost" on that device
+        // means itself, not this Mac. Substitute a LAN-reachable host so the
+        // stream is actually fetchable by a different device.
+        let audioHost = HostInfo.isLoopback(host) ? HostInfo.shareableHost() : host
+        let src = "\(scheme)://\(audioHost):\(port)\(webConfig.hlsMount)"
+        let mimeType = "application/vnd.apple.mpegurl"
         let autoplay = webConfig.autoplay ? "autoplay " : ""
         let handlers =
             " onabort='audioPlayerAbort(this);' oncanplay='audioPlayerCanPlay(this);'"
@@ -1677,7 +1773,7 @@ final class AntennaHeadHTTPServer {
             + " onseeking='audioPlayerSeeking(this);' onstalled='audioPlayerStalled(this);'"
             + " onsuspend='audioPlayerSuspend(this);' ontimeupdate='audioPlayerTimeUpdate(this);'"
             + " onwaiting='audioPlayerWaiting(this);'"
-        return "<audio id='audio_element' controls \(autoplay)preload=\"none\" src='\(src)' type='audio/\(format)'\(handlers)>Your browser does not support the audio element.</audio>"
+        return "<audio id='audio_element' controls \(autoplay)preload=\"none\" src='\(src)' type='\(mimeType)'\(handlers)>Your browser does not support the audio element.</audio>"
     }
 
     // Tokens shared across every dynamic page. Extend as pages migrate from

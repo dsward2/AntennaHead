@@ -17,6 +17,7 @@ struct WebRadioView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
+        webView.isInspectable = true
         webView.customUserAgent = "AntennaHead/1.0"
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -26,6 +27,7 @@ struct WebRadioView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.credentials = credentials
+        context.coordinator.targetURL = url
         if webView.url?.host == nil {
             webView.load(URLRequest(url: url))
         }
@@ -33,6 +35,7 @@ struct WebRadioView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var credentials: HTTPAuthCredentials.Credentials?
+        var targetURL: URL?
         private weak var webView: WKWebView?
 
         init(credentials: HTTPAuthCredentials.Credentials?) {
@@ -50,7 +53,20 @@ struct WebRadioView: NSViewRepresentable {
         }
 
         @objc private func reloadWebView() {
-            webView?.reload()
+            guard let webView else { return }
+            if let url = targetURL {
+                webView.load(URLRequest(url: url))
+            } else {
+                webView.reload()
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("WebRadioView navigation failed: \(error)")
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("WebRadioView provisional navigation failed: \(error)")
         }
 
         /// `target="_blank"` links (Pipeline Tools docs, Credits): WKWebView

@@ -8,6 +8,7 @@ import PipelineRunner
 struct StatusView: View {
     var sdrController: SDRController
     var audioServer: LiveAudioServerClient
+    var lasProcess: LiveAudioServerProcessManager
 
     var body: some View {
         StatusWebView(snapshot: snapshot)
@@ -36,6 +37,10 @@ struct StatusView: View {
             options: sdrController.options
         )
         snap.stages = pipelineStages()
+        snap.pipelineText = sdrController.radioTaskPipelineManager.tasksInfoString() + lasProcess.taskInfoString()
+        snap.pipelineCLIText = CLIStageText.export(pipeline: sdrController.radioTaskPipelineManager.taskItems.map {
+            CLIStage(path: $0.path, arguments: $0.argsArray)
+        })
         snap.signalLevel = normalizedSignal(sdrController.signalLevel)
         snap.pipelineLastStarted = Self.timeString(sdrController.radioTaskPipelineManager.lastStartedAt)
         snap.pipelineLastStopped = Self.timeString(sdrController.radioTaskPipelineManager.lastStoppedAt)

@@ -58,6 +58,8 @@ final class LiveAudioServerProcessManager {
     /// The LiveAudioServer (streaming/HTTP) process.
     private var serverProcess: Process?
     private var userInitiatedStop = false
+    /// Arguments passed to the last successful launch, for display in the Status view.
+    private(set) var lastLaunchArgs: [String] = []
     /// Pending async launch; cancelled and replaced on each new `start()` call so
     /// rapid successive calls (e.g. two notifications firing back-to-back) never
     /// race to start two LAS instances simultaneously.
@@ -210,6 +212,8 @@ final class LiveAudioServerProcessManager {
             ])
         }
 
+        lastLaunchArgs = serverArgs
+
         let server = Process()
         server.executableURL = serverURL
         server.arguments = serverArgs
@@ -253,6 +257,15 @@ final class LiveAudioServerProcessManager {
             self.serverProcess = nil
             self.isRunning = false
         }
+    }
+
+    /// Formats the LAS process state in the same layout as `TaskItem.taskInfoString()`,
+    /// so it can be appended to the pipeline text dump in the Status view.
+    func taskInfoString() -> String {
+        let pid = serverProcess?.processIdentifier ?? 0
+        let runningFlag = (serverProcess?.isRunning ?? false) ? 1 : 0
+        let argsString = lastLaunchArgs.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+        return "LiveAudioServer -  process ID = \(pid) -  isRunning = \(runningFlag)\n\n\"\(executableURL.path)\" \(argsString)\n\n"
     }
 
     /// Restarts LiveAudioServer with `--record-aac` pointed at `path`.

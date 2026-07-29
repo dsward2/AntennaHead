@@ -8,6 +8,13 @@ struct AboutView: View {
         return "v\(v)"
     }
 
+    /// Set by macOS only when the process is running under the App Sandbox
+    /// (see `com.apple.security.app-sandbox`). AntennaHead ships sandboxed,
+    /// so this should normally read "Enabled".
+    private var appSandboxStatus: String {
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil ? "Enabled" : "Disabled"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Image(nsImage: NSApp.applicationIconImage)
@@ -38,6 +45,10 @@ struct AboutView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+
+                Text("App Sandbox: \(appSandboxStatus)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             .padding(.bottom, 4)
         }

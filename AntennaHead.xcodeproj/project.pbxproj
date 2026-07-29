@@ -46,6 +46,7 @@
 		0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
 		AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */; };
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
@@ -96,6 +97,7 @@
 				0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */,
 				0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */,
 				0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */,
+				0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -327,6 +329,7 @@
 				0EFDB0062FFB000000BA711A /* AUProcessor */,
 				0EFDB0072FFB000000BA711A /* AudioInputCapture */,
 				0EFDB0082FFB000000BA711A /* FMDeemphasis */,
+				0EFDB0192FFB000000BA711A /* PCMJitterBuffer */,
 				0EAEBD022FFAE00000BA711A /* AirPlayReceiver */,
 			);
 			productName = AntennaHead;
@@ -758,9 +761,10 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AntennaHead/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AntennaHead captures audio from the selected input device to stream it.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -803,9 +807,10 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AntennaHead/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AntennaHead captures audio from the selected input device to stream it.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1159,6 +1164,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
 			productName = FMDeemphasis;
+		};
+		0EFDB0192FFB000000BA711A /* PCMJitterBuffer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = PCMJitterBuffer;
 		};
 		AA000002AA000002AA000002 /* librtlsdr */ = {
 			isa = XCSwiftPackageProductDependency;
