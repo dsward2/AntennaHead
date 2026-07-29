@@ -7,6 +7,13 @@ import AppKit
 ///   'Strt'  start listening task   direct parameter: custom-task name
 ///   'Stop'  stop listening task    direct parameter: custom-task name
 ///   'Runs'  listening task names   reply: list of the listening tasks' names
+///   'RecS'  start recording        direct parameter: security-scoped bookmark
+///                                  (Data) for the recording folder; 'fnam'
+///                                  param: filename to create inside it.
+///                                  AntennaHead is sandboxed and has no access
+///                                  to a folder ControlBooth picked without
+///                                  this bookmark — see `handleStartRecording`.
+///   'RecP'  stop recording         no parameters
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
 /// zero or one name, and 'Stop' naming anything other than the active custom
@@ -16,6 +23,11 @@ final class ControlBoothEventReceiver: NSObject {
     private let sdrController: SDRController
     private let lasManager: LiveAudioServerProcessManager
     private let sqlite: SQLiteController
+
+    /// The recording folder's security-scoped resource access, held open for
+    /// as long as a recording started via 'RecS' is in progress. Released by
+    /// 'RecP' (or by the next 'RecS', if one arrives without a matching stop).
+    private var activeRecordingScopedURL: URL?
 
     @MainActor
     init(sdrController: SDRController, lasManager: LiveAudioServerProcessManager,
@@ -111,19 +123,60 @@ final class ControlBoothEventReceiver: NSObject {
                                              withReplyEvent reply: NSAppleEventDescriptor) {
         print("ControlBoothEventReceiver: handleStartRecording called")
         MainActor.assumeIsolated {
-            guard let path = directParameter(of: event) else {
-                print("ControlBoothEventReceiver: handleStartRecording — missing path")
+            guard let bookmark = event.paramDescriptor(forKeyword: Self.keyDirectObject)?.data,
+                  !bookmark.isEmpty else {
                 setError(on: reply, code: Self.errAEWrongNumberArgs,
-                         message: "'start recording' requires a file path.")
+                         message: "'start recording' requires a security-scoped bookmark for the recording folder.")
                 return
             }
-            print("ControlBoothEventReceiver: handleStartRecording — scheduling at \(path)")
-            let url = URL(fileURLWithPath: path)
+            guard let filename = event.paramDescriptor(forKeyword: Self.keyRecordingFilename)?.stringValue,
+                  !filename.isEmpty else {
+                setError(on: reply, code: Self.errAEWrongNumberArgs,
+                         message: "'start recording' requires a filename.")
+                return
+            }
+
+            // Resolving the bookmark and gaining access are both synchronous
+            // and fast (no subprocess involved), so it's safe to check them
+            // here and reply with a real error immediately — unlike the
+            // subprocess relaunch below, which stays fire-and-forget.
+            var isStale = false
+            let directoryURL: URL
+            do {
+                directoryURL = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope],
+                                        relativeTo: nil, bookmarkDataIsStale: &isStale)
+            } catch {
+                print("ControlBoothEventReceiver: handleStartRecording — bookmark resolution failed: \(error)")
+                setError(on: reply, code: Self.errAEEventFailed,
+                         message: "Couldn't resolve the recording folder's bookmark: \(error). Re-pick the folder in ControlBooth's schedule editor.")
+                return
+            }
+            if isStale {
+                print("ControlBoothEventReceiver: handleStartRecording — bookmark is stale, using it anyway; ask ControlBooth to re-pick the folder soon")
+            }
+            guard directoryURL.startAccessingSecurityScopedResource() else {
+                setError(on: reply, code: Self.errAEEventFailed,
+                         message: "Sandbox denied access to the recording folder (\(directoryURL.path)). Re-pick it in ControlBooth's schedule editor.")
+                return
+            }
+
+            // A previous recording's access wasn't released (e.g. a 'RecS'
+            // arrived without a matching 'RecP') — release it before this one
+            // takes over, rather than leaking the security-scoped grant.
+            if let previous = activeRecordingScopedURL {
+                previous.stopAccessingSecurityScopedResource()
+            }
+            activeRecordingScopedURL = directoryURL
+
+            let fileURL = directoryURL.appendingPathComponent(filename)
+            print("ControlBoothEventReceiver: handleStartRecording — scheduling at \(fileURL.path)")
             let mgr = lasManager
             // DispatchQueue.main.async guarantees work runs after this handler
             // returns and the AE reply is dispatched, so terminate()'s Thread.sleep
-            // cannot block the reply.
-            DispatchQueue.main.async { mgr.startRecording(at: url) }
+            // cannot block the reply. Whether the LiveAudioServer relaunch itself
+            // succeeds remains fire-and-forget — only the sandbox-access check
+            // above is confirmed synchronously before this reply is sent.
+            DispatchQueue.main.async { mgr.startRecording(at: fileURL) }
         }
     }
 
@@ -133,6 +186,8 @@ final class ControlBoothEventReceiver: NSObject {
         MainActor.assumeIsolated {
             let mgr = lasManager
             DispatchQueue.main.async { mgr.stopRecording() }
+            activeRecordingScopedURL?.stopAccessingSecurityScopedResource()
+            activeRecordingScopedURL = nil
         }
     }
 
@@ -167,6 +222,7 @@ final class ControlBoothEventReceiver: NSObject {
     private static let keyDirectObject = fourCC("----")
     private static let keyErrorNumber = fourCC("errn")
     private static let keyErrorString = fourCC("errs")
+    private static let keyRecordingFilename = fourCC("fnam")
     private static let typeNull = fourCC("null")
 
     private static let errAEWrongNumberArgs: Int32 = -1721
