@@ -2250,7 +2250,7 @@ static void *retune_socket_thread_fn(void *arg) {
     int name_result = pthread_setname_np("retune_socket");
 
 	struct fm_state *fm = arg;
-	int port = 6020;
+	int port = 6023;
     int r, n;
     int sockfd, newsockfd, portno;
     socklen_t clilen;
