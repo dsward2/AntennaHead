@@ -15,6 +15,7 @@
 		0E2AED73300F2B0E007F4143 /* AUProcessor in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; };
 		0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; };
 		0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; };
+		0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; };
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
 		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -180,6 +181,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */,
 				0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */,
 				0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */,
 				0E2AED73300F2B0E007F4143 /* AUProcessor in Frameworks */,

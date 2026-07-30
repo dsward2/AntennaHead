@@ -21,6 +21,8 @@ struct ConfigurationView: View {
     @State private var launchControlBoothOnStartup = false
     @State private var airPlayReceiverEnabled = false
     @State private var airPlayReceiverDeviceName = "AntennaHead"
+    @State private var recordingFolderPath: String?
+    @State private var recordingFolderErrorMessage: String?
 
     private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
@@ -79,6 +81,39 @@ struct ConfigurationView: View {
                     .onChange(of: launchControlBoothOnStartup) { _, _ in
                         saveControlBoothSettings()
                     }
+            }
+
+            Section {
+                if let recordingFolderPath {
+                    LabeledContent("Folder") {
+                        HStack {
+                            Text(recordingFolderPath)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .foregroundStyle(.secondary)
+                            Button("Change…") { chooseRecordingFolder() }
+                            Button("Clear") { clearRecordingFolder() }
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("Not configured")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Set Folder…") { chooseRecordingFolder() }
+                    }
+                }
+                if let recordingFolderErrorMessage {
+                    Text(recordingFolderErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Recording")
+            } footer: {
+                Text("Where ControlBooth-triggered recordings (schedule events, \"Test Recording Now\") are written. Must be picked here, in AntennaHead's own folder picker — a folder picked in ControlBooth carries no sandbox access grant AntennaHead can use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -193,6 +228,7 @@ struct ConfigurationView: View {
         airPlayReceiverEnabled = airPlayEnabled == "1"
         let storedDeviceName = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
         airPlayReceiverDeviceName = storedDeviceName ?? "AntennaHead"
+        recordingFolderPath = RecordingFolderStore.shared.folderURL?.path
     }
 
     private func saveControlBoothSettings() {
@@ -209,6 +245,35 @@ struct ConfigurationView: View {
             airPlayReceiverEnabled ? "1" : "0", forKey: Self.airPlayReceiverEnabledKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             airPlayReceiverDeviceName, forKey: Self.airPlayReceiverDeviceNameKey)
+    }
+
+    private func chooseRecordingFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Select"
+        panel.message = "Choose a folder for ControlBooth-triggered recordings"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try url.bookmarkData(options: .withSecurityScope,
+                                             includingResourceValuesForKeys: nil, relativeTo: nil)
+            try SQLiteController.shared.storeAppSettingsValue(
+                data.base64EncodedString(), forKey: RecordingFolderStore.bookmarkKey)
+            RecordingFolderStore.shared.reload()
+            recordingFolderPath = RecordingFolderStore.shared.folderURL?.path
+            recordingFolderErrorMessage = RecordingFolderStore.shared.folderURL == nil
+                ? "Bookmark saved but failed to resolve — try picking the folder again." : nil
+        } catch {
+            recordingFolderErrorMessage = "Couldn't create a security-scoped bookmark for that folder: \(error)"
+        }
+    }
+
+    private func clearRecordingFolder() {
+        try? SQLiteController.shared.storeAppSettingsValue("", forKey: RecordingFolderStore.bookmarkKey)
+        RecordingFolderStore.shared.reload()
+        recordingFolderPath = nil
+        recordingFolderErrorMessage = nil
     }
 
     private func chooseControlBoothApp() {

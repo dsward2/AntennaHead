@@ -70,6 +70,10 @@ final class LiveAudioServerProcessManager {
     private var currentTLS: TLSConfig?
     private var currentOutputBitrate = 128_000
     private var currentRecordingPath: URL?
+    /// Where a recording started via `startRecording(at:)` should end up once
+    /// finished — see that function's doc comment for why it isn't the same
+    /// as `currentRecordingPath` (the path LAS is actually told to write to).
+    private var currentRecordingFinalDestination: URL?
 
     /// Bonjour (mDNS) name LAS advertises its HTTP/HTTPS listeners under on
     /// the LAN (LAS `--bonjour`), so players can discover the audio stream.
@@ -268,18 +272,50 @@ final class LiveAudioServerProcessManager {
         return "LiveAudioServer -  process ID = \(pid) -  isRunning = \(runningFlag)\n\n\"\(executableURL.path)\" \(argsString)\n\n"
     }
 
-    /// Restarts LiveAudioServer with `--record-aac` pointed at `path`.
+    /// Restarts LiveAudioServer with `--record-aac` pointed at a temp file
+    /// inside AntennaHead's own sandbox container, *not* `path` itself.
+    ///
+    /// LiveAudioServer runs as a spawned child process, which does not
+    /// inherit the security-scoped access this app holds for `path`'s folder
+    /// (confirmed the hard way: the same folder access that resolves fine in
+    /// this process makes the child fail with "Cannot open recording file for
+    /// writing" — sandbox extensions aren't inherited across `Process()`).
+    /// The app's own container has no such restriction for its own children,
+    /// so recording always happens there; `stopRecording()` moves the
+    /// finished file to `path` afterward, once this app's own valid access
+    /// can be used to write there.
     func startRecording(at path: URL) {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(path.lastPathComponent)
+        currentRecordingFinalDestination = path
         start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
               httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
-              recordingPath: path)
+              recordingPath: tempURL)
     }
 
-    /// Restarts LiveAudioServer without a recording output (stops the current recording).
+    /// Restarts LiveAudioServer without a recording output (stops the current
+    /// recording), then — once the recording process has actually exited, not
+    /// just been signaled — moves the finished temp file to its real
+    /// destination (see `startRecording(at:)`).
     func stopRecording() {
-        guard currentRecordingPath != nil else { return }
+        guard let tempURL = currentRecordingPath, let destination = currentRecordingFinalDestination else { return }
+        let dying = serverProcess
         start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
               httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
               recordingPath: nil)
+        currentRecordingFinalDestination = nil
+        Task { @MainActor in
+            if let dying {
+                await Self.waitForExit(dying, timeout: 2.0)
+            }
+            do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.moveItem(at: tempURL, to: destination)
+                print("LiveAudioServerProcessManager: moved recording to \(destination.path)")
+            } catch {
+                print("LiveAudioServerProcessManager: failed to move recording from \(tempURL.path) to \(destination.path): \(error)")
+            }
+        }
     }
 }
