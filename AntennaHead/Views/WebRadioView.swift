@@ -206,8 +206,9 @@ struct WebRadioView: NSViewRepresentable {
         /// user-typed path like `~/Downloads/...` fails silently under the App
         /// Sandbox — child processes don't inherit AntennaHead's security-scoped
         /// file access, see `LiveAudioServerProcessManager.startRecording(at:)`),
-        /// then moves the finished file into AntennaHead's configured Recording
-        /// folder once LiveAudioServer confirms the file is closed.
+        /// then moves the finished file into the shared App Group Recordings
+        /// folder (`SharedRecordingFolder`) once LiveAudioServer confirms the
+        /// file is closed.
         func userContentController(_ userContentController: WKUserContentController,
                                     didReceive message: WKScriptMessage) {
             guard let dict = message.body as? [String: Any],
@@ -228,9 +229,9 @@ struct WebRadioView: NSViewRepresentable {
 
         @MainActor
         private func handleRecorderStart(format: String, typedPath: String, replyID: String) {
-            guard let folderURL = RecordingFolderStore.shared.folderURL else {
+            guard let folderURL = SharedRecordingFolder.url else {
                 resolveRecorderBridge(replyID: replyID, result: [
-                    "error": "No recording folder is configured in AntennaHead's Settings — set one under Configuration → Recording."
+                    "error": "AntennaHead's shared recording folder isn't available — check its App Group entitlement."
                 ])
                 return
             }

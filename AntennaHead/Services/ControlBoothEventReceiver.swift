@@ -8,12 +8,10 @@ import AppKit
 ///   'Stop'  stop listening task    direct parameter: custom-task name
 ///   'Runs'  listening task names   reply: list of the listening tasks' names
 ///   'RecS'  start recording        direct parameter: filename to create.
-///                                  Written into the folder configured in
-///                                  AntennaHead's own Settings (see
-///                                  `RecordingFolderStore`) — a folder
-///                                  ControlBooth picks in its own,
-///                                  unsandboxed process carries no sandbox
-///                                  access grant AntennaHead can use.
+///                                  Written into the shared App Group
+///                                  container's Recordings folder (see
+///                                  `SharedRecordingFolder`), which both apps
+///                                  can reach without any bookmark relay.
 ///   'RecP'  stop recording         no parameters
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
@@ -124,9 +122,9 @@ final class ControlBoothEventReceiver: NSObject {
                          message: "'start recording' requires a filename.")
                 return
             }
-            guard let directoryURL = RecordingFolderStore.shared.folderURL else {
+            guard let directoryURL = SharedRecordingFolder.url else {
                 setError(on: reply, code: Self.errAEEventFailed,
-                         message: "No recording folder is configured in AntennaHead's Settings — set one under Configuration → Recording.")
+                         message: "AntennaHead's shared recording folder isn't available — check its App Group entitlement.")
                 return
             }
 
