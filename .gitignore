@@ -7,6 +7,7 @@ Package.resolved
 build/
 DerivedData/
 *.xcuserstate
+xcuserdata/
 *.profraw
 
 # macOS
