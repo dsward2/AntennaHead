@@ -16,6 +16,7 @@
 		0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; };
 		0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; };
 		0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; };
+		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
 		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -48,6 +49,7 @@
 		0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
 		AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */; };
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
@@ -99,6 +101,7 @@
 				0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */,
 				0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */,
 				0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */,
+				A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -181,6 +184,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */,
 				0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */,
 				0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */,
 				0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */,
@@ -332,6 +336,7 @@
 				0EFDB0072FFB000000BA711A /* AudioInputCapture */,
 				0EFDB0082FFB000000BA711A /* FMDeemphasis */,
 				0EFDB0192FFB000000BA711A /* PCMJitterBuffer */,
+				926091239864FEF2D1C7078C /* LiveAudioRecorder */,
 				0EAEBD022FFAE00000BA711A /* AirPlayReceiver */,
 			);
 			productName = AntennaHead;
@@ -1171,6 +1176,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
 			productName = PCMJitterBuffer;
+		};
+		926091239864FEF2D1C7078C /* LiveAudioRecorder */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			productName = LiveAudioRecorder;
 		};
 		AA000002AA000002AA000002 /* librtlsdr */ = {
 			isa = XCSwiftPackageProductDependency;
