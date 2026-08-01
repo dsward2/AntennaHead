@@ -174,13 +174,19 @@ struct ContentView: View {
         let airPlayReceiverEnabled = ((try? SQLiteController.shared.appSettingsValue(
             forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
 
-        // The web UI's audio player points at LiveAudioServer's AAC stream.
+        // The web UI's audio player is proxied through this server's own port
+        // (selfHTTPPort/selfHTTPSPort) rather than pointed directly at
+        // LiveAudioServer's separate port — see WebConfig.selfHTTPPort's doc
+        // comment — while streamHTTPPort/streamHTTPSPort remain LAS's real
+        // ports, used internally by proxyToLiveAudioServer.
         let webConfig = AntennaHeadHTTPServer.WebConfig(
             streamHTTPPort: Int(ports.streamingHTTP),
             streamHTTPSPort: tlsConfig?.port,
             aacBitrate: outputBitrate,
             controlBoothEnabled: controlBoothEnabled,
-            airPlayReceiverEnabled: airPlayReceiverEnabled
+            airPlayReceiverEnabled: airPlayReceiverEnabled,
+            selfHTTPPort: Int(ports.webHTTP),
+            selfHTTPSPort: identity != nil ? Int(ports.webHTTPS) : nil
         )
         // Let web routes read favorites, drive tuning, and reflect AirPlay status.
         httpServer.sdrController = sdrController

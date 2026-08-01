@@ -55,10 +55,14 @@ final class AntennaHeadHTTPServer {
     var sqlite: SQLiteController?
     var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
 
-    /// Stream configuration needed to render the `%%AUDIO_PLAYER%%` token. Points
-    /// at the continuously-running LiveAudioServer, which serves the audio the web
-    /// UI plays. A value type captured at `start()`; read from the nonisolated
-    /// routing queue, so it is set before listeners begin and treated as immutable.
+    /// Stream configuration needed to render the `%%AUDIO_PLAYER%%` token. The
+    /// audio the web UI plays is ultimately served by the continuously-running
+    /// LiveAudioServer, but the `<audio>` element itself is pointed at this
+    /// server (`selfHTTPPort`/`selfHTTPSPort`), which proxies the HLS request
+    /// through to LAS (`proxyToLiveAudioServer`) rather than exposing LAS's
+    /// separate port directly — see that field's doc comment for why. A value
+    /// type captured at `start()`; read from the nonisolated routing queue, so
+    /// it is set before listeners begin and treated as immutable.
     struct WebConfig: Sendable {
         var streamHTTPPort: Int = 8080
         var streamHTTPSPort: Int? = nil
@@ -70,10 +74,27 @@ final class AntennaHeadHTTPServer {
         /// (e.g. Apple TV) appear to need this rather than an open-ended
         /// live byte stream.
         var hlsMount: String = "/hls/index.m3u8"
+        /// Prefix LiveAudioServer's HLS segment filenames share (see
+        /// `HLSSegmenter.segmentURI` in LiveAudioServerCore) — segment URIs in
+        /// the playlist are root-relative (e.g. `/hls/seg-123.aac`), so once
+        /// the playlist itself is fetched from this server (see
+        /// `proxyToLiveAudioServer`), the browser resolves segment requests
+        /// against this same origin automatically; this prefix is how
+        /// `respond(_:auth:isSecure:webConfig:)` recognizes them as also
+        /// needing proxying to LAS.
+        var hlsSegmentPrefix: String = "/hls/seg-"
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
         var controlBoothEnabled: Bool = false
         var airPlayReceiverEnabled: Bool = false
+        /// AntennaHead's own web-server port(s). The `<audio>` element's HLS
+        /// request is pointed at *this* server (proxied through to LAS
+        /// internally) rather than LAS's separate port, so a browser
+        /// authenticates once: per RFC 7617 the Basic Auth "protection space"
+        /// includes the port, so even a matching realm on a different port
+        /// would otherwise force a second login when the audio element loads.
+        var selfHTTPPort: Int = 8090
+        var selfHTTPSPort: Int? = nil
     }
 
     private var httpListener: NWListener?
@@ -336,11 +357,56 @@ final class AntennaHeadHTTPServer {
                                 headers: ["Content-Type": "application/json"],
                                 body: Data(#"{"status":"ok"}"#.utf8))
         }
+        if path == webConfig.hlsMount || path.hasPrefix(webConfig.hlsSegmentPrefix) {
+            return await proxyToLiveAudioServer(path: path, auth: auth, webConfig: webConfig)
+        }
         // Pages that read the DB or drive SDRController run on the MainActor.
         if let appResponse = await appStateResponse(path: path, request: request, host: host, isSecure: isSecure, webConfig: webConfig) {
             return appResponse
         }
         return staticOrDynamic(path: path, host: host, isSecure: isSecure, webConfig: webConfig)
+    }
+
+    /// Fetches an HLS playlist/segment from the co-located LiveAudioServer
+    /// instance over loopback and relays it verbatim, so the browser only
+    /// ever talks to this server's origin for the embedded audio player —
+    /// see `WebConfig.selfHTTPPort`'s doc comment for why that's what makes a
+    /// single Basic Auth login cover both servers. Only HLS (bounded,
+    /// single-shot requests) is proxied this way; LAS's raw infinite mp3/m4a
+    /// icy streams are not, since this server only supports fully-buffered
+    /// single-shot responses (see `HTTPResponse`) and an infinite stream needs
+    /// a genuine long-lived relay this server doesn't have — HLS's segmented
+    /// design fits the existing request/response model without needing one.
+    /// Always dials LAS over plain loopback HTTP regardless of `isSecure`;
+    /// TLS only matters for the untrusted external hop this server itself
+    /// terminates.
+    nonisolated private func proxyToLiveAudioServer(path: String, auth: HTTPAuthCredentials.Credentials?,
+                                                     webConfig: WebConfig) async -> HTTPResponse {
+        guard let url = URL(string: "http://127.0.0.1:\(webConfig.streamHTTPPort)\(path)") else {
+            return .notFound
+        }
+        var request = URLRequest(url: url, timeoutInterval: 8)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let auth, let b64 = "\(auth.user):\(auth.password)".data(using: .utf8)?.base64EncodedString() {
+            request.setValue("Basic \(b64)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .notFound }
+            guard http.statusCode != 404 else { return .notFound }
+            var headers: [String: String] = ["Cache-Control": "no-cache, no-store"]
+            if let contentType = http.value(forHTTPHeaderField: "Content-Type") {
+                headers["Content-Type"] = contentType
+            }
+            return HTTPResponse(status: http.statusCode,
+                                reason: HTTPURLResponse.localizedString(forStatusCode: http.statusCode).capitalized,
+                                headers: headers, body: data)
+        } catch {
+            return HTTPResponse(status: 502, reason: "Bad Gateway",
+                                headers: ["Content-Type": "text/plain; charset=utf-8"],
+                                body: Data("LiveAudioServer unreachable: \(error.localizedDescription)".utf8))
+        }
     }
 
     /// Static asset or non-app dynamic page (index.html nav/audio, index2 icons).
@@ -1744,12 +1810,14 @@ final class AntennaHeadHTTPServer {
         """
     }
 
-    /// `<audio>` element pointing at LiveAudioServer's live HLS playlist. Uses
-    /// the same hostname the client used to reach this page, on
-    /// LiveAudioServer's HTTP(S) port, so it resolves from phones on the LAN.
+    /// `<audio>` element pointing at LiveAudioServer's live HLS playlist,
+    /// proxied through *this* server rather than LAS's own port (see
+    /// `proxyToLiveAudioServer` and `WebConfig.selfHTTPPort`) so a browser
+    /// only has to authenticate once. Uses the same hostname the client used
+    /// to reach this page, so it resolves from phones on the LAN.
     nonisolated private func audioPlayerHTML(host: String, isSecure: Bool, webConfig: WebConfig) -> String {
         let scheme = isSecure ? "https" : "http"
-        let port = isSecure ? (webConfig.streamHTTPSPort ?? webConfig.streamHTTPPort) : webConfig.streamHTTPPort
+        let port = isSecure ? (webConfig.selfHTTPSPort ?? webConfig.selfHTTPPort) : webConfig.selfHTTPPort
         // AntennaHead's own embedded WKWebView tabs load this page via
         // http://localhost, so `host` here is literally "localhost". That's
         // fine for playback relayed locally (HomePod/AirPlay 1), but AirPlay 2

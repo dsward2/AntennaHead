@@ -65,15 +65,24 @@ final class LiveAudioServerProcessManager {
     /// race to start two LAS instances simultaneously.
     private var startTask: Task<Void, Never>?
 
-    /// Auth/TLS/bitrate/recording captured at last start so `restart()` can reapply them.
+    /// Auth/TLS/bitrate captured at last start so `restart()` can reapply them.
     private var currentAuth: HTTPAuthCredentials.Credentials?
     private var currentTLS: TLSConfig?
     private var currentOutputBitrate = 128_000
-    private var currentRecordingPath: URL?
-    /// Where a recording started via `startRecording(at:)` should end up once
-    /// finished — see that function's doc comment for why it isn't the same
-    /// as `currentRecordingPath` (the path LAS is actually told to write to).
-    private var currentRecordingFinalDestination: URL?
+
+    /// Temp path LAS is currently writing an in-progress recording to (see
+    /// `startRecording(at:)`), or nil when no recording is active. Bookkeeping
+    /// only — recording is controlled at runtime via LAS's HTTP API, not by
+    /// relaunching the process, so this is unrelated to `start()`/`restart()`.
+    private var activeRecordingTempPath: URL?
+    /// Where the active recording should end up once `stopRecording()` moves
+    /// it — see `startRecording(at:)`'s doc comment for why it isn't the same
+    /// path LAS is told to write to.
+    private var activeRecordingFinalDestination: URL?
+    /// Whether the active recording asked for tone filler (see
+    /// `startRecording(at:useToneFiller:)`), so `stopRecording()` knows
+    /// whether to revert `/api/filler-mode` back to silence afterward.
+    private var activeRecordingUsesToneFiller = false
 
     /// Bonjour (mDNS) name LAS advertises its HTTP/HTTPS listeners under on
     /// the LAN (LAS `--bonjour`), so players can discover the audio stream.
@@ -97,9 +106,14 @@ final class LiveAudioServerProcessManager {
     /// auth/TLS/bitrate/port settings change. The radio pipeline is managed
     /// separately by `SDRController`, which never restarts LAS — so listeners
     /// survive retunes. `outputBitrate` (bits/sec) applies to both encoders.
+    ///
+    /// Note: restarting the process (this function) drops any in-progress
+    /// recording started via `startRecording(at:)` — recording lives on the
+    /// running LAS instance's own state, which a relaunch discards. Changing
+    /// auth/TLS/port/bitrate settings mid-test-recording is an accepted edge
+    /// case, not something this guards against.
     func start(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?, outputBitrate: Int = 128_000,
-               httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort,
-               recordingPath: URL? = nil) {
+               httpPort: UInt16 = 8080, udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort) {
         // Capture any running process before stop() clears the reference, so the
         // async wait below can confirm port 8080/6020 are free before the new
         // instance tries to bind them.
@@ -109,7 +123,6 @@ final class LiveAudioServerProcessManager {
         currentAuth = auth
         currentTLS = tls
         currentOutputBitrate = outputBitrate
-        currentRecordingPath = recordingPath
         self.httpPort = Int(httpPort)
         self.udpInputPort = udpInputPort
 
@@ -159,8 +172,7 @@ final class LiveAudioServerProcessManager {
     func restart(auth: HTTPAuthCredentials.Credentials?, tls: TLSConfig?) {
         // Delegate entirely to start(), which handles stop-then-wait internally.
         start(auth: auth, tls: tls, outputBitrate: currentOutputBitrate,
-              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
-              recordingPath: currentRecordingPath)
+              httpPort: UInt16(httpPort), udpInputPort: udpInputPort)
     }
 
     /// Non-blocking wait for a process to exit; SIGKILLs after the timeout.
@@ -187,6 +199,9 @@ final class LiveAudioServerProcessManager {
         // filler while idle so the client connection never drops on retune.
         // --exit-with-parent makes LAS reap itself if the app dies/crashes
         // (otherwise it orphans holding its HTTP port).
+        // --filler-mode starts as silence; startRecording(at:useToneFiller:)
+        // switches it to tone at runtime via /api/filler-mode without a
+        // restart, then stopRecording() reverts it — see FillerModeState.
         var serverArgs: [String] = [
             "--port", "\(self.httpPort)",
             "--udp-input-port", "\(self.udpInputPort)",
@@ -200,9 +215,6 @@ final class LiveAudioServerProcessManager {
             "--aac-bitrate", "\(currentOutputBitrate / 1000)",
             "--bonjour", Self.bonjourName
         ]
-        if let recordingPath = currentRecordingPath {
-            serverArgs.append(contentsOf: ["--record-aac", recordingPath.path])
-        }
         if let tls = currentTLS {
             serverArgs.append(contentsOf: ["--tls-identity", tls.identityPath,
                                            "--tls-password", tls.password,
@@ -272,50 +284,97 @@ final class LiveAudioServerProcessManager {
         return "LiveAudioServer -  process ID = \(pid) -  isRunning = \(runningFlag)\n\n\"\(executableURL.path)\" \(argsString)\n\n"
     }
 
-    /// Restarts LiveAudioServer with `--record-aac` pointed at a temp file
-    /// inside AntennaHead's own sandbox container, *not* `path` itself.
-    ///
-    /// LiveAudioServer runs as a spawned child process, which does not
-    /// inherit the security-scoped access this app holds for `path`'s folder
-    /// (confirmed the hard way: the same folder access that resolves fine in
-    /// this process makes the child fail with "Cannot open recording file for
-    /// writing" — sandbox extensions aren't inherited across `Process()`).
-    /// The app's own container has no such restriction for its own children,
-    /// so recording always happens there; `stopRecording()` moves the
-    /// finished file to `path` afterward, once this app's own valid access
-    /// can be used to write there.
-    func startRecording(at path: URL) {
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(path.lastPathComponent)
-        currentRecordingFinalDestination = path
-        start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
-              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
-              recordingPath: tempURL)
+    /// POSTs to the already-running LAS instance's loopback HTTP API (e.g.
+    /// `/api/recorder/aac/start`, `/api/filler-mode`) and reports success.
+    /// Attaches Basic Auth if the listener was configured with credentials —
+    /// the API gate in `HTTPServer` applies to every route, `/api/*` included.
+    /// Errors are logged and folded into `lastError`; callers treat a `false`
+    /// return as "the request didn't take," not a thrown failure.
+    @discardableResult
+    private func postToLAS(path: String, jsonBody: [String: String]? = nil) async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(httpPort)\(path)") else { return false }
+        var request = URLRequest(url: url, timeoutInterval: 5)
+        request.httpMethod = "POST"
+        if let jsonBody {
+            request.httpBody = try? JSONSerialization.data(withJSONObject: jsonBody)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        if let auth = currentAuth,
+           let b64 = "\(auth.user):\(auth.password)".data(using: .utf8)?.base64EncodedString() {
+            request.setValue("Basic \(b64)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200...299).contains(status) else {
+                lastError = LASError.launchFailed("POST \(path) returned HTTP \(status)")
+                print("LiveAudioServerProcessManager: POST \(path) returned HTTP \(status)")
+                return false
+            }
+            return true
+        } catch {
+            lastError = LASError.launchFailed("POST \(path) failed: \(error)")
+            print("LiveAudioServerProcessManager: POST \(path) failed: \(error)")
+            return false
+        }
     }
 
-    /// Restarts LiveAudioServer without a recording output (stops the current
-    /// recording), then — once the recording process has actually exited, not
-    /// just been signaled — moves the finished temp file to its real
-    /// destination (see `startRecording(at:)`).
-    func stopRecording() {
-        guard let tempURL = currentRecordingPath, let destination = currentRecordingFinalDestination else { return }
-        let dying = serverProcess
-        start(auth: currentAuth, tls: currentTLS, outputBitrate: currentOutputBitrate,
-              httpPort: UInt16(httpPort), udpInputPort: udpInputPort,
-              recordingPath: nil)
-        currentRecordingFinalDestination = nil
-        Task { @MainActor in
-            if let dying {
-                await Self.waitForExit(dying, timeout: 2.0)
+    /// Starts recording on the already-running LAS instance via its runtime
+    /// `/api/recorder/aac/start` endpoint — no process restart, so recording
+    /// begins the instant this call returns instead of after a relaunch (the
+    /// prior kill-and-relaunch design raced: `stopRecording()` could fire
+    /// before the new instance had even bound its ports, yielding a 0-byte
+    /// file). The path handed to LAS is a temp file inside AntennaHead's own
+    /// sandbox container, *not* `path` itself: LiveAudioServer is a spawned
+    /// child process that does not inherit the security-scoped access this
+    /// app holds for `path`'s folder (confirmed the hard way — the same
+    /// folder access that resolves fine in this process makes the child fail
+    /// with "Cannot open recording file for writing"). The app's own
+    /// container has no such restriction for its own children, so recording
+    /// always happens there; `stopRecording()` moves the finished file to
+    /// `path` afterward, once this app's own valid access can write there.
+    ///
+    /// `useToneFiller` flips LAS to `/api/filler-mode` "tone" for as long as
+    /// this recording runs, so a manually-triggered test recording captures
+    /// an audible tone (rather than encoded digital zero) whenever there's no
+    /// real PCM flowing — i.e. no station tuned. `stopRecording()` always
+    /// reverts to silence afterward, so this never leaks into ordinary
+    /// listening.
+    func startRecording(at path: URL, useToneFiller: Bool = false) async {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(path.lastPathComponent)
+        activeRecordingTempPath = tempURL
+        activeRecordingFinalDestination = path
+        activeRecordingUsesToneFiller = useToneFiller
+        if useToneFiller {
+            await postToLAS(path: "/api/filler-mode", jsonBody: ["mode": "tone"])
+        }
+        await postToLAS(path: "/api/recorder/aac/start", jsonBody: ["path": tempURL.path])
+    }
+
+    /// Stops the active recording via LAS's `/api/recorder/aac/stop` and
+    /// moves the finished temp file to its real destination. `FileRecorder`
+    /// closes the file synchronously (on its serial queue) while handling
+    /// that request, so by the time this POST's response arrives the file is
+    /// already fully flushed — no need to wait for a process exit.
+    func stopRecording() async {
+        guard let tempURL = activeRecordingTempPath,
+              let destination = activeRecordingFinalDestination else { return }
+        await postToLAS(path: "/api/recorder/aac/stop")
+        if activeRecordingUsesToneFiller {
+            await postToLAS(path: "/api/filler-mode", jsonBody: ["mode": "silence"])
+        }
+        activeRecordingTempPath = nil
+        activeRecordingFinalDestination = nil
+        activeRecordingUsesToneFiller = false
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
             }
-            do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
-                }
-                try FileManager.default.moveItem(at: tempURL, to: destination)
-                print("LiveAudioServerProcessManager: moved recording to \(destination.path)")
-            } catch {
-                print("LiveAudioServerProcessManager: failed to move recording from \(tempURL.path) to \(destination.path): \(error)")
-            }
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+            print("LiveAudioServerProcessManager: moved recording to \(destination.path)")
+        } catch {
+            print("LiveAudioServerProcessManager: failed to move recording from \(tempURL.path) to \(destination.path): \(error)")
+            lastError = error
         }
     }
 }

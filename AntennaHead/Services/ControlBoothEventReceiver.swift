@@ -12,6 +12,12 @@ import AppKit
 ///                                  container's Recordings folder (see
 ///                                  `SharedRecordingFolder`), which both apps
 ///                                  can reach without any bookmark relay.
+///                                  optional 'Tone' parameter (boolean): when
+///                                  true, gaps in real audio are filled with
+///                                  an audible test tone instead of silence —
+///                                  set by ControlBooth's manual test button
+///                                  so a test recording is verifiable by ear
+///                                  even with no station tuned.
 ///   'RecP'  stop recording         no parameters
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
@@ -129,14 +135,19 @@ final class ControlBoothEventReceiver: NSObject {
             }
 
             let fileURL = directoryURL.appendingPathComponent(filename)
-            print("ControlBoothEventReceiver: handleStartRecording — scheduling at \(fileURL.path)")
+            let useToneFiller = event.paramDescriptor(forKeyword: Self.keyUseToneFiller)?.booleanValue ?? false
+            print("ControlBoothEventReceiver: handleStartRecording — scheduling at \(fileURL.path), useToneFiller=\(useToneFiller)")
             let mgr = lasManager
-            // DispatchQueue.main.async guarantees work runs after this handler
+            // Task { @MainActor } guarantees this runs after the handler
             // returns and the AE reply is dispatched, so terminate()'s Thread.sleep
-            // cannot block the reply. Whether the LiveAudioServer relaunch itself
-            // succeeds remains fire-and-forget — only the recording-folder check
-            // above is confirmed synchronously before this reply is sent.
-            DispatchQueue.main.async { mgr.startRecording(at: fileURL) }
+            // elsewhere cannot block the reply. startRecording now calls LAS's
+            // already-running instance over loopback HTTP (no process relaunch),
+            // so this completes in milliseconds rather than racing a relaunch —
+            // still fire-and-forget relative to the AE reply, but the window
+            // for ControlBooth's Stop button to land before recording actually
+            // started is now negligible. Only the recording-folder check above
+            // is confirmed synchronously before this reply is sent.
+            Task { @MainActor in await mgr.startRecording(at: fileURL, useToneFiller: useToneFiller) }
         }
     }
 
@@ -145,7 +156,7 @@ final class ControlBoothEventReceiver: NSObject {
         print("ControlBoothEventReceiver: handleStopRecording called")
         MainActor.assumeIsolated {
             let mgr = lasManager
-            DispatchQueue.main.async { mgr.stopRecording() }
+            Task { @MainActor in await mgr.stopRecording() }
         }
     }
 
@@ -181,6 +192,7 @@ final class ControlBoothEventReceiver: NSObject {
     private static let keyErrorNumber = fourCC("errn")
     private static let keyErrorString = fourCC("errs")
     private static let typeNull = fourCC("null")
+    private static let keyUseToneFiller = fourCC("Tone")
 
     private static let errAEWrongNumberArgs: Int32 = -1721
     private static let errAENoSuchObject: Int32 = -1728
