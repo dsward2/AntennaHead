@@ -119,6 +119,21 @@ honor Apple's embedded speech commands in plain text, e.g.
 <code>[[rate 120]]</code>. The modern voices (Samantha, Siri) <em>read those aloud</em>
 instead — use <code>--ssml</code> with them. Don't mix the two syntaxes.</p>
 
+<h3>PCMFilePlayer — file/playlist source</h3>
+<p>Decodes AAC/MP3 (or any format <code>AVAudioFile</code> reads — M4A, WAV, CAF, …) into
+S16LE PCM at <code>--rate</code>/<code>--channels</code> and writes it to stdout, paced in
+real time. Every track is decoded into memory before playback starts.</p>
+<table>
+  <tr><th>Option</th><th>Description</th></tr>
+  <tr><td><code>--file &lt;path&gt;</code></td><td>One track; repeatable, played in the order given.</td></tr>
+  <tr><td><code>--playlist &lt;path&gt;</code></td><td>A text file listing one path per line (blank lines and <code>#</code> comments ignored); combines with any <code>--file</code> entries in the order the flags appear.</td></tr>
+  <tr><td><code>--rate &lt;hz&gt;</code></td><td>Output sample rate, 8000–192000. Default 48000.</td></tr>
+  <tr><td><code>--channels &lt;n&gt;</code></td><td>Output channels, 1–8. Default 2.</td></tr>
+  <tr><td><code>--gap &lt;seconds&gt;</code></td><td>Silence between tracks, and between the last track and the first when <code>--repeat</code> loops back. Default 0.0.</td></tr>
+  <tr><td><code>--repeat</code></td><td>Loop the whole playlist continuously.</td></tr>
+  <tr><td><code>--exit-with-parent</code></td><td>Exit if the app dies.</td></tr>
+</table>
+
 <h3>PCMMixer — mix two or more PCM streams</h3>
 <p>Mixes S16LE inputs sample-wise (with saturation) into one output. All inputs must share
 the same rate and channel count. <strong>Input 0 is the clock master</strong> — it paces
