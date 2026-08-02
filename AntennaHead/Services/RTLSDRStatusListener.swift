@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SharedLogging
 
 /// Listens on a local UDP port for the status feed emitted by
 /// `rtl_fm_localradio -c <port>`. The helper connects to `127.0.0.1:<port>` and
@@ -42,7 +43,10 @@ final class RTLSDRStatusListener: @unchecked Sendable {
             listener.start(queue: queue)
             self.listener = listener
         } catch {
-            print("RTLSDRStatusListener: failed to listen on \(port) - \(error)")
+            let message = "failed to listen on \(port) - \(error)"
+            Task { @MainActor in
+                LogStore.shared.log(.error, source: "RTLSDRStatusListener", message)
+            }
         }
     }
 

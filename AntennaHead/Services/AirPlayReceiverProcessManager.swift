@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import AirPlayReceiver
+import SharedLogging
 
 /// Manages the AirPlay 1 (RAOP) receiver, mirroring `LiveAudioServerProcessManager`'s
 /// shape: a thin `@Observable` wrapper around the shared `AirPlayReceiverController`
@@ -23,6 +24,12 @@ final class AirPlayReceiverProcessManager {
 
     var isRunning: Bool { controller.isRunning }
     var lastError: Error? { controller.lastError }
+
+    init() {
+        controller.onLog = { source, message in
+            LogStore.shared.log(.info, source: source, message)
+        }
+    }
 
     func start(deviceName: String, udpPort: UInt16) {
         let wasRunning = controller.isRunning

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import PipelineRunner
+import SharedLogging
 
 /// Builds and drives the RTL-SDR audio pipeline, ported from LocalRadio's
 /// Objective-C `SDRController`.
@@ -103,6 +104,9 @@ final class SDRController {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
         self.statusUDPPort = statusUDPPort
+        radioTaskPipelineManager.onLog = { source, message in
+            LogStore.shared.log(.info, source: source, message)
+        }
         startStatusListener()
     }
 
@@ -361,7 +365,7 @@ final class SDRController {
         let path = helperPath("PCMUDPReceiver")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("PCMUDPReceiver helper missing at \(path)")
-            print("SDRController: PCMUDPReceiver helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "PCMUDPReceiver helper missing at \(path)")
             return nil
         }
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
@@ -440,7 +444,7 @@ final class SDRController {
                 self.lastError = error
                 self.taskMode = .stopped
                 self.activeFrequencyID = nil
-                print("SDRController: pipeline start failed: \(error)")
+                LogStore.shared.log(.error, source: "SDRController", "pipeline start failed: \(error)")
             }
         }
     }
@@ -582,7 +586,7 @@ final class SDRController {
         let path = helperPath("AudioInputCapture")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("AudioInputCapture helper missing at \(path)")
-            print("SDRController: AudioInputCapture helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "AudioInputCapture helper missing at \(path)")
             return nil
         }
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
@@ -657,7 +661,7 @@ final class SDRController {
         let path = helperPath("stereodemux")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("stereodemux helper missing at \(path)")
-            print("SDRController: stereodemux helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "stereodemux helper missing at \(path)")
             return nil
         }
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
@@ -673,7 +677,7 @@ final class SDRController {
         let path = helperPath("FMDeemphasis")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("FMDeemphasis helper missing at \(path)")
-            print("SDRController: FMDeemphasis helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "FMDeemphasis helper missing at \(path)")
             return nil
         }
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
@@ -694,7 +698,7 @@ final class SDRController {
             item = try radioTaskPipelineManager.makeSoxTaskItem()
         } catch {
             lastError = error
-            print("SDRController: \(error)")
+            LogStore.shared.log(.error, source: "SDRController", "\(error)")
             return nil
         }
 
@@ -773,9 +777,10 @@ final class SDRController {
         for proc in runningProcesses() where proc.ppid == 1 {
             guard let path = executablePath(forPID: proc.pid), path.hasPrefix(prefix) else { continue }
             if kill(proc.pid, SIGKILL) == 0 {
-                print("SDRController: reaped orphaned helper PID=\(proc.pid) \(path)")
+                LogStore.shared.log(.info, source: "SDRController", "reaped orphaned helper PID=\(proc.pid) \(path)")
             } else {
-                print("SDRController: failed to reap orphaned helper PID=\(proc.pid) \(path) — errno=\(errno)")
+                LogStore.shared.log(.error, source: "SDRController",
+                    "failed to reap orphaned helper PID=\(proc.pid) \(path) — errno=\(errno)")
             }
         }
     }

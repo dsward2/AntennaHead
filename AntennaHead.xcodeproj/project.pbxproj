@@ -34,6 +34,7 @@
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
 		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBD022FFAE00000BA711A /* AirPlayReceiver */; };
+		A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */; };
 		0ECF51042FD87DC8006943DA /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51032FD87DC8006943DA /* LiveAudioServerCore */; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51162FD92305006943DA /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51152FD92305006943DA /* LiveAudioServer */; };
@@ -202,6 +203,7 @@
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 				0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */,
 				0EAEBD032FFAE00000BA711A /* AirPlayReceiver in Frameworks */,
+				A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -338,6 +340,7 @@
 				0EFDB0192FFB000000BA711A /* PCMJitterBuffer */,
 				926091239864FEF2D1C7078C /* LiveAudioRecorder */,
 				0EAEBD022FFAE00000BA711A /* AirPlayReceiver */,
+				308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */,
 			);
 			productName = AntennaHead;
 			productReference = 0EF469B62FCE8911001510D3 /* AntennaHead.app */;
@@ -446,8 +449,9 @@
 				0ECF51052FD87EB4006943DA /* XCRemoteSwiftPackageReference "swift-certificates" */,
 				0ECF51262FDA8FF5006943DA /* XCRemoteSwiftPackageReference "GRDB" */,
 				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "antennahead-librtlsdr" */,
-				0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */,
+				0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */,
 				0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */,
+				F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -1045,15 +1049,18 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/dsward2/PipelineHelpers";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../PipelineHelpers;
 		};
+		F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../SharedLogging;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dsward2/AirPlayReceiver";
@@ -1099,13 +1106,18 @@
 /* Begin XCSwiftPackageProductDependency section */
 		0EAEBB192FFAD5F300BA711A /* PipelineRunner */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PipelineRunner;
 		};
 		0EAEBD022FFAE00000BA711A /* AirPlayReceiver */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBD012FFAE00000BA711A /* XCRemoteSwiftPackageReference "AirPlayReceiver" */;
 			productName = AirPlayReceiver;
+		};
+		308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */;
+			productName = SharedLogging;
 		};
 		0ECF51032FD87DC8006943DA /* LiveAudioServerCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1134,52 +1146,52 @@
 		};
 		0EFDB0012FFB000000BA711A /* PCMUDPSender */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMUDPSender;
 		};
 		0EFDB0022FFB000000BA711A /* PCMUDPReceiver */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMUDPReceiver;
 		};
 		0EFDB0032FFB000000BA711A /* PCMPassthrough */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMPassthrough;
 		};
 		0EFDB0042FFB000000BA711A /* PCMMixer */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMMixer;
 		};
 		0EFDB0052FFB000000BA711A /* PCMSpeechSynth */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMSpeechSynth;
 		};
 		0EFDB0062FFB000000BA711A /* AUProcessor */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = AUProcessor;
 		};
 		0EFDB0072FFB000000BA711A /* AudioInputCapture */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = AudioInputCapture;
 		};
 		0EFDB0082FFB000000BA711A /* FMDeemphasis */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = FMDeemphasis;
 		};
 		0EFDB0192FFB000000BA711A /* PCMJitterBuffer */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMJitterBuffer;
 		};
 		926091239864FEF2D1C7078C /* LiveAudioRecorder */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCRemoteSwiftPackageReference "PipelineHelpers" */;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = LiveAudioRecorder;
 		};
 		AA000002AA000002AA000002 /* librtlsdr */ = {

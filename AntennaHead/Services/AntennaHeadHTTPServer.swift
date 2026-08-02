@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Network
 import PipelineRunner
+import SharedLogging
 
 private extension Dictionary where Key == String, Value == Any {
     /// String value for a key, coercing JSON numbers to their string form.
@@ -136,7 +137,7 @@ final class AntennaHeadHTTPServer {
             }
             isRunning = true
         } catch {
-            print("AntennaHeadHTTPServer failed to start: \(error)")
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "failed to start: \(error)")
             stop()
         }
     }
@@ -198,7 +199,8 @@ final class AntennaHeadHTTPServer {
         case .failed(let error):
             let attempt = isSecure ? httpsRetryAttempt : httpRetryAttempt
             if isEADDRINUSE(error), attempt < Self.maxBindRetries {
-                print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") bind failed (\(error)); retrying (attempt \(attempt + 1)/\(Self.maxBindRetries))")
+                LogStore.shared.log(.warning, source: "AntennaHeadHTTPServer",
+                    "\(isSecure ? "HTTPS" : "HTTP") bind failed (\(error)); retrying (attempt \(attempt + 1)/\(Self.maxBindRetries))")
                 scheduleRetry(isSecure: isSecure)
                 return
             }
@@ -208,7 +210,8 @@ final class AntennaHeadHTTPServer {
             } else {
                 isRunning = false
             }
-            print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") listener failed: \(error)")
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                "\(isSecure ? "HTTPS" : "HTTP") listener failed: \(error)")
         default:
             break
         }
@@ -250,7 +253,8 @@ final class AntennaHeadHTTPServer {
             }
         } catch {
             lastError = error
-            print("AntennaHeadHTTPServer: \(isSecure ? "HTTPS" : "HTTP") retry bind failed: \(error)")
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                "\(isSecure ? "HTTPS" : "HTTP") retry bind failed: \(error)")
         }
     }
 

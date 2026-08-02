@@ -1,10 +1,12 @@
 import SwiftUI
 import AppKit
+import SharedLogging
 
 @main
 struct AntennaHeadApp: App {
     init() {
         _ = AppDatabase.shared
+        LogStore.shared.configure(appName: "AntennaHead")
         launchControlBoothIfConfigured()
     }
 
@@ -48,6 +50,7 @@ struct AntennaHeadApp: App {
             // intentionally absent — custom tasks live in the web UI here.)
             CommandMenu("Commands") {
                 FCCSearchWindowCommand()
+                LogsWindowCommand()
                 Button("Reload Web View") {
                     NotificationCenter.default.post(name: WebRadioView.reloadNotification, object: nil)
                 }
@@ -64,6 +67,11 @@ struct AntennaHeadApp: App {
             FCCSearchView()
         }
         .defaultSize(width: 480, height: 560)
+
+        Window("Logs", id: "logs") {
+            LogViewerView()
+        }
+        .defaultSize(width: 800, height: 500)
     }
 }
 
@@ -85,5 +93,16 @@ struct FCCSearchWindowCommand: View {
             openWindow(id: "fcc-search")
         }
         .keyboardShortcut("f", modifiers: [.command, .shift])
+    }
+}
+
+struct LogsWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Logs") {
+            openWindow(id: "logs")
+        }
+        .keyboardShortcut("l", modifiers: [.command, .shift])
     }
 }

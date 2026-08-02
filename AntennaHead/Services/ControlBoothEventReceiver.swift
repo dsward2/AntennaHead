@@ -1,4 +1,5 @@
 import AppKit
+import SharedLogging
 
 /// AntennaHead's receiving half of the AppleEvents control channel with
 /// ControlBooth (see "AppleEvents control channel" in ControlBooth's SETUP.md).
@@ -58,7 +59,8 @@ final class ControlBoothEventReceiver: NSObject {
                                 andSelector: #selector(handleStopRecording(_:withReplyEvent:)),
                                 forEventClass: Self.eventClass,
                                 andEventID: Self.fourCC("RecP"))
-        print("ControlBoothEventReceiver: registered all 5 AE handlers (Strt/Stop/Runs/RecS/RecP) — PID \(ProcessInfo.processInfo.processIdentifier)")
+        LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+            "registered all 5 AE handlers (Strt/Stop/Runs/RecS/RecP) — PID \(ProcessInfo.processInfo.processIdentifier)")
     }
 
     // NSAppleEventManager delivers on the main thread; the @objc entry points
@@ -107,8 +109,9 @@ final class ControlBoothEventReceiver: NSObject {
 
     @objc private func handleListeningTasks(_ event: NSAppleEventDescriptor,
                                             withReplyEvent reply: NSAppleEventDescriptor) {
-        print("ControlBoothEventReceiver: handleListeningTasks called — PID \(ProcessInfo.processInfo.processIdentifier)")
         MainActor.assumeIsolated {
+            LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+                "handleListeningTasks called — PID \(ProcessInfo.processInfo.processIdentifier)")
             let list = NSAppleEventDescriptor.list()
             if sdrController.taskMode == .customTask, !sdrController.stationName.isEmpty {
                 list.insert(NSAppleEventDescriptor(string: sdrController.stationName), at: 1)
@@ -121,8 +124,8 @@ final class ControlBoothEventReceiver: NSObject {
 
     @objc private func handleStartRecording(_ event: NSAppleEventDescriptor,
                                              withReplyEvent reply: NSAppleEventDescriptor) {
-        print("ControlBoothEventReceiver: handleStartRecording called")
         MainActor.assumeIsolated {
+            LogStore.shared.log(.info, source: "ControlBoothEventReceiver", "handleStartRecording called")
             guard let filename = directParameter(of: event) else {
                 setError(on: reply, code: Self.errAEWrongNumberArgs,
                          message: "'start recording' requires a filename.")
@@ -136,7 +139,8 @@ final class ControlBoothEventReceiver: NSObject {
 
             let fileURL = directoryURL.appendingPathComponent(filename)
             let useToneFiller = event.paramDescriptor(forKeyword: Self.keyUseToneFiller)?.booleanValue ?? false
-            print("ControlBoothEventReceiver: handleStartRecording — scheduling at \(fileURL.path), useToneFiller=\(useToneFiller)")
+            LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+                "handleStartRecording — scheduling at \(fileURL.path), useToneFiller=\(useToneFiller)")
             let mgr = lasManager
             // Task { @MainActor } guarantees this runs after the handler
             // returns and the AE reply is dispatched, so terminate()'s Thread.sleep
@@ -153,8 +157,8 @@ final class ControlBoothEventReceiver: NSObject {
 
     @objc private func handleStopRecording(_ event: NSAppleEventDescriptor,
                                             withReplyEvent reply: NSAppleEventDescriptor) {
-        print("ControlBoothEventReceiver: handleStopRecording called")
         MainActor.assumeIsolated {
+            LogStore.shared.log(.info, source: "ControlBoothEventReceiver", "handleStopRecording called")
             let mgr = lasManager
             Task { @MainActor in await mgr.stopRecording() }
         }

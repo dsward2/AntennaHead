@@ -1,4 +1,5 @@
 import Foundation
+import SharedLogging
 
 /// Scans for and terminates any orphaned AntennaHead helper processes from a
 /// previous session before new ones are launched, preventing port-binding
@@ -19,10 +20,12 @@ enum HelperProcessPreflight {
         let pids = helperNames.flatMap { allPIDs(named: $0) }
         guard !pids.isEmpty else { return }
 
-        print("HelperProcessPreflight: terminating \(pids.count) orphaned helper(s): PIDs \(pids)")
+        await LogStore.shared.log(.info, source: "HelperProcessPreflight",
+            "terminating \(pids.count) orphaned helper(s): PIDs \(pids)")
         for pid in pids {
             if kill(pid, SIGTERM) != 0 {
-                print("HelperProcessPreflight: SIGTERM PID \(pid) failed (errno=\(errno)) — may be unkillable")
+                await LogStore.shared.log(.warning, source: "HelperProcessPreflight",
+                    "SIGTERM PID \(pid) failed (errno=\(errno)) — may be unkillable")
             }
         }
 
@@ -36,7 +39,7 @@ enum HelperProcessPreflight {
             alive = alive.filter { isActuallyRunning($0) }
         }
         for pid in alive {
-            print("HelperProcessPreflight: SIGKILL PID \(pid)")
+            await LogStore.shared.log(.info, source: "HelperProcessPreflight", "SIGKILL PID \(pid)")
             kill(pid, SIGKILL)
         }
         if !alive.isEmpty {
@@ -53,7 +56,8 @@ enum HelperProcessPreflight {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         if !isUDPPortFree(port) {
-            print("HelperProcessPreflight: UDP port \(port) still in use after \(timeout)s; proceeding anyway")
+            await LogStore.shared.log(.warning, source: "HelperProcessPreflight",
+                "UDP port \(port) still in use after \(timeout)s; proceeding anyway")
         }
     }
 
@@ -66,7 +70,8 @@ enum HelperProcessPreflight {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         if !isTCPPortFree(port) {
-            print("HelperProcessPreflight: TCP port \(port) still in use after \(timeout)s; proceeding anyway")
+            await LogStore.shared.log(.warning, source: "HelperProcessPreflight",
+                "TCP port \(port) still in use after \(timeout)s; proceeding anyway")
         }
     }
 

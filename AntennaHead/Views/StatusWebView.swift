@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import SharedLogging
 
 /// A point-in-time snapshot of everything the Status tab presents. Built on the
 /// MainActor from `SDRController` + `LiveAudioServerClient` and pushed into the
@@ -104,16 +105,24 @@ struct StatusWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            print("StatusWebView navigation failed: \(error)")
+            MainActor.assumeIsolated {
+                LogStore.shared.log(.error, source: "StatusWebView", "navigation failed: \(error)")
+            }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            print("StatusWebView provisional navigation failed: \(error)")
+            MainActor.assumeIsolated {
+                LogStore.shared.log(.error, source: "StatusWebView", "provisional navigation failed: \(error)")
+            }
         }
 
         private func evaluate(_ json: String, in webView: WKWebView) {
             webView.evaluateJavaScript("applyStatus(\(json));") { _, error in
-                if let error { print("StatusWebView JS error: \(error)") }
+                if let error {
+                    MainActor.assumeIsolated {
+                        LogStore.shared.log(.error, source: "StatusWebView", "JS error: \(error)")
+                    }
+                }
             }
         }
     }

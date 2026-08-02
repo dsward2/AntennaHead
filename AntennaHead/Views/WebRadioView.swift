@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import SharedLogging
 
 struct WebRadioView: NSViewRepresentable {
     let url: URL
@@ -162,11 +163,15 @@ struct WebRadioView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            print("WebRadioView navigation failed: \(error)")
+            MainActor.assumeIsolated {
+                LogStore.shared.log(.error, source: "WebRadioView", "navigation failed: \(error)")
+            }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            print("WebRadioView provisional navigation failed: \(error)")
+            MainActor.assumeIsolated {
+                LogStore.shared.log(.error, source: "WebRadioView", "provisional navigation failed: \(error)")
+            }
         }
 
         /// `target="_blank"` links (Pipeline Tools docs, Credits): WKWebView

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SharedLogging
 
 /// Manages the LiveAudioServer (LAS) helper process.
 ///
@@ -191,7 +192,7 @@ final class LiveAudioServerProcessManager {
         let serverURL = executableURL
         guard FileManager.default.isExecutableFile(atPath: serverURL.path) else {
             lastError = LASError.executableMissing(serverURL.path)
-            print("LiveAudioServerProcessManager: executable missing at \(serverURL.path)")
+            LogStore.shared.log(.error, source: "LiveAudioServerProcessManager", "executable missing at \(serverURL.path)")
             return
         }
 
@@ -256,7 +257,8 @@ final class LiveAudioServerProcessManager {
                 self.isRunning = false
                 self.serverProcess = nil
                 if !wasUserInitiated {
-                    print("LiveAudioServerProcessManager: server exited unexpectedly with status \(terminated.terminationStatus)")
+                    LogStore.shared.log(.error, source: "LiveAudioServerProcessManager",
+                        "server exited unexpectedly with status \(terminated.terminationStatus)")
                 }
             }
         }
@@ -268,7 +270,7 @@ final class LiveAudioServerProcessManager {
             self.lastError = nil
         } catch {
             self.lastError = LASError.launchFailed("\(error)")
-            print("LiveAudioServerProcessManager: \(error)")
+            LogStore.shared.log(.error, source: "LiveAudioServerProcessManager", "\(error)")
             if server.isRunning { server.terminate() }
             self.serverProcess = nil
             self.isRunning = false
@@ -308,13 +310,13 @@ final class LiveAudioServerProcessManager {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200...299).contains(status) else {
                 lastError = LASError.launchFailed("POST \(path) returned HTTP \(status)")
-                print("LiveAudioServerProcessManager: POST \(path) returned HTTP \(status)")
+                LogStore.shared.log(.warning, source: "LiveAudioServerProcessManager", "POST \(path) returned HTTP \(status)")
                 return false
             }
             return true
         } catch {
             lastError = LASError.launchFailed("POST \(path) failed: \(error)")
-            print("LiveAudioServerProcessManager: POST \(path) failed: \(error)")
+            LogStore.shared.log(.error, source: "LiveAudioServerProcessManager", "POST \(path) failed: \(error)")
             return false
         }
     }
@@ -371,9 +373,10 @@ final class LiveAudioServerProcessManager {
                 try FileManager.default.removeItem(at: destination)
             }
             try FileManager.default.moveItem(at: tempURL, to: destination)
-            print("LiveAudioServerProcessManager: moved recording to \(destination.path)")
+            LogStore.shared.log(.info, source: "LiveAudioServerProcessManager", "moved recording to \(destination.path)")
         } catch {
-            print("LiveAudioServerProcessManager: failed to move recording from \(tempURL.path) to \(destination.path): \(error)")
+            LogStore.shared.log(.error, source: "LiveAudioServerProcessManager",
+                "failed to move recording from \(tempURL.path) to \(destination.path): \(error)")
             lastError = error
         }
     }

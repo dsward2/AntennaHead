@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedLogging
 
 struct AddStationView: View {
     var category: Category
@@ -54,7 +55,7 @@ struct AddStationView: View {
             dismiss()
         } catch {
             // Surface to user once an error sheet exists; for now just log.
-            print("AddStationView insert failed: \(error)")
+            LogStore.shared.log(.error, source: "AddStationView", "insert failed: \(error)")
         }
     }
 }
