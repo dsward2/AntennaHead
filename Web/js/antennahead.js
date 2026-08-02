@@ -1541,3 +1541,132 @@ function applyAACSettings(form)
     //console.log("postMessage startaudio");
 }
 
+
+// AAC recorder toggle (button + elapsed-time span next to the <audio>
+// element — see AntennaHeadHTTPServer.aacRecorderToggleHTML()). Talks to
+// this server's own /api/aac-recorder/* routes, which drive
+// LiveAudioServerProcessManager.startRecording(at:)/stopRecording() so the
+// recording lands in the shared App Group Recordings folder.
+
+var aacRecorderStartedAt = null;       // Date the current recording began, from the server
+var aacRecorderTickIntervalID = null;  // ticks the elapsed-time display once/sec while recording
+
+function aacRecorderBaseUrl()
+{
+    var getUrl = window.location;
+    return getUrl.protocol + "//" + getUrl.host + "/";
+}
+
+function aacRecorderToggle()
+{
+    var btn = document.getElementById("aac-rec-btn");
+    if (btn && btn.classList.contains("recording"))
+    {
+        aacRecorderStop();
+    }
+    else
+    {
+        aacRecorderStart();
+    }
+}
+
+function aacRecorderStart()
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4) {
+            if (this.status == 200) {
+                applyAACRecorderStatus(JSON.parse(this.responseText));
+            } else {
+                alert("Couldn't start AAC recording (HTTP " + this.status + ")");
+            }
+        }
+    };
+    xhttp.open("POST", aacRecorderBaseUrl() + "api/aac-recorder/start", true);
+    xhttp.send();
+}
+
+function aacRecorderStop()
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4) {
+            if (this.status == 200) {
+                applyAACRecorderStatus(JSON.parse(this.responseText));
+            } else {
+                alert("Couldn't stop AAC recording (HTTP " + this.status + ")");
+            }
+        }
+    };
+    xhttp.open("POST", aacRecorderBaseUrl() + "api/aac-recorder/stop", true);
+    xhttp.send();
+}
+
+function aacRecorderPoll()
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            applyAACRecorderStatus(JSON.parse(this.responseText));
+        }
+    };
+    xhttp.open("GET", aacRecorderBaseUrl() + "api/aac-recorder/status", true);
+    xhttp.send();
+}
+
+function aacRecorderFormatElapsed(seconds)
+{
+    seconds = Math.max(0, Math.floor(seconds));
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function applyAACRecorderStatus(status)
+{
+    var btn = document.getElementById("aac-rec-btn");
+    var timeEl = document.getElementById("aac-rec-time");
+    if (!btn || !timeEl) return;
+
+    if (status && status.recording)
+    {
+        btn.classList.add("recording");
+        btn.title = "Stop AAC recording";
+        aacRecorderStartedAt = status.startedAt ? new Date(status.startedAt) : new Date();
+        timeEl.style.display = "";
+        if (!aacRecorderTickIntervalID)
+        {
+            aacRecorderTickIntervalID = setInterval(aacRecorderTick, 1000);
+        }
+        aacRecorderTick();
+    }
+    else
+    {
+        btn.classList.remove("recording");
+        btn.title = "Record the AAC stream to a file";
+        timeEl.style.display = "none";
+        timeEl.textContent = "00:00";
+        aacRecorderStartedAt = null;
+        if (aacRecorderTickIntervalID)
+        {
+            clearInterval(aacRecorderTickIntervalID);
+            aacRecorderTickIntervalID = null;
+        }
+    }
+}
+
+function aacRecorderTick()
+{
+    var timeEl = document.getElementById("aac-rec-time");
+    if (!timeEl || !aacRecorderStartedAt) return;
+    var elapsed = (Date.now() - aacRecorderStartedAt.getTime()) / 1000;
+    timeEl.textContent = aacRecorderFormatElapsed(elapsed);
+}
+
+// Poll every 5s so the toggle stays in sync even when the recording was
+// started/stopped elsewhere (ControlBooth, the LiveAudioServer status tab).
+// The first real check happens from bodyElementLoaded()'s one-shot timeout
+// below (mirrors the Now Playing periodicUpdate() pattern) — this script
+// runs in <head>, before #aac-rec-btn exists in the DOM.
+var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
+

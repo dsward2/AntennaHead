@@ -699,3 +699,34 @@ html {
     .ct-pipeline line.ct-arrow { stroke: #8e8e93; }
     .ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
 }
+
+/* AAC recorder toggle, shown next to the <audio> element in the bottom bar. */
+.aac-recorder-toggle {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+.rec-btn {
+    border: none;
+    background: transparent;
+    color: #8e8e93;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px;
+}
+.rec-btn.recording {
+    color: #ff3b30;
+    animation: aac-rec-pulse 1.2s ease-in-out infinite;
+}
+.rec-time {
+    font-family: monospace;
+    font-size: 12px;
+    color: #ff3b30;
+    margin-left: 2px;
+}
+@keyframes aac-rec-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}

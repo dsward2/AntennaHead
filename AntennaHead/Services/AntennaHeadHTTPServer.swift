@@ -55,6 +55,8 @@ final class AntennaHeadHTTPServer {
     var sdrController: SDRController?
     var sqlite: SQLiteController?
     var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
+    /// Drives the `%%AUDIO_PLAYER%%` bar's AAC recorder toggle (`/api/aac-recorder/*`).
+    var liveAudioServerProcessManager: LiveAudioServerProcessManager?
 
     /// Stream configuration needed to render the `%%AUDIO_PLAYER%%` token. The
     /// audio the web UI plays is ultimately served by the continuously-running
@@ -433,7 +435,7 @@ final class AntennaHeadHTTPServer {
 
     /// Handles the pages that need `sqlite`/`sdrController`. Returns nil for paths
     /// that aren't app-state, so the caller falls back to static/dynamic serving.
-    @MainActor private func appStateResponse(path: String, request: HTTPRequest, host: String, isSecure: Bool, webConfig: WebConfig) -> HTTPResponse? {
+    @MainActor private func appStateResponse(path: String, request: HTTPRequest, host: String, isSecure: Bool, webConfig: WebConfig) async -> HTTPResponse? {
         switch path {
         case "/favorites.html":
             return renderHTML(relativePath: "favorites.html", host: host, isSecure: isSecure, webConfig: webConfig,
@@ -687,9 +689,65 @@ final class AntennaHeadHTTPServer {
             sdrController?.terminateTasks()
             return htmlFragmentResponse(airPlayPageHTML())
 
+        case "/api/aac-recorder/status":
+            return aacRecorderStatusResponse()
+
+        case "/api/aac-recorder/start":
+            return await startAACRecording()
+
+        case "/api/aac-recorder/stop":
+            if let mgr = liveAudioServerProcessManager {
+                await mgr.stopRecording()
+            }
+            return aacRecorderStatusResponse()
+
         default:
             return nil
         }
+    }
+
+    // MARK: AAC recorder toggle (`%%AUDIO_PLAYER%%` bar)
+
+    /// Starts a recording of the live AAC stream to a timestamped file in the
+    /// shared App Group Recordings folder — the same destination ControlBooth
+    /// and the LiveAudioServer status tab's recorder bridge use (see
+    /// `SharedRecordingFolder`). There's no path field in this compact toggle
+    /// (unlike LAS's own status page), so the filename is always generated
+    /// here rather than supplied by the caller.
+    @MainActor private func startAACRecording() async -> HTTPResponse {
+        guard let mgr = liveAudioServerProcessManager else {
+            return jsonErrorResponse("LiveAudioServer is not available.", status: 503)
+        }
+        guard let folderURL = SharedRecordingFolder.url else {
+            return jsonErrorResponse("AntennaHead's shared recording folder isn't available — check its App Group entitlement.", status: 500)
+        }
+        if !mgr.isRecording {
+            let df = DateFormatter()
+            df.dateFormat = "yyyyMMdd-HHmmss"
+            df.locale = Locale(identifier: "en_US_POSIX")
+            let filename = "AntennaHead-\(df.string(from: Date())).aac"
+            await mgr.startRecording(at: folderURL.appendingPathComponent(filename))
+        }
+        return aacRecorderStatusResponse()
+    }
+
+    @MainActor private func aacRecorderStatusResponse() -> HTTPResponse {
+        var dict: [String: Any] = ["recording": liveAudioServerProcessManager?.isRecording ?? false]
+        if let startedAt = liveAudioServerProcessManager?.recordingStartedAt {
+            dict["startedAt"] = ISO8601DateFormatter().string(from: startedAt)
+        }
+        let body = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
+        return HTTPResponse(status: 200, reason: "OK",
+                            headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
+                            body: body)
+    }
+
+    @MainActor private func jsonErrorResponse(_ message: String, status: Int) -> HTTPResponse {
+        let body = (try? JSONSerialization.data(withJSONObject: ["error": message])) ?? Data("{}".utf8)
+        return HTTPResponse(status: status,
+                            reason: HTTPURLResponse.localizedString(forStatusCode: status).capitalized,
+                            headers: ["Content-Type": "application/json"],
+                            body: body)
     }
 
     /// Mirrors `controlBoothPageHTML()`: shows whether the AirPlay Receiver's
@@ -1845,7 +1903,25 @@ final class AntennaHeadHTTPServer {
             + " onseeking='audioPlayerSeeking(this);' onstalled='audioPlayerStalled(this);'"
             + " onsuspend='audioPlayerSuspend(this);' ontimeupdate='audioPlayerTimeUpdate(this);'"
             + " onwaiting='audioPlayerWaiting(this);'"
-        return "<audio id='audio_element' controls \(autoplay)preload=\"none\" src='\(src)' type='\(mimeType)'\(handlers)>Your browser does not support the audio element.</audio>"
+        let audioTag = "<audio id='audio_element' controls \(autoplay)preload=\"none\" src='\(src)' type='\(mimeType)'\(handlers)>Your browser does not support the audio element.</audio>"
+        return aacRecorderToggleHTML() + audioTag
+    }
+
+    /// Compact record/stop toggle for the AAC stream, shown next to the
+    /// `<audio>` element. Talks to this server's own `/api/aac-recorder/*`
+    /// routes (see `startAACRecording()`/`aacRecorderStatusResponse()`), which
+    /// in turn drive `LiveAudioServerProcessManager.startRecording(at:)` —
+    /// *not* LAS's raw recorder API directly, since that helper already
+    /// handles the App Sandbox temp-file dance and the move into the shared
+    /// App Group Recordings folder (see its doc comment). JS lives in
+    /// `js/antennahead.js` (`aacRecorderToggle()` and friends).
+    nonisolated private func aacRecorderToggleHTML() -> String {
+        """
+        <span id="aac-recorder-toggle" class="aac-recorder-toggle">
+          <button type="button" id="aac-rec-btn" class="rec-btn" onclick="aacRecorderToggle();" title="Record the AAC stream to a file">⏺</button>
+          <span id="aac-rec-time" class="rec-time" style="display:none">00:00</span>
+        </span>
+        """
     }
 
     // Tokens shared across every dynamic page. Extend as pages migrate from

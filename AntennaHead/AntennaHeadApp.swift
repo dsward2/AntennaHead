@@ -51,6 +51,7 @@ struct AntennaHeadApp: App {
             CommandMenu("Commands") {
                 FCCSearchWindowCommand()
                 LogsWindowCommand()
+                RevealRecordingsFolderCommand()
                 Button("Reload Web View") {
                     NotificationCenter.default.post(name: WebRadioView.reloadNotification, object: nil)
                 }
@@ -104,5 +105,23 @@ struct LogsWindowCommand: View {
             openWindow(id: "logs")
         }
         .keyboardShortcut("l", modifiers: [.command, .shift])
+    }
+}
+
+struct RevealRecordingsFolderCommand: View {
+    var body: some View {
+        Button("Show Recordings Folder in Finder") {
+            guard let url = SharedRecordingFolder.url else {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Recordings folder unavailable"
+                alert.informativeText = "AntennaHead's shared recording folder isn't available — check its App Group entitlement."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
+            NSWorkspace.shared.open(url)
+        }
+        .keyboardShortcut("r", modifiers: [.command, .shift])
     }
 }

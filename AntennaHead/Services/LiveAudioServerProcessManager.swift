@@ -85,6 +85,15 @@ final class LiveAudioServerProcessManager {
     /// whether to revert `/api/filler-mode` back to silence afterward.
     private var activeRecordingUsesToneFiller = false
 
+    /// Whether a recording is currently active — set only once LAS has
+    /// actually confirmed the `/api/recorder/aac/start` call (see
+    /// `startRecording(at:)`), so UI observing this can't show "recording"
+    /// for a start that silently failed. Exposed for callers like the web
+    /// UI's AAC recorder toggle that have no other way to know the state.
+    private(set) var isRecording = false
+    /// When the active recording began, for callers that display elapsed time.
+    private(set) var recordingStartedAt: Date?
+
     /// Bonjour (mDNS) name LAS advertises its HTTP/HTTPS listeners under on
     /// the LAN (LAS `--bonjour`), so players can discover the audio stream.
     static let bonjourName = "AntennaHead Audio"
@@ -350,7 +359,18 @@ final class LiveAudioServerProcessManager {
         if useToneFiller {
             await postToLAS(path: "/api/filler-mode", jsonBody: ["mode": "tone"])
         }
-        await postToLAS(path: "/api/recorder/aac/start", jsonBody: ["path": tempURL.path])
+        let started = await postToLAS(path: "/api/recorder/aac/start", jsonBody: ["path": tempURL.path])
+        if started {
+            isRecording = true
+            recordingStartedAt = Date()
+        } else {
+            // LAS didn't confirm the start — don't leave bookkeeping around for
+            // a recording that never began, or stopRecording() would later try
+            // to move a temp file that was never written.
+            activeRecordingTempPath = nil
+            activeRecordingFinalDestination = nil
+            activeRecordingUsesToneFiller = false
+        }
     }
 
     /// Stops the active recording via LAS's `/api/recorder/aac/stop` and
@@ -368,6 +388,8 @@ final class LiveAudioServerProcessManager {
         activeRecordingTempPath = nil
         activeRecordingFinalDestination = nil
         activeRecordingUsesToneFiller = false
+        isRecording = false
+        recordingStartedAt = nil
         do {
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)

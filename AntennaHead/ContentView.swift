@@ -191,6 +191,7 @@ struct ContentView: View {
         // Let web routes read favorites, drive tuning, and reflect AirPlay status.
         httpServer.sdrController = sdrController
         httpServer.airPlayReceiverProcessManager = airPlayReceiverProcessManager
+        httpServer.liveAudioServerProcessManager = lasProcess
         httpServer.sqlite = .shared
         httpServer.start(tlsIdentity: identity, auth: auth, webConfig: webConfig)
         audioServer.credentials = auth

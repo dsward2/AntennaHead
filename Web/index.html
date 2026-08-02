@@ -452,8 +452,9 @@
         loadContent("index2.html");
 
         window.addEventListener("message", function(){startAudioPlayer();}, false); // receive "startaudio" via postMessage()
-        
+
         setTimeout(function(){periodicUpdate();}, 1000);      // a one-shot call to periodicUpdate() for "Now Playing"
+        setTimeout(function(){aacRecorderPoll();}, 1000);      // a one-shot call to pick up the AAC recorder's current state
     }
 
 
