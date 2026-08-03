@@ -1286,6 +1286,76 @@ function customTaskListenButtonClicked(form)
 }
 
 
+function recordingListenButtonClicked(form)
+{
+  var selected = form.querySelector('input[name="selected_file"]:checked');
+  if (!selected)
+  {
+    alert("Select a recording first.");
+    return;
+  }
+
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  // request to HTTP server to start the PCMFilePlayer pipeline
+  var getUrl = window.location;
+  var baseUrl = getUrl .protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "recordingslistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        // response received ok
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.send(jsonData);
+
+  // handle the audio tag with the new source
+  window.top.postMessage("startaudio", "*");
+
+  //console.log("postMessage startaudio");
+}
+
+
+// Client-side filter/sort for the Recordings page table (js only — no round
+// trip to the server while typing). Rows carry data-name (lowercased) and
+// data-date (epoch seconds) attributes rendered by recordingsListHTML().
+function filterRecordingsTable()
+{
+  var filterInput = document.getElementById("recordings_filter");
+  if (!filterInput) { return; }
+  var query = filterInput.value.trim().toLowerCase();
+  var rows = document.querySelectorAll("#recordingsTableBody tr.recording-row");
+  rows.forEach(function(row) {
+    var name = row.getAttribute("data-name") || "";
+    row.style.display = (query === "" || name.indexOf(query) !== -1) ? "" : "none";
+  });
+}
+
+
+function sortRecordingsTable()
+{
+  var sortSelect = document.getElementById("recordings_sort");
+  var tbody = document.getElementById("recordingsTableBody");
+  if (!sortSelect || !tbody) { return; }
+  var mode = sortSelect.value;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr.recording-row"));
+  rows.sort(function(a, b) {
+    if (mode === "date")
+    {
+      return parseFloat(b.getAttribute("data-date")) - parseFloat(a.getAttribute("data-date"));
+    }
+    var nameA = a.getAttribute("data-name") || "";
+    var nameB = b.getAttribute("data-name") || "";
+    return nameA.localeCompare(nameB);
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+
 function controlBoothListenButtonClicked(form)
 {
   var formArray = $(form).serializeArray();

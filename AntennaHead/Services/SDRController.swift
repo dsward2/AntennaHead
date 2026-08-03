@@ -25,6 +25,7 @@ final class SDRController {
         case scan
         case device
         case customTask
+        case recording
     }
 
     enum SDRError: Error, CustomStringConvertible {
@@ -33,6 +34,7 @@ final class SDRController {
         case categoryHasNoFrequencies(Int64)
         case customTaskNotFound(Int64)
         case customTaskHasNoStages(Int64)
+        case recordingNotFound(String)
         case notImplemented(String)
 
         var description: String {
@@ -42,6 +44,7 @@ final class SDRController {
             case .categoryHasNoFrequencies(let id): return "Category \(id) has no frequencies to scan."
             case .customTaskNotFound(let id): return "No custom task record found for id \(id)."
             case .customTaskHasNoStages(let id): return "Custom task \(id) has no tasks defined."
+            case .recordingNotFound(let name): return "Recording '\(name)' was not found in the shared Recordings folder."
             case .notImplemented(let what): return "\(what) is not yet implemented."
             }
         }
@@ -256,6 +259,79 @@ final class SDRController {
         // waitForPort5000: custom tasks may include shairport-sync (port 5000),
         // which conflicts if the AirPlay receiver hasn't fully released it yet.
         launchCurrentPipeline(dying: dying, waitForPort5000: true)
+    }
+
+    /// Listen to a recorded audio file from the shared App Group Recordings
+    /// folder (see `SharedRecordingFolder`) via the `PCMFilePlayer` helper.
+    /// That helper decodes straight to the 48 kHz / 2 ch LiveAudioServer
+    /// contract, so — like the ControlBooth/AirPlay bridges — no sox resample
+    /// stage is needed here.
+    ///
+    /// `fileName` must be a bare filename (no path separators): it's resolved
+    /// against the Recordings folder here rather than trusting a path the web
+    /// UI sent, so a tampered request can't reach outside that folder.
+    func startTasksForRecording(fileName: String, repeatAudio: Bool) throws {
+        guard !fileName.isEmpty, !fileName.contains("/") else {
+            throw SDRError.recordingNotFound(fileName)
+        }
+        guard let folder = SharedRecordingFolder.url else {
+            throw SDRError.notImplemented("The shared Recordings folder")
+        }
+        let fileURL = folder.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw SDRError.recordingNotFound(fileName)
+        }
+
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        radioTaskPipelineManager.terminate()
+
+        taskMode = .recording
+        activeFrequencyID = nil
+        publishRecordingStatus(fileName: fileName, repeatAudio: repeatAudio)
+
+        guard let player = makeFilePlayerTaskItem(fileURL: fileURL, repeatAudio: repeatAudio),
+              let udpSender = makeUDPSenderTaskItem() else {
+            taskMode = .stopped
+            return
+        }
+        radioTaskPipelineManager.add(player)
+        radioTaskPipelineManager.add(udpSender)
+
+        launchCurrentPipeline(dying: dying)
+    }
+
+    private func makeFilePlayerTaskItem(fileURL: URL, repeatAudio: Bool) -> TaskItem? {
+        let path = helperPath("PCMFilePlayer")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("PCMFilePlayer helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "PCMFilePlayer helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMFilePlayer")
+        item.addArgument("--file"); item.addArgument(fileURL.path)
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        if repeatAudio {
+            item.addArgument("--repeat")
+            item.addArgument("--gap"); item.addArgument(2)
+        }
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    private func publishRecordingStatus(fileName: String, repeatAudio: Bool) {
+        statusFunction = "Playing Recording" + (repeatAudio ? " (repeating)" : "")
+        stationName = fileName
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
     }
 
     private struct CustomTaskStage {

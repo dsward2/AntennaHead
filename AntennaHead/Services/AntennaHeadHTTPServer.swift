@@ -454,6 +454,18 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "tuner_advanced.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["TUNER_FORM": newFrequencyFormHTML()])
 
+        case "/recordings.html":
+            return renderHTML(relativePath: "recordings.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["RECORDINGS_LIST": recordingsListHTML()])
+
+        case "/recordingslistenbuttonclicked.html":
+            let fields = formFields(fromBody: request.body)
+            if let fileName = fields["selected_file"], !fileName.isEmpty {
+                try? sdrController?.startTasksForRecording(fileName: fileName,
+                                                            repeatAudio: fields["repeat_flag"] == "1")
+            }
+            return okResponse()
+
         case "/devices.html":
             return renderHTML(relativePath: "devices.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["DEVICES_FORM": devicesFormHTML(),
@@ -904,6 +916,68 @@ final class AntennaHeadHTTPServer {
         for bps in Self.outputBitrateOptions {
             s += "<option value='\(bps)'\(bps == current ? " selected" : "")>\(bps / 1000) kbps</option>"
         }
+        return s
+    }
+
+    // MARK: Recordings page (browse + play files from the shared Recordings folder)
+
+    /// Audio file extensions listed on the Recordings page — everything
+    /// AntennaHead's own AAC recorder and ControlBooth's LiveAudioRecorder
+    /// helper can produce, plus the common formats `PCMFilePlayer` (backed by
+    /// `AVAudioFile`) can decode.
+    private static let recordingsFileExtensions: Set<String> = ["aac", "mp3", "m4a", "wav", "caf"]
+
+    /// `%%RECORDINGS_LIST%%` — filter/sort controls, the file table, a Repeat
+    /// checkbox, and the Listen button. Sorting/filtering happens client-side
+    /// (`js/antennahead.js`) against the `data-name`/`data-date` attributes
+    /// rendered on each row, so no round trip is needed while typing.
+    @MainActor private func recordingsListHTML() -> String {
+        guard let folder = SharedRecordingFolder.url else {
+            return "<p>AntennaHead's shared Recordings folder isn't available — check its App Group entitlement.</p>"
+        }
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])) ?? [])
+            .filter { Self.recordingsFileExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+
+        var rows = ""
+        for (index, url) in entries.enumerated() {
+            let name = url.lastPathComponent
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let rowID = "rec-\(index)"
+            rows += "<tr class='recording-row' data-name='\(htmlAttribute(name.lowercased()))' data-date='\(modified.timeIntervalSince1970)'>"
+            rows += "<td><input type='radio' name='selected_file' id='\(rowID)' value='\(htmlAttribute(name))'></td>"
+            rows += "<td><label for='\(rowID)'>\(htmlText(name))</label></td>"
+            rows += "<td>\(htmlText(df.string(from: modified)))</td>"
+            rows += "</tr>"
+        }
+        if rows.isEmpty {
+            rows = "<tr><td colspan='3'>No recordings found.</td></tr>"
+        }
+
+        var s = "<form class='recordings_form' id='recordingsForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label for='recordings_filter'>Filter:</label>"
+        s += "<input class='twelve columns value-prop' type='text' \(Self.verbatimInputAttributes) id='recordings_filter' "
+        s += "oninput='filterRecordingsTable();' placeholder='Filter by name…' title='Narrows the list below to names containing this text.'>"
+        s += "<label for='recordings_sort'>Sort By:</label>"
+        s += "<select id='recordings_sort' class='twelve columns value-prop' onchange='sortRecordingsTable();' title='Choose how the list below is ordered.'>"
+        s += "<option value='name'>Name</option>"
+        s += "<option value='date'>Date (Newest First)</option>"
+        s += "</select>"
+        s += "<table class='u-full-width' id='recordingsTable'>"
+        s += "<thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>"
+        s += "<tbody id='recordingsTableBody'>\(rows)</tbody>"
+        s += "</table>"
+        s += "<label for='recordings_repeat' title='Loop the selected file continuously until you play something else.'>"
+        s += "<input type='checkbox' id='recordings_repeat' name='repeat_flag' value='1'> Repeat continuously</label>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"recordingListenButtonClicked(getElementById('recordingsForm'));\" "
+        s += "title='Listen to the selected recording.'>"
+        s += "</form><br>&nbsp;<br>"
         return s
     }
 
@@ -1823,6 +1897,7 @@ final class AntennaHeadHTTPServer {
                 col(loadSVG(named: "favorites"),   onclick: "favorites.html",  title: "Click the Favorites button to listen to your favorite stations.",                                                                    label: "Favorites",   description: "Listen to your favorite frequencies."),
                 col(loadSVG(named: "categories"),  onclick: "categories.html", title: "Click the Categories button to organize your favorite stations by category, and for high-speed scanning of multiple frequencies.",   label: "Categories",  description: "Organize and scan frequencies."),
                 col(loadSVG(named: "tuner"),       onclick: "tuner.html",      title: "Click the Tuner button to enter the frequency for a new station, and save it as a Favorite station.",                                label: "Tuner",       description: "Enter a new frequency and listen."),
+                col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
                 col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Use audio input devices or custom tasks."),
             ]
             if webConfig.controlBoothEnabled {
