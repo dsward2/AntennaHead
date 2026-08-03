@@ -700,12 +700,14 @@ html {
     .ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
 }
 
-/* AAC recorder toggle, shown next to the <audio> element in the bottom bar. */
+/* AAC recorder toggle, shown next to the <audio> element in the bottom bar.
+   flex-shrink:0 keeps it from being squeezed out when the row is tight (see
+   #audiodiv in index.html, which lets the <audio> element shrink instead). */
 .aac-recorder-toggle {
     display: inline-flex;
     align-items: center;
     vertical-align: middle;
-    margin-right: 8px;
+    flex: 0 0 auto;
 }
 .rec-btn {
     border: none;

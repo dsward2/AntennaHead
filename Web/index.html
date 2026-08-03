@@ -98,15 +98,37 @@
         border: 1px;
         overflow: hidden;
         background-color: lightgray;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 8px;
     }
 
+    /* A flex row (not the old absolute-center trick) so the record toggle and
+       the <audio> element are true siblings that share the available width —
+       previously #audiodiv shrink-wrapped its content with no width limit, so
+       on iOS (whose native <audio controls> renders much wider than desktop's)
+       the centered box overflowed past the screen edges and #audioplayer's
+       overflow:hidden clipped off the toggle button on the left. flex-shrink:0
+       on the toggle (below) keeps it always visible; the <audio> element
+       shrinks instead, and nowrap (the flex default) keeps them on one line. */
     div#audiodiv {
         margin: 0;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
         overflow: hidden;
+    }
+
+    div#audiodiv > audio {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%;
     }
   
   </style>
