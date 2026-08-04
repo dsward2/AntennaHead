@@ -1993,7 +1993,7 @@ final class AntennaHeadHTTPServer {
     nonisolated private func aacRecorderToggleHTML() -> String {
         """
         <span id="aac-recorder-toggle" class="aac-recorder-toggle">
-          <button type="button" id="aac-rec-btn" class="rec-btn" onclick="aacRecorderToggle();" title="Record the AAC stream to a file">⏺</button>
+          <button type="button" id="aac-rec-btn" class="rec-btn" onclick="aacRecorderToggle();" title="Click to start/stop audio recording">⏺</button>
           <span id="aac-rec-time" class="rec-time" style="display:none">00:00</span>
         </span>
         """

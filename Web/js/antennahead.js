@@ -1701,7 +1701,7 @@ function applyAACRecorderStatus(status)
     if (status && status.recording)
     {
         btn.classList.add("recording");
-        btn.title = "Stop AAC recording";
+        btn.title = "Click to start/stop audio recording";
         aacRecorderStartedAt = status.startedAt ? new Date(status.startedAt) : new Date();
         timeEl.style.display = "";
         if (!aacRecorderTickIntervalID)
@@ -1713,7 +1713,7 @@ function applyAACRecorderStatus(status)
     else
     {
         btn.classList.remove("recording");
-        btn.title = "Record the AAC stream to a file";
+        btn.title = "Click to start/stop audio recording";
         timeEl.style.display = "none";
         timeEl.textContent = "00:00";
         aacRecorderStartedAt = null;
