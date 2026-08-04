@@ -17,12 +17,23 @@ All dependencies are resolved by Swift Package Manager when the project is opene
 | [GRDB](https://github.com/groue/GRDB.swift) | SQLite database (frequencies, categories, settings) |
 | [LiveAudioServer](https://github.com/dsward2/LiveAudioServer) | Embedded streaming server (AAC/HLS over HTTP/HTTPS) |
 | [PipelineHelpers](https://github.com/dsward2/PipelineHelpers) | Pipeline runner shared with ControlBooth |
+| [SharedLogging](https://github.com/dsward2/SharedLogging) | Shared log store + viewer window shared with ControlBooth |
+| [AirPlayReceiver](https://github.com/dsward2/AirPlayReceiver) | AirPlay 1 (RAOP) audio receiver shared with ControlBooth |
 | [librtlsdr](https://github.com/dsward2/librtlsdr) | RTL-SDR driver (XCFramework) |
 | [swift-certificates](https://github.com/apple/swift-certificates) | TLS certificate generation |
 | [swift-asn1](https://github.com/apple/swift-asn1) | ASN.1 / DER encoding (for PKCS#12 export) |
 | [swift-crypto](https://github.com/apple/swift-crypto) | P-256 key generation for self-signed TLS certs |
 
 The LiveAudioServer helper binary is also **vendored** at `AntennaHead/LiveAudioServer` for use as a subprocess; refresh it manually when updating the LAS package.
+
+**LiveAudioServer, PipelineHelpers, SharedLogging, and AirPlayReceiver are
+local Swift packages**, referenced by relative path (`../LiveAudioServer`,
+`../PipelineHelpers`, `../SharedLogging`, `../AirPlayReceiver`) rather than by
+URL — Xcode can only resolve them if this repo is checked out with those four
+as sibling directories. The [antennahead-workspace](https://github.com/dsward2/antennahead-workspace)
+umbrella project's `bootstrap.sh` sets up exactly that layout; use it instead
+of cloning this repo standalone if you plan to build from source rather than
+just consuming released binaries.
 
 ## Build
 
