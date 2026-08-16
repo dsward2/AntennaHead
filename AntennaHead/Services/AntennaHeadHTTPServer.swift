@@ -743,6 +743,36 @@ final class AntennaHeadHTTPServer {
         case APIEndpoint.recorderStatus:
             return apiRecorderStatusResponse()
 
+        case APIEndpoint.devices:
+            return apiDevicesResponse()
+
+        case APIEndpoint.startDevice:
+            return apiStartDeviceResponse(body: request.body)
+
+        case APIEndpoint.recordings:
+            return apiRecordingsResponse()
+
+        case APIEndpoint.controlBoothStatus:
+            return apiControlBoothStatusResponse()
+
+        case APIEndpoint.controlBoothLaunch:
+            return apiControlBoothLaunchResponse()
+
+        case APIEndpoint.controlBoothStart:
+            return apiControlBoothStartResponse(body: request.body)
+
+        case APIEndpoint.controlBoothStop:
+            return apiControlBoothStopResponse()
+
+        case APIEndpoint.airPlayStatus:
+            return apiAirPlayStatusResponse()
+
+        case APIEndpoint.airPlayListen:
+            return apiAirPlayListenResponse()
+
+        case APIEndpoint.airPlayStop:
+            return apiAirPlayStopResponse()
+
         default:
             return nil
         }
@@ -922,6 +952,109 @@ final class AntennaHeadHTTPServer {
         let status = AACRecorderStatus(isRecording: liveAudioServerProcessManager?.isRecording ?? false,
                                        startedAt: liveAudioServerProcessManager?.recordingStartedAt)
         return apiEncode(status)
+    }
+
+    /// The JSON-API equivalent of `devicesFormHTML()`'s picker.
+    @MainActor private func apiDevicesResponse() -> HTTPResponse {
+        let summaries = AudioInputDevices.names().map { DeviceSummary(name: $0) }
+        return apiEncode(summaries)
+    }
+
+    /// The JSON-API equivalent of `/devicelistenbuttonclicked.html`.
+    /// `startTasksForDevice` doesn't throw (there's no "device not found" case
+    /// — it's just a name handed to the capture pipeline), so this always
+    /// succeeds from the caller's perspective.
+    @MainActor private func apiStartDeviceResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartDeviceRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        sdrController?.startTasksForDevice(deviceName: req.deviceName, deviceAudioOutputFilter: req.audioOutputFilter)
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `recordingsListHTML()`'s file listing —
+    /// playback itself goes through the existing `/recordings-download/...`
+    /// route (see `RecordingSummary.downloadPath`'s doc comment), not a new
+    /// endpoint, since that route already gives Range-capable, seekable
+    /// playback with the AAC-duration-estimate fix already applied.
+    @MainActor private func apiRecordingsResponse() -> HTTPResponse {
+        guard let folder = SharedRecordingFolder.url else {
+            return apiEncode([RecordingSummary]())
+        }
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])) ?? [])
+            .filter { Self.recordingsFileExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let summaries = entries.map { url -> RecordingSummary in
+            let name = url.lastPathComponent
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+            return RecordingSummary(fileName: name, modifiedAt: modified,
+                                    downloadPath: Self.recordingsDownloadPrefix + encodedName)
+        }
+        return apiEncode(summaries)
+    }
+
+    /// The JSON-API equivalent of `controlBoothPageHTML()`'s status portion.
+    /// Pipeline names are only fetched when ControlBooth is actually running
+    /// — `ControlBoothClient.pipelines()` talks to ControlBooth over
+    /// AppleEvents, which has nothing to answer when it's not open.
+    @MainActor private func apiControlBoothStatusResponse() -> HTTPResponse {
+        let isRunning = ControlBoothClient.isControlBoothRunning
+        let pipelines = isRunning ? ((try? ControlBoothClient.pipelines()) ?? []) : []
+        return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines))
+    }
+
+    /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
+    /// fire-and-forget (`launchControlBooth()` doesn't wait for the app to
+    /// finish starting), so the returned status may still show `isRunning ==
+    /// false` right after this call — same as the web page, which relies on
+    /// its own "Refresh" button rather than blocking on launch.
+    @MainActor private func apiControlBoothLaunchResponse() -> HTTPResponse {
+        launchControlBooth()
+        return apiControlBoothStatusResponse()
+    }
+
+    /// The JSON-API equivalent of `/controlboothlistenbuttonclicked.html`:
+    /// stop whatever ControlBooth pipeline is already running, start
+    /// AntennaHead's receiver, then start the new pipeline — same ordering
+    /// as the HTML route, for the same reason (see that route's comment).
+    @MainActor private func apiControlBoothStartResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartControlBoothPipelineRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        try? ControlBoothClient.stopAllPipelines()
+        sdrController?.startControlBoothListening(name: req.pipelineName)
+        try? ControlBoothClient.startPipeline(named: req.pipelineName)
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/controlboothstop.html`.
+    @MainActor private func apiControlBoothStopResponse() -> HTTPResponse {
+        try? ControlBoothClient.stopAllPipelines()
+        sdrController?.terminateTasks()
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `airPlayPageHTML()`'s status portion.
+    @MainActor private func apiAirPlayStatusResponse() -> HTTPResponse {
+        let isRunning = airPlayReceiverProcessManager?.isRunning ?? false
+        let lastError = airPlayReceiverProcessManager?.lastError.map { "\($0)" }
+        return apiEncode(AirPlayReceiverStatus(isRunning: isRunning, lastError: lastError))
+    }
+
+    /// The JSON-API equivalent of `/airplaylistenbuttonclicked.html`.
+    @MainActor private func apiAirPlayListenResponse() -> HTTPResponse {
+        let deviceName = ((try? sqlite?.appSettingsValue(
+            forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
+        sdrController?.startAirPlayListening(deviceName: deviceName)
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/airplaystop.html`.
+    @MainActor private func apiAirPlayStopResponse() -> HTTPResponse {
+        sdrController?.terminateTasks()
+        return apiNowPlayingResponse()
     }
 
     /// Mirrors `controlBoothPageHTML()`: shows whether the AirPlay Receiver's

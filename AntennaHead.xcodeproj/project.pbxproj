@@ -49,9 +49,9 @@
 		0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; };
 		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
-		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */; };
 		A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
@@ -1057,10 +1057,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		5A22CB680E20F1B262A32A1A /* XCLocalSwiftPackageReference "../AntennaHeadAPI" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../AntennaHeadAPI;
-		};
 		0EA033AF3020488500F3BE37 /* XCLocalSwiftPackageReference "../AirPlayReceiver" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../AirPlayReceiver;
@@ -1072,6 +1068,10 @@
 		0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../PipelineHelpers;
+		};
+		5A22CB680E20F1B262A32A1A /* XCLocalSwiftPackageReference "../AntennaHeadAPI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../AntennaHeadAPI;
 		};
 		F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */ = {
 			isa = XCLocalSwiftPackageReference;
