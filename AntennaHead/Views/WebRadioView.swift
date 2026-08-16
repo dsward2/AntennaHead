@@ -12,6 +12,12 @@ struct WebRadioView: NSViewRepresentable {
     /// `WebRadioView` reloads its page (port of LocalRadio's `reloadWebView:`).
     static let reloadNotification = Notification.Name("WebRadioView.reload")
 
+    /// Posted by the Status tab's "Stop Pipeline" button; every live
+    /// `WebRadioView` pauses its `<audio id="audio_element">` element, if it
+    /// has one. A no-op on pages without that element (LiveAudioServer's own
+    /// status page uses plain, id-less preview `<audio>` tags).
+    static let stopAudioNotification = Notification.Name("WebRadioView.stopAudio")
+
     func makeCoordinator() -> Coordinator {
         Coordinator(credentials: credentials)
     }
@@ -151,6 +157,8 @@ struct WebRadioView: NSViewRepresentable {
             self.webView = webView
             NotificationCenter.default.addObserver(self, selector: #selector(reloadWebView),
                                                    name: WebRadioView.reloadNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(pauseAudioElement),
+                                                   name: WebRadioView.stopAudioNotification, object: nil)
         }
 
         @objc private func reloadWebView() {
@@ -160,6 +168,11 @@ struct WebRadioView: NSViewRepresentable {
             } else {
                 webView.reload()
             }
+        }
+
+        @objc private func pauseAudioElement() {
+            webView?.evaluateJavaScript(
+                "(function(){ var a = document.getElementById('audio_element'); if (a) { a.pause(); } })();")
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

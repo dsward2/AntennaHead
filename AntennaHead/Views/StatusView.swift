@@ -11,8 +11,30 @@ struct StatusView: View {
     var lasProcess: LiveAudioServerProcessManager
 
     var body: some View {
-        StatusWebView(snapshot: snapshot)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Stop Pipeline", systemImage: "stop.fill") {
+                    stopPipeline()
+                }
+                .disabled(sdrController.taskMode == .stopped)
+                .help("Halt and tear down the tuning pipeline, and stop audio playback.")
+            }
+            .padding([.top, .horizontal], 10)
+
+            StatusWebView(snapshot: snapshot)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Halts and tears down the SDR pipeline (rtl_fm/sox/etc. — mirrors
+    /// `NowPlayingView`'s Stop button), then pauses the `<audio>` element in
+    /// every live `WebRadioView` so playback actually stops, not just the
+    /// upstream source (LiveAudioServer keeps streaming filler audio after
+    /// the pipeline tears down, so the player would otherwise play on).
+    private func stopPipeline() {
+        sdrController.terminateTasks()
+        NotificationCenter.default.post(name: WebRadioView.stopAudioNotification, object: nil)
     }
 
     /// Builds the snapshot from current controller state. Reading the observable
