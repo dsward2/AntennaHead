@@ -140,6 +140,14 @@
 
     var nowPlayingTitle = "";
 
+    // Fast-download recording playback (see recordingDownloadButtonClicked()
+    // in antennahead.js). liveStreamAudioSrc is the <audio> element's
+    // server-rendered src — the live HLS mount — captured once at load so it
+    // can be restored after a fast-download plays. audioElementInDownloadMode
+    // tracks which one the element is currently pointed at.
+    var liveStreamAudioSrc = null;
+    var audioElementInDownloadMode = false;
+
     function audioElementLog(audioElement, message)
     {
         var audioSrc = audioElement.src;
@@ -160,12 +168,21 @@
     function audioPlayerPaused(audioPlayer)
     {
       audioElementLog(audioPlayer, "audioPlayerPaused");
-      
+
       audioPlayer.autoplay=false;
-      
+
       //seekToEndForAudioElement(audioPlayer);
-     
-      emptyBufferDataForAudioPlayer(audioPlayer);
+
+      // emptyBufferDataForAudioPlayer() is a live-stream-only recovery hack
+      // (forces a fresh HLS connection on resume instead of playing stale
+      // buffered live audio) — it swaps in an empty blob, then restores the
+      // real src *without* reloading it, which just leaves a fast-download
+      // recording's <audio> element blank. Native seeking on the scrubber
+      // fires a transient pause, so this must not run in download mode.
+      if (audioElementInDownloadMode == false)
+      {
+        emptyBufferDataForAudioPlayer(audioPlayer);
+      }
 
       //audioPlayer.autoplay=true;
 
@@ -298,6 +315,17 @@
     {
         audioElementLog(audioPlayer, "audioPlayerStalled");
 
+        // Same live-stream-only reconnect hack as emptyBufferDataForAudioPlayer()
+        // (see audioPlayerPaused()): reloading forces a fresh connection at the
+        // live edge, which is right for the live HLS stream but wrong for a
+        // fast-download recording -- .load() resets currentTime to 0, so every
+        // transient network stall on a long download was kicking playback back
+        // to the beginning instead of just letting buffering catch up.
+        if (audioElementInDownloadMode == true)
+        {
+            return;
+        }
+
         var audioPlayer = document.getElementById("audio_element");
         if (audioPlayer !== null)
         {
@@ -332,13 +360,26 @@
     function startAudioPlayer()
     {
         console.log("startAudioPlayer");
-        
+
         //var nowPlayingNavBarLink = window.document.getElementById("nowPlayingNavBarLink");
         //setTimeout(function() { nowPlayingNavBarLink.innerText = "NOW PLAYING: " + nowPlayingTitle.innerText; }, 1000);
 
         var needsAudioPlayerStart = true;
 
         var audioPlayer = document.getElementById("audio_element");
+
+        if (audioElementInDownloadMode == true && audioPlayer !== null && liveStreamAudioSrc !== null)
+        {
+            // Coming back from fast-download playback (recordingDownloadButtonClicked())
+            // to a live-stream action (Listen, Tuner, Devices, AirPlay, ...) —
+            // point the element back at the live HLS mount before doing anything else.
+            audioElementLog(audioPlayer, "startAudioPlayer: restoring live stream src from download mode");
+            audioPlayer.loop = false;
+            audioPlayer.src = liveStreamAudioSrc;
+            audioPlayer.load();
+            audioElementInDownloadMode = false;
+        }
+
         if (audioPlayer !== null)
         {
             if (audioPlayer.paused == false)
@@ -351,6 +392,51 @@
         {
             //setTimeout(function() { startAudioPlayerAfterDelay(); }, 1000);  // iOS rejects delayed audio play
             startAudioPlayerAfterDelay();
+        }
+    }
+
+
+
+    function startDownloadAudioPlayer(url, loop)
+    {
+        console.log("startDownloadAudioPlayer " + url + " loop=" + loop);
+
+        var audioPlayer = document.getElementById("audio_element");
+        if (audioPlayer === null)
+        {
+            return;
+        }
+
+        audioElementInDownloadMode = true;
+
+        audioPlayer.loop = loop;
+        audioPlayer.autoplay = true;
+        audioPlayer.src = url;
+        audioPlayer.load();
+        audioPlayer.play();
+    }
+
+
+
+    // Dispatches postMessage() traffic used to (re)start the <audio> element:
+    // the plain "startaudio" string (Listen/Tuner/Devices/AirPlay — see
+    // startAudioPlayer()) or "startdownloadaudio:<0|1>:<encoded url>" for
+    // fast-download recording playback (see recordingDownloadButtonClicked()
+    // in antennahead.js and startDownloadAudioPlayer() above).
+    function handleAudioPlayerMessage(event)
+    {
+        var data = event.data;
+        if (typeof data === "string" && data.indexOf("startdownloadaudio:") === 0)
+        {
+            var rest = data.substring("startdownloadaudio:".length);
+            var sep = rest.indexOf(":");
+            var loopFlag = rest.substring(0, sep) === "1";
+            var url = decodeURIComponent(rest.substring(sep + 1));
+            startDownloadAudioPlayer(url, loopFlag);
+        }
+        else
+        {
+            startAudioPlayer();
         }
     }
 
@@ -470,10 +556,19 @@
     function bodyElementLoaded(event)
     {
         console.log("bodyElementLoaded");
-        
+
+        // Capture the server-rendered live HLS src before anything can
+        // overwrite it, so fast-download playback can restore it later
+        // (see startAudioPlayer()/startDownloadAudioPlayer()).
+        var audioPlayer = document.getElementById("audio_element");
+        if (audioPlayer !== null)
+        {
+            liveStreamAudioSrc = audioPlayer.src;
+        }
+
         loadContent("index2.html");
 
-        window.addEventListener("message", function(){startAudioPlayer();}, false); // receive "startaudio" via postMessage()
+        window.addEventListener("message", function(event){handleAudioPlayerMessage(event);}, false); // receive "startaudio"/"startdownloadaudio:..." via postMessage()
 
         setTimeout(function(){periodicUpdate();}, 1000);      // a one-shot call to periodicUpdate() for "Now Playing"
         setTimeout(function(){aacRecorderPoll();}, 1000);      // a one-shot call to pick up the AAC recorder's current state

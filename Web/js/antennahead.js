@@ -1320,6 +1320,57 @@ function recordingListenButtonClicked(form)
 }
 
 
+// Formats the browser's own <audio> element can decode directly. Matches
+// AntennaHeadHTTPServer.recordingsFileExtensions minus "caf" (Core Audio
+// Format isn't supported by any browser's <audio> element — Listen works
+// around that by having PCMFilePlayer decode server-side before it ever
+// reaches the browser, but the fast-download route below serves the raw
+// file, so the browser has to decode it itself).
+var recordingsBrowserPlayableExtensions = ["aac", "mp3", "m4a", "wav"];
+
+
+// "Download & Play": points the persistent <audio> element straight at the
+// file via the fast-download route (recordings-download/<name>, Range-
+// enabled — see recordingDownloadResponse() server-side) instead of routing
+// it through the live PCMFilePlayer/HLS pipeline the way Listen does. That
+// gives the browser's native seek bar something it can actually scrub
+// (HLS's live playlist has no seekable timeline), at the cost of there being
+// no live stream left to fall back to once the file finishes playing.
+function recordingDownloadButtonClicked(form)
+{
+  var selected = form.querySelector('input[name="selected_file"]:checked');
+  if (!selected)
+  {
+    alert("Select a recording first.");
+    return;
+  }
+
+  var fileName = selected.value;
+  var ext = fileName.split('.').pop().toLowerCase();
+  if (recordingsBrowserPlayableExtensions.indexOf(ext) === -1)
+  {
+    alert("The \"" + fileName + "\" recording is a ." + ext + " file, which browsers can't play directly. Use Listen instead, or choose a .aac/.mp3/.m4a/.wav recording.");
+    return;
+  }
+
+  var repeatCheckbox = form.querySelector('#recordings_repeat');
+  var repeatFlag = !!(repeatCheckbox && repeatCheckbox.checked);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var downloadUrl = baseUrl + "recordings-download/" + encodeURIComponent(fileName);
+
+  window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+
+  // Tell the top frame's persistent <audio> element to switch into
+  // fast-download mode. See handleAudioPlayerMessage()/startDownloadAudioPlayer()
+  // in index.html for the receiving end of this message.
+  window.top.postMessage("startdownloadaudio:" + (repeatFlag ? "1" : "0") + ":" + encodeURIComponent(downloadUrl), "*");
+
+  //console.log("postMessage startdownloadaudio");
+}
+
+
 // Client-side filter/sort for the Recordings page table (js only — no round
 // trip to the server while typing). Rows carry data-name (lowercased) and
 // data-date (epoch seconds) attributes rendered by recordingsListHTML().

@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreMedia
 import Foundation
 import Network
 import PipelineRunner
@@ -365,6 +367,9 @@ final class AntennaHeadHTTPServer {
         }
         if path == webConfig.hlsMount || path.hasPrefix(webConfig.hlsSegmentPrefix) {
             return await proxyToLiveAudioServer(path: path, auth: auth, webConfig: webConfig)
+        }
+        if path.hasPrefix(Self.recordingsDownloadPrefix) {
+            return recordingDownloadResponse(path: path, request: request)
         }
         // Pages that read the DB or drive SDRController run on the MainActor.
         if let appResponse = await appStateResponse(path: path, request: request, host: host, isSecure: isSecure, webConfig: webConfig) {
@@ -927,6 +932,25 @@ final class AntennaHeadHTTPServer {
     /// `AVAudioFile`) can decode.
     private static let recordingsFileExtensions: Set<String> = ["aac", "mp3", "m4a", "wav", "caf"]
 
+    /// Route prefix for the fast-download playback route (see
+    /// `recordingDownloadResponse`) — the bare filename is appended,
+    /// percent-encoded, e.g. `/recordings-download/AntennaHead-2026...aac`.
+    private static let recordingsDownloadPrefix = "/recordings-download/"
+
+    /// Where `remuxedM4A(forRecordingAt:)` caches its output. Lives in this
+    /// (sandboxed) app's own Caches directory rather than the shared App
+    /// Group Recordings folder — it's a derived playback convenience, not a
+    /// recording itself, so ControlBooth and other App Group readers of that
+    /// folder shouldn't see it. `nil` only if Caches itself is unavailable.
+    nonisolated private static var recordingsDownloadCacheFolder: URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let folder = caches.appendingPathComponent("RecordingsDownloadCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
     /// `%%RECORDINGS_LIST%%` — filter/sort controls, the file table, a Repeat
     /// checkbox, and the Listen button. Sorting/filtering happens client-side
     /// (`js/antennahead.js`) against the `data-name`/`data-date` attributes
@@ -976,7 +1000,10 @@ final class AntennaHeadHTTPServer {
         s += "<input type='checkbox' id='recordings_repeat' name='repeat_flag' value='1'> Repeat continuously</label>"
         s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
         s += "onclick=\"recordingListenButtonClicked(getElementById('recordingsForm'));\" "
-        s += "title='Listen to the selected recording.'>"
+        s += "title='Stream the selected recording through the live audio pipeline. No seeking, but you can switch away and back at any time.'>"
+        s += "<br><input class='twelve columns button' type='button' value='Download &amp; Play' "
+        s += "onclick=\"recordingDownloadButtonClicked(getElementById('recordingsForm'));\" "
+        s += "title='Download the selected recording and play it directly, so you can drag the seek bar to any point. Playback just stops at the end of the file — unlike Listen, there is no live stream to fall back to. Not available for .caf files.'>"
         s += "</form><br>&nbsp;<br>"
         return s
     }
@@ -2047,6 +2074,236 @@ final class AntennaHeadHTTPServer {
                             body: data)
     }
 
+    /// Fast-download playback route (`/recordings-download/<filename>`): serves
+    /// a recording straight from the shared Recordings folder as a plain,
+    /// Range-capable file — unlike `Listen`, which feeds the file through
+    /// `PCMFilePlayer` into the live HLS stream (see `SDRController.
+    /// startTasksForRecording`). Pointing the `<audio>` element's `src`
+    /// directly at this route (see `recordingDownloadButtonClicked` in
+    /// antennahead.js) is what lets the browser's native seek bar work — HLS
+    /// live playlists don't expose a seekable timeline, but a Range-capable
+    /// static file does. `fileName` is resolved against the Recordings folder
+    /// only (no path separators allowed), same guard as
+    /// `SDRController.startTasksForRecording`, so a tampered request can't
+    /// reach outside that folder.
+    nonisolated private func recordingDownloadResponse(path: String, request: HTTPRequest) -> HTTPResponse {
+        let encodedName = String(path.dropFirst(Self.recordingsDownloadPrefix.count))
+        guard let fileName = encodedName.removingPercentEncoding,
+              !fileName.isEmpty, !fileName.contains("/") else {
+            return .notFound
+        }
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        guard Self.recordingsFileExtensions.contains(ext),
+              let folder = SharedRecordingFolder.url else {
+            return .notFound
+        }
+        let originalURL = folder.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: originalURL.path) else {
+            return .notFound
+        }
+
+        // Raw ADTS AAC (.aac) has no container-level duration field, so
+        // browsers estimate it by sampling the bitrate of the first few
+        // frames and extrapolating across the file's byte size. A recording
+        // that opens with LiveAudioServer's silence filler (a few seconds of
+        // dead air before a scheduled ControlBooth recording's tuner locks
+        // on) starts with abnormally tiny frames, which throws that estimate
+        // off by 20-30x -- a 60-minute recording reporting a ~26-hour
+        // duration, which then corrupts the <audio> element's seek bar and
+        // playback position bookkeeping. Serving a losslessly remuxed .m4a
+        // instead sidesteps the whole problem: MPEG-4 containers carry a
+        // real duration box, so no estimation is needed. Falls back to the
+        // raw file if remuxing fails for any reason.
+        var fileURL = originalURL
+        var servedExt = ext
+        if ext == "aac", let m4aURL = remuxedM4A(forRecordingAt: originalURL) {
+            fileURL = m4aURL
+            servedExt = "m4a"
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let total = attrs[.size] as? Int else {
+            return .notFound
+        }
+        let contentType = mimeType(forExtension: servedExt)
+
+        // No Range header (or an unparseable one): serve the whole file, same
+        // as staticFile(). This is the request the browser makes first, before
+        // it knows the resource is seekable.
+        guard let rangeHeader = request.headers["range"],
+              let (start, rawEnd) = Self.parseByteRange(rangeHeader), start >= 0 else {
+            guard let data = try? Data(contentsOf: fileURL) else { return .notFound }
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": contentType, "Accept-Ranges": "bytes"],
+                                body: data)
+        }
+        let end = min(rawEnd, total - 1)
+        guard total > 0, start < total, start <= end else {
+            return HTTPResponse(status: 416, reason: "Range Not Satisfiable",
+                                headers: ["Content-Range": "bytes */\(total)"],
+                                body: Data())
+        }
+        // Seeking sends many small ranged requests, so read only the
+        // requested slice rather than the whole file each time (unlike the
+        // no-Range branch above, where the whole file is wanted anyway).
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return .notFound }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: UInt64(start))
+            let slice = try handle.read(upToCount: end - start + 1) ?? Data()
+            return HTTPResponse(status: 206, reason: "Partial Content",
+                                headers: ["Content-Type": contentType, "Accept-Ranges": "bytes",
+                                          "Content-Range": "bytes \(start)-\(end)/\(total)"],
+                                body: slice)
+        } catch {
+            return .notFound
+        }
+    }
+
+    /// Returns a losslessly-remuxed `.m4a` copy of `fileURL` (a raw `.aac`
+    /// recording), cached in `recordingsDownloadCacheFolder` keyed by the
+    /// source's mtime+size so this only runs once per recording — subsequent
+    /// requests (including every ranged seek request during playback) just
+    /// reuse the cached file. `nil` if remuxing fails for any reason, in
+    /// which case `recordingDownloadResponse` falls back to serving the raw
+    /// `.aac` (the pre-existing behavior, with its duration-estimate quirk).
+    nonisolated private func remuxedM4A(forRecordingAt fileURL: URL) -> URL? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let size = attrs[.size] as? Int,
+              let mtime = attrs[.modificationDate] as? Date,
+              let cacheFolder = Self.recordingsDownloadCacheFolder else {
+            return nil
+        }
+        let stem = fileURL.deletingPathExtension().lastPathComponent
+        let cacheURL = cacheFolder.appendingPathComponent("\(stem)-\(Int(mtime.timeIntervalSince1970))-\(size).m4a")
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            return cacheURL
+        }
+
+        // Remux into a uniquely-named temp file first, then move into place —
+        // avoids two near-simultaneous Download & Play requests for the same
+        // uncached recording colliding on the same output path mid-write.
+        let tempURL = cacheFolder.appendingPathComponent(".\(stem)-\(UUID().uuidString).m4a.tmp")
+        guard remux(from: fileURL, to: tempURL) else {
+            try? FileManager.default.removeItem(at: tempURL)
+            return nil
+        }
+        if !FileManager.default.fileExists(atPath: cacheURL.path) {
+            try? FileManager.default.moveItem(at: tempURL, to: cacheURL)
+        }
+        try? FileManager.default.removeItem(at: tempURL) // no-op if the move above succeeded
+        return FileManager.default.fileExists(atPath: cacheURL.path) ? cacheURL : nil
+    }
+
+    /// Reads `sourceURL`'s single audio track via `AVAssetReader` and
+    /// rewrites it to `destinationURL` as an `.m4a` via `AVAssetWriter`,
+    /// passing the original compressed AAC samples through unchanged (`nil`
+    /// output settings = passthrough: repackaging, not decoding/re-encoding —
+    /// fast, and lossless). Blocks the calling thread for the duration
+    /// (there's no synchronous `AVAssetWriter.finishWriting`), consistent
+    /// with the rest of this server's fully-buffered, single-shot response
+    /// model — see `proxyToLiveAudioServer`'s doc comment for that constraint.
+    nonisolated private func remux(from sourceURL: URL, to destinationURL: URL) -> Bool {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let track = asset.tracks(withMediaType: .audio).first,
+              let reader = try? AVAssetReader(asset: asset),
+              let writer = try? AVAssetWriter(outputURL: destinationURL, fileType: .m4a) else {
+            return false
+        }
+
+        // Decode to LPCM and re-encode to AAC, rather than passing the raw
+        // ADTS samples through unchanged: passthrough (nil output settings)
+        // reliably failed to mux this app's ADTS AAC into an MP4 container
+        // (AVAssetWriterInput.append() erroring a couple of samples in, right
+        // where LiveAudioServer's tiny silence-filler frames are) — most
+        // likely because a bare ADTS format description doesn't carry what
+        // MP4 muxing needs to build a proper `esds`/AudioSpecificConfig box.
+        // Decode+re-encode sidesteps that: the writer builds its own
+        // well-formed AAC configuration from scratch. The extra CPU cost is
+        // one-time and cached (see remuxedM4A) and still much faster than
+        // realtime on any Mac this app runs on.
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM])
+        guard reader.canAdd(output) else { return false }
+        reader.add(output)
+
+        guard let formatDescription = (track.formatDescriptions as? [CMFormatDescription])?.first else {
+            return false
+        }
+        let sourceFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let encodeSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sourceFormat.sampleRate,
+            AVNumberOfChannelsKey: sourceFormat.channelCount,
+            AVEncoderBitRateKey: 128_000,
+        ]
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: encodeSettings)
+        input.expectsMediaDataInRealTime = false
+        guard writer.canAdd(input) else { return false }
+        writer.add(input)
+
+        guard reader.startReading() else {
+            let message = "Remux to M4A: AVAssetReader.startReading failed for \(sourceURL.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown error")"
+            Task { @MainActor in LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", message) }
+            return false
+        }
+        guard writer.startWriting() else {
+            let message = "Remux to M4A: AVAssetWriter.startWriting failed for \(sourceURL.lastPathComponent): \(writer.error?.localizedDescription ?? "unknown error")"
+            Task { @MainActor in LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", message) }
+            return false
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        var appendedCount = 0
+        while let sampleBuffer = output.copyNextSampleBuffer() {
+            while !input.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+            if !input.append(sampleBuffer) {
+                let message = "Remux to M4A: append failed after \(appendedCount) samples for \(sourceURL.lastPathComponent): writerStatus=\(writer.status.rawValue) \(writer.error?.localizedDescription ?? "no error set")"
+                Task { @MainActor in LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", message) }
+                break
+            }
+            appendedCount += 1
+        }
+        input.markAsFinished()
+
+        guard reader.status == .completed else {
+            let message = "Remux to M4A: reader ended in status=\(reader.status.rawValue) after \(appendedCount) samples for \(sourceURL.lastPathComponent): \(reader.error?.localizedDescription ?? "no error set")"
+            Task { @MainActor in LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", message) }
+            writer.cancelWriting()
+            return false
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        writer.finishWriting { semaphore.signal() }
+        semaphore.wait()
+
+        if writer.status != .completed {
+            let nsError = writer.error as NSError?
+            let message = "Remux to M4A failed for \(sourceURL.lastPathComponent): status=\(writer.status.rawValue) " +
+                "domain=\(nsError?.domain ?? "?") code=\(nsError?.code ?? 0) " +
+                "desc=\(nsError?.localizedDescription ?? "?") underlying=\(String(describing: nsError?.userInfo[NSUnderlyingErrorKey]))"
+            Task { @MainActor in LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", message) }
+        }
+        return writer.status == .completed
+    }
+
+    /// Parses a single-range `Range: bytes=start-end` header (the only form
+    /// browsers send for `<audio>` seeking) into a raw `(start, end)` pair —
+    /// `end` is `Int.max` when omitted (`bytes=1000-` means "to EOF"), left
+    /// for the caller to clamp against the file size and turn into a 416 if
+    /// unsatisfiable. `nil` for anything malformed or multi-range, which
+    /// callers treat as "serve the whole file" — the safe fallback.
+    nonisolated private static func parseByteRange(_ header: String) -> (Int, Int)? {
+        guard header.hasPrefix("bytes=") else { return nil }
+        let spec = header.dropFirst("bytes=".count)
+        guard !spec.contains(",") else { return nil } // multi-range: not supported, fall back to whole file
+        let parts = spec.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, let start = Int(parts[0]) else { return nil }
+        let end = parts[1].isEmpty ? Int.max : (Int(parts[1]) ?? Int.max)
+        return (start, end)
+    }
+
     nonisolated private func mimeType(forExtension ext: String) -> String {
         switch ext {
         case "html", "htm": return "text/html; charset=utf-8"
@@ -2065,6 +2322,9 @@ final class AntennaHeadHTTPServer {
         case "eot": return "application/vnd.ms-fontobject"
         case "mp3": return "audio/mpeg"
         case "wav": return "audio/wav"
+        case "aac": return "audio/aac"
+        case "m4a": return "audio/mp4"
+        case "caf": return "audio/x-caf" // not browser-playable; recordingDownloadButtonClicked() excludes it
         default: return "application/octet-stream"
         }
     }
