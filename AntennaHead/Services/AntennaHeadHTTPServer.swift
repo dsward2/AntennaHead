@@ -1,4 +1,5 @@
 import AppKit
+import AntennaHeadAPI
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -718,6 +719,30 @@ final class AntennaHeadHTTPServer {
             }
             return aacRecorderStatusResponse()
 
+        // MARK: JSON API v1 (AntennaHeadAPI) — see that package's README for
+        // why these are separate types from the *.html fragment routes'
+        // dictionaries above, not just this switch's JSON-shaped siblings.
+        case APIEndpoint.categories:
+            return apiCategoriesResponse()
+
+        case APIEndpoint.favorites:
+            return apiFavoritesResponse()
+
+        case APIEndpoint.nowPlaying:
+            return apiNowPlayingResponse()
+
+        case APIEndpoint.tune:
+            return apiTuneResponse(body: request.body)
+
+        case APIEndpoint.startScan:
+            return apiStartScanResponse(body: request.body)
+
+        case APIEndpoint.stop:
+            return apiStopResponse()
+
+        case APIEndpoint.recorderStatus:
+            return apiRecorderStatusResponse()
+
         default:
             return nil
         }
@@ -765,6 +790,138 @@ final class AntennaHeadHTTPServer {
                             reason: HTTPURLResponse.localizedString(forStatusCode: status).capitalized,
                             headers: ["Content-Type": "application/json"],
                             body: body)
+    }
+
+    // MARK: JSON API v1 (AntennaHeadAPI)
+    //
+    // Additive routes for non-WebKit clients (tvOS, watchOS — see the
+    // AntennaHeadAPI package). Deliberately built from purpose-built summary
+    // types, not by reusing the *.html routes' dictionary-of-`Any` approach
+    // above: see FrequencySummary's/CategorySummary's doc comments for why
+    // the full GRDB records aren't what gets served here. Every handler below
+    // stays a thin translation from AntennaHead's existing model/database
+    // calls into `AntennaHeadAPI` types — no new business logic, matching the
+    // feasibility study's premise that the tuning/scanning logic itself
+    // doesn't need reimplementing for these clients, only exposing.
+
+    /// Encodes any `AntennaHeadAPI` response type as the JSON body. `.iso8601`
+    /// matches `AACRecorderStatus.startedAt`'s expectations and is a
+    /// reasonable default for any future `Date` field this API adds.
+    @MainActor private func apiEncode<T: Encodable>(_ value: T) -> HTTPResponse {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let body = try? encoder.encode(value) else {
+            return jsonErrorResponse("encoding failure", status: 500)
+        }
+        return HTTPResponse(status: 200, reason: "OK",
+                            headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
+                            body: body)
+    }
+
+    @MainActor private func apiCategoriesResponse() -> HTTPResponse {
+        let categories = (try? sqlite?.allCategoryRecords()) ?? []
+        let summaries = categories.compactMap { category -> CategorySummary? in
+            guard let id = category.id else { return nil }
+            // No dedicated count query — matches the cost of the equivalent
+            // *.html rendering path, which walks the same join per category.
+            let frequencyCount = ((try? sqlite?.allFrequencyRecords(forCategoryID: id)) ?? []).count
+            return CategorySummary(id: id, categoryName: category.categoryName,
+                                   scanningEnabled: category.categoryScanningEnabled != 0,
+                                   frequencyCount: frequencyCount)
+        }
+        return apiEncode(summaries)
+    }
+
+    /// All frequencies, unfiltered — the JSON-API equivalent of
+    /// `favoritesTableHTML()`/`favorites.html`, not a per-category listing
+    /// (there is no per-category `categoryID` populated here for the same
+    /// reason `favorites.html` doesn't show one: a frequency can belong to
+    /// several categories via the `FreqCat` join table, so "the" category
+    /// isn't well-defined for a flat list).
+    @MainActor private func apiFavoritesResponse() -> HTTPResponse {
+        let frequencies = (try? sqlite?.allFrequencyRecords()) ?? []
+        let summaries = frequencies.compactMap { f -> FrequencySummary? in
+            guard let id = f.id else { return nil }
+            return FrequencySummary(id: id, stationName: f.stationName,
+                                    formattedFrequency: f.formattedFrequency, modulation: f.modulation)
+        }
+        return apiEncode(summaries)
+    }
+
+    /// The JSON-API equivalent of `/nowplayingstatus.html`, redesigned per
+    /// `NowPlayingStatus`'s doc comment: a fixed set of fields instead of
+    /// `nowPlayingStatusJSON()`'s full flattened `Frequency` record.
+    @MainActor private func apiNowPlayingResponse() -> HTTPResponse {
+        // TaskMode(rawValue:) round-tripping through SDRController.TaskMode's
+        // rawValue is the drift guardrail described in AntennaHeadAPI's
+        // TaskMode.swift: if the two enums' cases ever diverge, an unmapped
+        // rawValue here silently becomes .stopped rather than failing to
+        // build, so a case added to one without the other is a runtime gap,
+        // not a compile error -- worth a follow-up if that's ever a problem.
+        let mode = TaskMode(rawValue: sdrController?.taskMode.rawValue ?? "stopped") ?? .stopped
+        let signalLevel = sdrController?.signalLevel ?? 0
+        if let f = activeFrequencyRecord() {
+            let status = NowPlayingStatus(taskMode: mode, stationName: f.stationName,
+                                          formattedFrequency: f.formattedFrequency,
+                                          statusText: sdrController?.statusFunction ?? "",
+                                          signalLevel: signalLevel)
+            return apiEncode(status)
+        }
+        let statusText = sdrController?.statusFunction ?? "Not Playing"
+        let status = NowPlayingStatus(taskMode: mode, stationName: statusText, formattedFrequency: nil,
+                                      statusText: statusText, signalLevel: signalLevel)
+        return apiEncode(status)
+    }
+
+    /// The JSON-API equivalent of `/frequencylistenbuttonclicked.html`.
+    /// Responds with the resulting `NowPlayingStatus` (rather than an empty
+    /// 200, like the `.html` route) so a client can update its UI from one
+    /// round trip instead of a tune-then-poll sequence.
+    @MainActor private func apiTuneResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(TuneFrequencyRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        do {
+            try sdrController?.startTasksForFrequency(id: req.frequencyID)
+        } catch {
+            return jsonErrorResponse("\(error)", status: 404)
+        }
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/scannerlistenbuttonclicked.html`.
+    @MainActor private func apiStartScanResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartCategoryScanRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        do {
+            try sdrController?.startTasksForCategoryScan(id: req.categoryID)
+        } catch {
+            return jsonErrorResponse("\(error)", status: 404)
+        }
+        return apiNowPlayingResponse()
+    }
+
+    /// Stops whatever's currently running, regardless of task mode — the
+    /// JSON-API equivalent of the various `*stop.html` routes
+    /// (`airplaystop.html`, `controlboothstop.html`) collapsed into one, since
+    /// a remote client has no reason to distinguish which source it's
+    /// stopping the way each source's own web page does.
+    @MainActor private func apiStopResponse() -> HTTPResponse {
+        sdrController?.terminateTasks()
+        return apiNowPlayingResponse()
+    }
+
+    /// Same data as `aacRecorderStatusResponse()` (`/api/aac-recorder/status`),
+    /// re-served under the `/api/v1/` namespace as the typed
+    /// `AACRecorderStatus` rather than that route's ad hoc dictionary — kept
+    /// as a separate route rather than changing the existing one so the
+    /// pre-existing route's response shape stays exactly as-is for whatever
+    /// currently depends on it.
+    @MainActor private func apiRecorderStatusResponse() -> HTTPResponse {
+        let status = AACRecorderStatus(isRecording: liveAudioServerProcessManager?.isRecording ?? false,
+                                       startedAt: liveAudioServerProcessManager?.recordingStartedAt)
+        return apiEncode(status)
     }
 
     /// Mirrors `controlBoothPageHTML()`: shows whether the AirPlay Receiver's

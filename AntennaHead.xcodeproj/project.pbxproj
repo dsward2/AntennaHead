@@ -51,6 +51,7 @@
 		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; };
 		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
+		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */; };
 		A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
@@ -210,6 +211,7 @@
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 				0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */,
 				A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */,
+				132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,6 +346,7 @@
 				926091239864FEF2D1C7078C /* LiveAudioRecorder */,
 				DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */,
 				308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */,
+				78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */,
 				0EA033AD3020485000F3BE37 /* LiveAudioServer */,
 				0EA033B03020488500F3BE37 /* AirPlayReceiver */,
 				0EA033B330204B1800F3BE37 /* LiveAudioServerCore */,
@@ -459,6 +462,7 @@
 				F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */,
 				0EA033AF3020488500F3BE37 /* XCLocalSwiftPackageReference "../AirPlayReceiver" */,
 				0EA033B230204B1800F3BE37 /* XCLocalSwiftPackageReference "../LiveAudioServer" */,
+				5A22CB680E20F1B262A32A1A /* XCLocalSwiftPackageReference "../AntennaHeadAPI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0EF469B72FCE8911001510D3 /* Products */;
@@ -1053,6 +1057,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		5A22CB680E20F1B262A32A1A /* XCLocalSwiftPackageReference "../AntennaHeadAPI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../AntennaHeadAPI;
+		};
 		0EA033AF3020488500F3BE37 /* XCLocalSwiftPackageReference "../AirPlayReceiver" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../AirPlayReceiver;
@@ -1179,6 +1187,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F230C2FAC07247AFC99310B6 /* XCLocalSwiftPackageReference "../SharedLogging" */;
 			productName = SharedLogging;
+		};
+		78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A22CB680E20F1B262A32A1A /* XCLocalSwiftPackageReference "../AntennaHeadAPI" */;
+			productName = AntennaHeadAPI;
 		};
 		926091239864FEF2D1C7078C /* LiveAudioRecorder */ = {
 			isa = XCSwiftPackageProductDependency;
