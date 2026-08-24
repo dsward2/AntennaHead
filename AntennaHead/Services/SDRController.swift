@@ -74,6 +74,10 @@ final class SDRController {
     /// here regardless, so AirPlay listening can resume later without a fresh
     /// AirPlay session.
     private(set) var airPlayReceivePort: UInt16 = 6022
+    /// UDP port PCMUDPReceiver listens on for Gqrx's 2-channel PCM audio
+    /// output — Gqrx's own default UDP audio port (see NETWORK_PORTS.md), not
+    /// currently exposed in the Configuration sheet like the other ports.
+    private let gqrxReceivePort: UInt16 = 7355
     private var statusListener: RTLSDRStatusListener?
 
     let radioTaskPipelineManager = TaskPipelineManager()
@@ -437,7 +441,49 @@ final class SDRController {
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
     }
 
-    private func makeUDPReceiverTaskItem(port: UInt16) -> TaskItem? {
+    /// Start a PCMUDPReceiver → sox → PCMUDPSender bridge pipeline that receives
+    /// Gqrx's UDP audio output on `gqrxReceivePort`, normalizes it to the
+    /// LiveAudioServer 48 kHz/2ch contract via sox, and relays it on
+    /// `udpInputPort`. Sox handles both mono and stereo Gqrx output; `channels`
+    /// must match the Gqrx Audio→Stereo setting (1 = mono, 2 = stereo).
+    ///
+    /// Binds PCMUDPReceiver to `::1` (IPv6 loopback) because Gqrx (Qt) resolves
+    /// "localhost" to `::1` and sends datagrams there. AF_INET (127.0.0.1) never
+    /// receives those packets; AF_INET6 (::1) does.
+    ///
+    /// Uses `waitForDyingProcesses: true` so the dying pipeline releases port
+    /// 7355 before the new PCMUDPReceiver tries to bind it.
+    func startGqrxListening(channels: Int = 2) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        radioTaskPipelineManager.terminate()
+        taskMode = .customTask
+        activeFrequencyID = nil
+        statusFunction = "Gqrx"
+        stationName = "Gqrx"
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        lastError = nil
+
+        guard let receiver = makeUDPReceiverTaskItem(port: gqrxReceivePort, bind: "::1"),
+              let resample = makeResampleTaskItem(inputRate: Self.outputSampleRate,
+                                                 inputChannels: max(1, channels),
+                                                 audioOutputFilter: "vol 1"),
+              let sender = makeUDPSenderTaskItem() else { return }
+        radioTaskPipelineManager.add(receiver)
+        radioTaskPipelineManager.add(resample)
+        radioTaskPipelineManager.add(sender)
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
+    }
+
+    private func makeUDPReceiverTaskItem(port: UInt16, bind: String = "127.0.0.1") -> TaskItem? {
         let path = helperPath("PCMUDPReceiver")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("PCMUDPReceiver helper missing at \(path)")
@@ -447,6 +493,7 @@ final class SDRController {
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path,
                                                          functionName: "PCMUDPReceiver")
         item.addArgument("--port"); item.addArgument(Int(port))
+        item.addArgument("--bind"); item.addArgument(bind)
         item.addArgument("--exit-with-parent")
         return item
     }

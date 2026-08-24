@@ -10,6 +10,8 @@ struct StatusView: View {
     var audioServer: LiveAudioServerClient
     var lasProcess: LiveAudioServerProcessManager
 
+    @State private var detectedDevices: [RTLSDRDevice] = []
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -24,6 +26,15 @@ struct StatusView: View {
 
             StatusWebView(snapshot: snapshot)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task {
+            while !Task.isCancelled {
+                let found = await Task.detached(priority: .utility) {
+                    RTLSDRDeviceList.enumerate()
+                }.value
+                detectedDevices = found
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
@@ -58,6 +69,7 @@ struct StatusView: View {
             audioOutputFilter: sdrController.audioOutputFilter,
             options: sdrController.options
         )
+        snap.devices = detectedDevices
         snap.stages = pipelineStages()
         snap.pipelineText = sdrController.radioTaskPipelineManager.tasksInfoString() + lasProcess.taskInfoString()
         snap.pipelineCLIText = CLIStageText.export(pipeline: sdrController.radioTaskPipelineManager.taskItems.map {

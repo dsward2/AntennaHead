@@ -16,13 +16,17 @@
 		0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; };
 		0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; };
 		0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; };
+		0E966DF3303C1BE6004CF465 /* rtl_fm in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DEF303C1BE6004CF465 /* rtl_fm */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0E966DF4303C1BE6004CF465 /* rtl_test in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF0303C1BE6004CF465 /* rtl_test */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0E966DF5303C1BE6004CF465 /* rtl_sdr in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF1303C1BE6004CF465 /* rtl_sdr */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0E966DF6303C1BE6004CF465 /* rtl_tcp in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF2303C1BE6004CF465 /* rtl_tcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EA033AE3020485000F3BE37 /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033AD3020485000F3BE37 /* LiveAudioServer */; };
 		0EA033B13020488500F3BE37 /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B03020488500F3BE37 /* AirPlayReceiver */; };
 		0EA033B430204B1800F3BE37 /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B330204B1800F3BE37 /* LiveAudioServerCore */; };
 		0EA033B630204B1800F3BE37 /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B530204B1800F3BE37 /* LiveAudioServer */; };
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
-		0EAEB6782FED566300BA711A /* sox in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB6782FED566300BA711A /* sox in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEB8B82FF3BA2800BA711A /* stereodemux in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8BA2FF3BAFE00BA711A /* libliquid.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8BC2FF3BB1500BA711A /* libfec.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8BB2FF3BB1500BA711A /* libfec.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8BE2FF3BB2C00BA711A /* libfftw3f.3.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8BD2FF3BB2C00BA711A /* libfftw3f.3.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -35,31 +39,31 @@
 		0EAEB8CD2FF3BBD100BA711A /* libopus.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
-		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51272FDA8FF5006943DA /* GRDB */; };
 		0ECF58D62FDB7F7F006943DA /* libusb-1.0.0.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */; };
 		0ECF58D82FDB8040006943DA /* libusb-1.0.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0ECF58D52FDB7F7F006943DA /* libusb-1.0.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0112FFB000000BA711A /* PCMUDPSender in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0122FFB000000BA711A /* PCMUDPReceiver in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0132FFB000000BA711A /* PCMPassthrough in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0142FFB000000BA711A /* PCMMixer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0152FFB000000BA711A /* PCMSpeechSynth in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0112FFB000000BA711A /* PCMUDPSender in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0122FFB000000BA711A /* PCMUDPReceiver in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0132FFB000000BA711A /* PCMPassthrough in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0142FFB000000BA711A /* PCMMixer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0152FFB000000BA711A /* PCMSpeechSynth in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0162FFB000000BA711A /* AUProcessor in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0172FFB000000BA711A /* AudioInputCapture in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB0182FFB000000BA711A /* FMDeemphasis in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; };
 		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
 		A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */; };
-		A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A90985C3303A034385162080 /* LiveAudioRecorder in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
 		AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */; };
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
-		AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */ = {isa = PBXBuildFile; fileRef = AA00000BAA00000BAA00000B /* rtl_fm_localradio */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AA000012AA000012AA000012 /* rtl_fm_localradio in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = AA00000BAA00000BAA00000B /* rtl_fm_localradio */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000018AA000018AA000018 /* rtl_convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA000017AA000017AA000017 /* rtl_convenience.c */; };
-		E86EBCDD413546D7853FB8EB /* PCMFilePlayer in CopyFiles */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		E86EBCDD413546D7853FB8EB /* PCMFilePlayer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,28 +91,43 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		0ECF51142FD91FC7006943DA /* CopyFiles */ = {
+		0E966DEE303C19ED004CF465 /* Copy RTL Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				0E966DF3303C1BE6004CF465 /* rtl_fm in Copy RTL Files */,
+				0E966DF4303C1BE6004CF465 /* rtl_test in Copy RTL Files */,
+				0E966DF5303C1BE6004CF465 /* rtl_sdr in Copy RTL Files */,
+				0E966DF6303C1BE6004CF465 /* rtl_tcp in Copy RTL Files */,
+			);
+			name = "Copy RTL Files";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0ECF51142FD91FC7006943DA /* Copy Helper Files */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = Contents/Helpers;
 			dstSubfolderSpec = 1;
 			files = (
-				0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in CopyFiles */,
-				AA000012AA000012AA000012 /* rtl_fm_localradio in CopyFiles */,
-				0EAEB6782FED566300BA711A /* sox in CopyFiles */,
-				0EAEB8B82FF3BA2800BA711A /* stereodemux in CopyFiles */,
-				0EFDB0132FFB000000BA711A /* PCMPassthrough in CopyFiles */,
-				0EFDB0112FFB000000BA711A /* PCMUDPSender in CopyFiles */,
-				0EFDB0122FFB000000BA711A /* PCMUDPReceiver in CopyFiles */,
-				0EFDB0142FFB000000BA711A /* PCMMixer in CopyFiles */,
-				0EFDB0152FFB000000BA711A /* PCMSpeechSynth in CopyFiles */,
-				0EFDB0172FFB000000BA711A /* AudioInputCapture in CopyFiles */,
-				0EFDB0162FFB000000BA711A /* AUProcessor in CopyFiles */,
-				0EFDB0182FFB000000BA711A /* FMDeemphasis in CopyFiles */,
-				0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in CopyFiles */,
-				A90985C3303A034385162080 /* LiveAudioRecorder in CopyFiles */,
-				E86EBCDD413546D7853FB8EB /* PCMFilePlayer in CopyFiles */,
+				0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in Copy Helper Files */,
+				AA000012AA000012AA000012 /* rtl_fm_localradio in Copy Helper Files */,
+				0EAEB6782FED566300BA711A /* sox in Copy Helper Files */,
+				0EAEB8B82FF3BA2800BA711A /* stereodemux in Copy Helper Files */,
+				0EFDB0132FFB000000BA711A /* PCMPassthrough in Copy Helper Files */,
+				0EFDB0112FFB000000BA711A /* PCMUDPSender in Copy Helper Files */,
+				0EFDB0122FFB000000BA711A /* PCMUDPReceiver in Copy Helper Files */,
+				0EFDB0142FFB000000BA711A /* PCMMixer in Copy Helper Files */,
+				0EFDB0152FFB000000BA711A /* PCMSpeechSynth in Copy Helper Files */,
+				0EFDB0172FFB000000BA711A /* AudioInputCapture in Copy Helper Files */,
+				0EFDB0162FFB000000BA711A /* AUProcessor in Copy Helper Files */,
+				0EFDB0182FFB000000BA711A /* FMDeemphasis in Copy Helper Files */,
+				0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in Copy Helper Files */,
+				A90985C3303A034385162080 /* LiveAudioRecorder in Copy Helper Files */,
+				E86EBCDD413546D7853FB8EB /* PCMFilePlayer in Copy Helper Files */,
 			);
+			name = "Copy Helper Files";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		0ECF58D72FDB8021006943DA /* Embed Frameworks */ = {
@@ -136,6 +155,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0E966DEF303C1BE6004CF465 /* rtl_fm */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_fm; path = "../antennahead-librtlsdr/rtl-tools/rtl_fm"; sourceTree = "<group>"; };
+		0E966DF0303C1BE6004CF465 /* rtl_test */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_test; path = "../antennahead-librtlsdr/rtl-tools/rtl_test"; sourceTree = "<group>"; };
+		0E966DF1303C1BE6004CF465 /* rtl_sdr */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_sdr; path = "../antennahead-librtlsdr/rtl-tools/rtl_sdr"; sourceTree = "<group>"; };
+		0E966DF2303C1BE6004CF465 /* rtl_tcp */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_tcp; path = "../antennahead-librtlsdr/rtl-tools/rtl_tcp"; sourceTree = "<group>"; };
 		0EA488A3300DD6D70030FD73 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
@@ -264,6 +287,10 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
+				0E966DEF303C1BE6004CF465 /* rtl_fm */,
+				0E966DF1303C1BE6004CF465 /* rtl_sdr */,
+				0E966DF2303C1BE6004CF465 /* rtl_tcp */,
+				0E966DF0303C1BE6004CF465 /* rtl_test */,
 				0EA488A3300DD6D70030FD73 /* README.md */,
 				0EA488A2300DD6B70030FD73 /* Docs */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
@@ -315,7 +342,8 @@
 				0EF469B22FCE8911001510D3 /* Sources */,
 				0EF469B32FCE8911001510D3 /* Frameworks */,
 				0EF469B42FCE8911001510D3 /* Resources */,
-				0ECF51142FD91FC7006943DA /* CopyFiles */,
+				0ECF51142FD91FC7006943DA /* Copy Helper Files */,
+				0E966DEE303C19ED004CF465 /* Copy RTL Files */,
 				0ECF511D2FD946E9006943DA /* Run Script - Fix LiveAudioServer Helper rpath */,
 				0ECF58D72FDB8021006943DA /* Embed Frameworks */,
 				0EAEBD042FFAE00000BA711A /* Embed AirPlayReceiver Helper */,

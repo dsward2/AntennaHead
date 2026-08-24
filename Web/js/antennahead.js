@@ -1286,6 +1286,33 @@ function customTaskListenButtonClicked(form)
 }
 
 
+function gqrxListenButtonClicked(form)
+{
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  // request to HTTP server to start the Gqrx UDP-relay pipeline
+  var getUrl = window.location;
+  var baseUrl = getUrl .protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "gqrxlistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        // response received ok
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.send(jsonData);
+
+  // handle the audio tag with the new source
+  window.top.postMessage("startaudio", "*");
+
+  //console.log("postMessage startaudio");
+}
+
+
 function recordingListenButtonClicked(form)
 {
   var selected = form.querySelector('input[name="selected_file"]:checked');

@@ -475,7 +475,8 @@ final class AntennaHeadHTTPServer {
         case "/devices.html":
             return renderHTML(relativePath: "devices.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["DEVICES_FORM": devicesFormHTML(),
-                                      "CUSTOM_TASKS_FORM": customTasksFormHTML()])
+                                      "CUSTOM_TASKS_FORM": customTasksFormHTML(),
+                                      "GQRX_FORM": gqrxFormHTML()])
 
         case "/devicelistenbuttonclicked.html":
             // Buttons are wired; the Core Audio device-input pipeline is deferred
@@ -489,6 +490,11 @@ final class AntennaHeadHTTPServer {
             if let id = formFields(fromBody: request.body)["custom_task_select"].flatMap(Int64.init) {
                 try? sdrController?.startTasksForCustomTask(id: id)
             }
+            return okResponse()
+
+        case "/gqrxlistenbuttonclicked.html":
+            let gqrxChannels = Int(formFields(fromBody: request.body)["gqrx_channels"] ?? "2") ?? 2
+            sdrController?.startGqrxListening(channels: gqrxChannels)
             return okResponse()
 
         case "/settings.html":
@@ -1338,6 +1344,24 @@ final class AntennaHeadHTTPServer {
         s += "</form>"
         s += "<form action='javascript:loadContent(&quot;customtasks.html&quot;)'>"
         s += "<input class='twelve columns button' type='submit' value='Manage Custom Tasks'></form><br>&nbsp;<br>"
+        return s
+    }
+
+    /// `%%GQRX_FORM%%` — starts a PCMUDPReceiver (port 7355) → sox → PCMUDPSender
+    /// bridge. Sox normalizes to 48 kHz/2ch; `channels` must match Gqrx's
+    /// Audio→Stereo setting (see `SDRController.startGqrxListening`).
+    @MainActor private func gqrxFormHTML() -> String {
+        var s = "<form class='gqrx_form' id='gqrxForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label>Listen to Gqrx</label>"
+        s += "<label>Channels</label>"
+        s += "<select class='u-full-width' name='gqrx_channels'>"
+        s += "<option value='2'>2 – Stereo (Gqrx Audio ▸ Stereo checkbox enabled)</option>"
+        s += "<option value='1'>1 – Mono</option>"
+        s += "</select>"
+        s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"gqrxListenButtonClicked(this.form);\" "
+        s += "title='Receive Gqrx&#39;s UDP audio output (port 7355), normalize via sox, forward to LiveAudioServer.'>"
+        s += "</form><br>&nbsp;<br>"
         return s
     }
 

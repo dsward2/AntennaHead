@@ -29,6 +29,7 @@ struct StatusSnapshot: Codable, Equatable {
     var pipelineLastStarted: String = ""
     var pipelineLastStopped: String = ""
 
+    var devices: [RTLSDRDevice] = []
     var stages: [Stage] = []
 
     /// Plain-text task dump — same format as ControlBooth's pipeline text view
@@ -340,6 +341,11 @@ private extension StatusWebView {
     </section>
 
     <section class="card">
+      <h2>RTL-SDR Devices</h2>
+      <div id="devices"><p class="idle">Scanning…</p></div>
+    </section>
+
+    <section class="card">
       <h2>Tuning</h2>
       <div class="row"><span class="lbl">Status</span><span class="val" id="statusFunction">—</span></div>
       <div class="row"><span class="lbl">Station</span><span class="val" id="stationName">—</span></div>
@@ -481,6 +487,27 @@ function copyPipelineText(){
   document.body.removeChild(ta);
 }
 
+function buildDevices(devices){
+  var c = document.getElementById('devices');
+  if (!devices || !devices.length){
+    c.innerHTML = '<p class="idle">No devices detected.</p>';
+    return;
+  }
+  var h = '';
+  for (var i = 0; i < devices.length; i++){
+    var d = devices[i];
+    h += '<div class="row"><span class="lbl">Device ' + d.index + '</span><span class="val">';
+    if (d.serial){
+      h += esc(d.serial);
+      if (d.product) h += ' <span style="color:var(--muted);font-weight:400">(' + esc(d.product) + ')</span>';
+    } else {
+      h += esc(d.name) || '—';
+    }
+    h += '</span></div>';
+  }
+  c.innerHTML = h;
+}
+
 function applyStatus(s){
   var live = !!s.serverRunning;
   var dot = document.getElementById('serverDot');
@@ -507,6 +534,12 @@ function applyStatus(s){
   if (copyBtn) copyBtn.disabled = !s.pipelineCLIText;
   var fill = document.getElementById('signalFill');
   if (fill) fill.style.width = Math.round((s.signalLevel || 0) * 100) + '%';
+  // Device list changes rarely; only rebuild when content changes.
+  var devicesJSON = JSON.stringify(s.devices || []);
+  if (devicesJSON !== window.__lastDevicesJSON) {
+    window.__lastDevicesJSON = devicesJSON;
+    buildDevices(s.devices);
+  }
   // The signal level pushes updates several times a second; only rebuild the
   // pipeline SVG when the stages actually change (avoids churn + hover flicker).
   var stagesJSON = JSON.stringify(s.stages || []);
