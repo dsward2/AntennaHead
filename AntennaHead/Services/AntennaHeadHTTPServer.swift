@@ -544,7 +544,7 @@ final class AntennaHeadHTTPServer {
 
         case "/frequencylistenbuttonclicked.html":
             // Ad-hoc tune from the web Tuner. Body is a JSON *object*
-            // {frequency, sample_rate, tuner_gain, stereo_flag, modulation}.
+            // {frequency, sample_rate, tuner_gain, stereo_flag, modulation, usb_device_string}.
             let o = jsonObject(fromBody: request.body)
             if let hz = Int(o.string("frequency")), hz > 0 {
                 sdrController?.startTasksForFrequency(
@@ -552,7 +552,8 @@ final class AntennaHeadHTTPServer {
                     sampleRate: Int(o.string("sample_rate")) ?? 170_000,
                     tunerGain: Double(o.string("tuner_gain")) ?? 49.6,
                     stereo: o.string("stereo_flag") == "1",
-                    modulation: o.string("modulation"))
+                    modulation: o.string("modulation"),
+                    usbDevice: o.string("usb_device_string"))
             }
             return okResponse()
 
@@ -1611,7 +1612,7 @@ final class AntennaHeadHTTPServer {
         s += text("atan Math:", "atan_math", p.atanMath)
         s += text("Audio Output Filter:", "audio_output_filter", p.audioOutputFilter)
         s += text("rtl_fm Options:", "options", p.options)
-        s += text("USB Device:", "usb_device_string", p.usbDeviceString)
+        s += text("USB Device (serial number or index):", "usb_device_string", formattedUSBDeviceValue(p.usbDeviceString))
         s += select("Bias-T Power:", "bias_t_flag", "\(p.biasTFlag)", onOff)
         s += categorySelectOptionsHTML()
         s += "<br>&nbsp;<br>&nbsp;<br>"
@@ -1746,7 +1747,7 @@ final class AntennaHeadHTTPServer {
         var s = "<form class='editcategorysettings' id='editcategorysettings' onsubmit='event.preventDefault(); return storeCategoryRecord(this);' method='POST'>"
         s += text("Name:", "category_name", c.categoryName)
         s += select("Enable Category Scanning:", "category_scanning_enabled", "\(c.categoryScanningEnabled)", [("0", "Disabled"), ("1", "Enabled")])
-        s += text("USB Device:", "scan_usb_device_string", c.scanUsbDeviceString)
+        s += text("USB Device (serial number or index):", "scan_usb_device_string", formattedUSBDeviceValue(c.scanUsbDeviceString))
         s += text("Tuner Gain:", "scan_tuner_gain", "\(c.scanTunerGain)", type: "number", step: "0.1")
         s += select("Tuner AGC:", "scan_tuner_agc", "\(c.scanTunerAgc)", onOff)
         s += text("Sample Rate:", "scan_sample_rate", "\(c.scanSampleRate)", type: "number")
@@ -1893,7 +1894,7 @@ final class AntennaHeadHTTPServer {
         s += text("Atan Math", "atan_math", f.atanMath)
         s += text("Audio Output Filter", "audio_output_filter", f.audioOutputFilter)
         s += text("rtl_fm Options", "options", f.options)
-        s += text("USB Device", "usb_device_string", f.usbDeviceString)
+        s += text("USB Device (serial number or index)", "usb_device_string", formattedUSBDeviceValue(f.usbDeviceString))
         s += select("Bias-T Power", "bias_t_flag", "\(f.biasTFlag)", [("0", "Off"), ("1", "On")])
         s += "<br><br>"
         s += "<input class='button button-primary' type='submit' value='Save'>"
@@ -1982,7 +1983,7 @@ final class AntennaHeadHTTPServer {
         d += row("atan math", f.atanMath)
         d += row("audio output filter", "rate 48000 \(f.audioOutputFilter)")
         d += row("bias-t", "\(f.biasTFlag)")
-        d += row("usb device", f.usbDeviceString)
+        d += row("usb device", formattedUSBDeviceValue(f.usbDeviceString))
         return (f.stationName, d)
     }
 
@@ -2112,6 +2113,19 @@ final class AntennaHeadHTTPServer {
 
     nonisolated private func htmlAttribute(_ s: String) -> String {
         htmlText(s).replacingOccurrences(of: "'", with: "&#39;").replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// Formats a "USB Device" field value for display. A bare single digit
+    /// ("0"-"9") is a USB device index and is left as-is; anything else that's
+    /// all digits is assumed to be an RTL-SDR EEPROM serial number (see
+    /// rtl_eeprom) and is zero-padded to the standard 8-digit serial format,
+    /// e.g. "1234" -> "00001234". Non-numeric values (or already-8-digit
+    /// values) pass through unchanged.
+    nonisolated private func formattedUSBDeviceValue(_ value: String) -> String {
+        guard value.count > 1, value.count < 8, value.allSatisfy(\.isNumber) else {
+            return value
+        }
+        return String(repeating: "0", count: 8 - value.count) + value
     }
 
     /// The hostname portion of a `Host` header, dropping any `:port`. Used to

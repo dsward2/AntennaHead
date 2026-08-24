@@ -154,15 +154,18 @@ final class SDRController {
     /// Tune to an ad-hoc frequency from the web Tuner (no saved record). Builds a
     /// one-off `Frequency` from the prototype defaults plus the tuner's chosen
     /// parameters, then drives the normal pipeline (stereodemux is inserted when
-    /// `modulation == "fm"` and `stereo`).
+    /// `modulation == "fm"` and `stereo`). `usbDevice` is the RTL-SDR USB device
+    /// index or EEPROM serial number from the Tuner's "USB Device" field; empty
+    /// falls back to device 0 (see `makeTuning`).
     func startTasksForFrequency(frequencyHz: Int, sampleRate: Int, tunerGain: Double,
-                                stereo: Bool, modulation: String) {
+                                stereo: Bool, modulation: String, usbDevice: String = "") {
         var f = Frequency.prototype()
         f.frequency = frequencyHz
         f.sampleRate = sampleRate
         f.tunerGain = tunerGain
         f.stereoFlag = stereo
         f.modulation = modulation.isEmpty ? "fm" : modulation
+        f.usbDeviceString = usbDevice
         f.stationName = String(format: "%.4f MHz", Double(frequencyHz) / 1_000_000.0)
         let tuning = makeTuning(forFrequency: f)
         taskMode = .frequency

@@ -1131,7 +1131,13 @@ function frequencyListenButtonClicked()
     var modulationElem = document.getElementById('tuner_modulation');
     if (modulationElem !== null) { modulation = modulationElem.value; }
 
-    var tuningArray = {frequency:frequency, sample_rate: sample_rate, tuner_gain: tuner_gain, stereo_flag: stereo_flag, modulation: modulation};
+    // RTL-SDR USB device index or EEPROM serial number, from the tuner
+    // page's "USB Device" field. Empty falls back to device 0 server-side.
+    var usb_device_string = '';
+    var usbDeviceElem = document.getElementById('usb_device_string');
+    if (usbDeviceElem !== null) { usb_device_string = usbDeviceElem.value; }
+
+    var tuningArray = {frequency:frequency, sample_rate: sample_rate, tuner_gain: tuner_gain, stereo_flag: stereo_flag, modulation: modulation, usb_device_string: usb_device_string};
 
     var jsonData = JSON.stringify(tuningArray);
 

@@ -286,7 +286,7 @@ void usage(void)
 		"\t    raw mode outputs 2x16 bit IQ pairs\n"
 		"\t[-s sample_rate (default: 24k)]\n"
 		"\t[-c current_info_socket_port\n"
-		"\t[-d device_index (default: 0)]\n"
+		"\t[-d device_index or serial number (default: 0; falls back to 0 if no match)]\n"
 		"\t[-T enable bias-T on GPIO PIN 0 (works for rtl-sdr.com v3 dongles)]\n"
 		"\t[-g tuner_gain (default: automatic)]\n"
 		"\t[-l squelch_level (default: 0/off)]\n"
@@ -1787,6 +1787,7 @@ int main(int argc, char **argv)
         #endif
         int r, opt;
         int dev_given = 0;
+        char *dev_arg = NULL;
         int custom_ppm = 0;
         int enable_biastee = 0;
 
@@ -1807,6 +1808,7 @@ int main(int argc, char **argv)
 				status.current_info_socket_port = (int)atof(optarg);
 				break;
 			case 'd':
+				dev_arg = optarg;
 				dongle.dev_index = verbose_device_search(optarg);
 				dev_given = 1;
 				break;
@@ -1956,6 +1958,15 @@ int main(int argc, char **argv)
 		ACTUAL_BUF_LENGTH = lcm_post[demod.post_downsample] * DEFAULT_BUF_LENGTH;
 
 		if (!dev_given) {
+			dongle.dev_index = verbose_device_search("0");
+		}
+
+		if (dongle.dev_index < 0 && dev_given) {
+			// -d was given a USB device index/serial number that didn't match
+			// any connected device (e.g. a saved serial for a dongle that's
+			// since been unplugged/swapped). Fall back to device 0 rather
+			// than refusing to start.
+			fprintf(stderr, "Device '%s' not found; falling back to device 0.\n", dev_arg);
 			dongle.dev_index = verbose_device_search("0");
 		}
 

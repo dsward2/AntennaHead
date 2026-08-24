@@ -20,6 +20,7 @@
 		0E966DF4303C1BE6004CF465 /* rtl_test in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF0303C1BE6004CF465 /* rtl_test */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0E966DF5303C1BE6004CF465 /* rtl_sdr in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF1303C1BE6004CF465 /* rtl_sdr */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0E966DF6303C1BE6004CF465 /* rtl_tcp in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF2303C1BE6004CF465 /* rtl_tcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0E966DF8303C1BE6004CF465 /* rtl_eeprom in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF7303C1BE6004CF465 /* rtl_eeprom */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EA033AE3020485000F3BE37 /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033AD3020485000F3BE37 /* LiveAudioServer */; };
 		0EA033B13020488500F3BE37 /* AirPlayReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B03020488500F3BE37 /* AirPlayReceiver */; };
 		0EA033B430204B1800F3BE37 /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B330204B1800F3BE37 /* LiveAudioServerCore */; };
@@ -101,6 +102,7 @@
 				0E966DF4303C1BE6004CF465 /* rtl_test in Copy RTL Files */,
 				0E966DF5303C1BE6004CF465 /* rtl_sdr in Copy RTL Files */,
 				0E966DF6303C1BE6004CF465 /* rtl_tcp in Copy RTL Files */,
+				0E966DF8303C1BE6004CF465 /* rtl_eeprom in Copy RTL Files */,
 			);
 			name = "Copy RTL Files";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -159,6 +161,7 @@
 		0E966DF0303C1BE6004CF465 /* rtl_test */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_test; path = "../antennahead-librtlsdr/rtl-tools/rtl_test"; sourceTree = "<group>"; };
 		0E966DF1303C1BE6004CF465 /* rtl_sdr */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_sdr; path = "../antennahead-librtlsdr/rtl-tools/rtl_sdr"; sourceTree = "<group>"; };
 		0E966DF2303C1BE6004CF465 /* rtl_tcp */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_tcp; path = "../antennahead-librtlsdr/rtl-tools/rtl_tcp"; sourceTree = "<group>"; };
+		0E966DF7303C1BE6004CF465 /* rtl_eeprom */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_eeprom; path = "../antennahead-librtlsdr/rtl-tools/rtl_eeprom"; sourceTree = "<group>"; };
 		0EA488A3300DD6D70030FD73 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
@@ -291,6 +294,7 @@
 				0E966DF1303C1BE6004CF465 /* rtl_sdr */,
 				0E966DF2303C1BE6004CF465 /* rtl_tcp */,
 				0E966DF0303C1BE6004CF465 /* rtl_test */,
+				0E966DF7303C1BE6004CF465 /* rtl_eeprom */,
 				0EA488A3300DD6D70030FD73 /* README.md */,
 				0EA488A2300DD6B70030FD73 /* Docs */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
