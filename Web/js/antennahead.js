@@ -1080,6 +1080,38 @@ function listenButtonClicked(form)
 }
 
 
+// Fills in the "USB Device" combo box's <datalist id="usb_device_datalist">
+// (there's at most one per loaded page) with the RTL-SDR devices currently
+// connected, so the field's dropdown offers real 8-digit serial numbers
+// while still accepting freely typed text. Called from loadContent() after
+// every page load; a no-op when the loaded page has no such field.
+function populateUSBDeviceDatalist()
+{
+    var datalist = document.getElementById('usb_device_datalist');
+    if (datalist === null) { return; }
+
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var url = baseUrl + "rtlsdrdevices.html";
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            var devices = [];
+            try { devices = JSON.parse(this.responseText); } catch (e) { devices = []; }
+
+            datalist.innerHTML = '';
+            for (var i = 0; i < devices.length; i++) {
+                var option = document.createElement('option');
+                option.value = devices[i].value;
+                option.textContent = devices[i].label;
+                datalist.appendChild(option);
+            }
+        }
+    };
+    xhttp.open("GET", url, true);
+    xhttp.send();
+}
 
 
 function frequencyListenButtonClicked()

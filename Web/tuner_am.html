@@ -67,7 +67,8 @@
                 </select>
 
                 <label for="usb_device_string">USB Device (serial number or index):</label>
-                <input class="twelve columns value-prop" type="text" id="usb_device_string" name="usb_device_string" value="" placeholder="0" title="Leave blank for device 0, or enter a USB device index or RTL-SDR EEPROM serial number to select a specific dongle.">
+                <input class="twelve columns value-prop" type="text" id="usb_device_string" name="usb_device_string" value="" placeholder="0" list="usb_device_datalist" title="Leave blank for device 0, or enter/select a USB device index or RTL-SDR EEPROM serial number to select a specific dongle.">
+                <datalist id="usb_device_datalist"></datalist>
 
                 <input type="hidden" id="tuner_modulation" name="modulation" value="am">
                 %%CATEGORY_SELECT%%

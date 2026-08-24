@@ -557,6 +557,19 @@ final class AntennaHeadHTTPServer {
             }
             return okResponse()
 
+        case "/rtlsdrdevices.html":
+            // Populates the "USB Device" combo box's <datalist> (see
+            // usbDeviceFieldHTML / antennahead.js's populateUSBDeviceDatalist).
+            // RTLSDRDeviceList.enumerate() blocks briefly on libusb
+            // enumeration, so it's run off the main actor even though this
+            // switch itself executes on it.
+            let devices = await Task.detached(priority: .utility) {
+                RTLSDRDeviceList.enumerate()
+            }.value
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json"],
+                                body: usbDeviceOptionsJSON(devices: devices))
+
         case "/insertnewfrequency.html":
             insertNewFrequency(fromBody: request.body)
             return okResponse()
@@ -1581,10 +1594,11 @@ final class AntennaHeadHTTPServer {
     @MainActor private func newFrequencyFormHTML() -> String {
         let p = Frequency.prototype()
 
-        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
+        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil, list: String? = nil) -> String {
             let stepAttr = step.map { " step='\($0)'" } ?? ""
+            let listAttr = list.map { " list='\($0)'" } ?? ""
             return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
-                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
+                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)\(listAttr)>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
             var s = "<label for='\(name)'>\(label)</label><select class='twelve columns value-prop' name='\(name)'>"
@@ -1612,7 +1626,8 @@ final class AntennaHeadHTTPServer {
         s += text("atan Math:", "atan_math", p.atanMath)
         s += text("Audio Output Filter:", "audio_output_filter", p.audioOutputFilter)
         s += text("rtl_fm Options:", "options", p.options)
-        s += text("USB Device (serial number or index):", "usb_device_string", formattedUSBDeviceValue(p.usbDeviceString))
+        s += text("USB Device (serial number or index):", "usb_device_string", formattedUSBDeviceValue(p.usbDeviceString), list: "usb_device_datalist")
+        s += "<datalist id='usb_device_datalist'></datalist>"
         s += select("Bias-T Power:", "bias_t_flag", "\(p.biasTFlag)", onOff)
         s += categorySelectOptionsHTML()
         s += "<br>&nbsp;<br>&nbsp;<br>"
@@ -1729,10 +1744,11 @@ final class AntennaHeadHTTPServer {
     private func editCategorySettingsFormHTML(category c: Category) -> String {
         guard let id = c.id else { return "Error getting category" }
 
-        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil) -> String {
+        func text(_ label: String, _ name: String, _ value: String, type: String = "text", step: String? = nil, list: String? = nil) -> String {
             let stepAttr = step.map { " step='\($0)'" } ?? ""
+            let listAttr = list.map { " list='\($0)'" } ?? ""
             return "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
-                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)>"
+                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)\(listAttr)>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
             var s = "<label for='\(name)'>\(label)</label><select class='twelve columns value-prop' name='\(name)'>"
@@ -1747,7 +1763,8 @@ final class AntennaHeadHTTPServer {
         var s = "<form class='editcategorysettings' id='editcategorysettings' onsubmit='event.preventDefault(); return storeCategoryRecord(this);' method='POST'>"
         s += text("Name:", "category_name", c.categoryName)
         s += select("Enable Category Scanning:", "category_scanning_enabled", "\(c.categoryScanningEnabled)", [("0", "Disabled"), ("1", "Enabled")])
-        s += text("USB Device (serial number or index):", "scan_usb_device_string", formattedUSBDeviceValue(c.scanUsbDeviceString))
+        s += text("USB Device (serial number or index):", "scan_usb_device_string", formattedUSBDeviceValue(c.scanUsbDeviceString), list: "usb_device_datalist")
+        s += "<datalist id='usb_device_datalist'></datalist>"
         s += text("Tuner Gain:", "scan_tuner_gain", "\(c.scanTunerGain)", type: "number", step: "0.1")
         s += select("Tuner AGC:", "scan_tuner_agc", "\(c.scanTunerAgc)", onOff)
         s += text("Sample Rate:", "scan_sample_rate", "\(c.scanSampleRate)", type: "number")
@@ -1855,11 +1872,12 @@ final class AntennaHeadHTTPServer {
         }
 
         func text(_ label: String, _ name: String, _ value: String, id elementID: String? = nil,
-                  type: String = "text", step: String? = nil) -> String {
+                  type: String = "text", step: String? = nil, list: String? = nil) -> String {
             let idAttr = elementID.map { " id='\($0)'" } ?? ""
             let stepAttr = step.map { " step='\($0)'" } ?? ""
+            let listAttr = list.map { " list='\($0)'" } ?? ""
             return "<label>\(label)<input class='u-full-width' type='\(type)'\(idAttr) \(Self.verbatimInputAttributes) "
-                + "name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)></label>"
+                + "name='\(name)' value='\(htmlAttribute(value))'\(stepAttr)\(listAttr)></label>"
         }
         func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
             var s = "<label>\(label)<select class='u-full-width' name='\(name)'>"
@@ -1894,7 +1912,8 @@ final class AntennaHeadHTTPServer {
         s += text("Atan Math", "atan_math", f.atanMath)
         s += text("Audio Output Filter", "audio_output_filter", f.audioOutputFilter)
         s += text("rtl_fm Options", "options", f.options)
-        s += text("USB Device (serial number or index)", "usb_device_string", formattedUSBDeviceValue(f.usbDeviceString))
+        s += text("USB Device (serial number or index)", "usb_device_string", formattedUSBDeviceValue(f.usbDeviceString), list: "usb_device_datalist")
+        s += "<datalist id='usb_device_datalist'></datalist>"
         s += select("Bias-T Power", "bias_t_flag", "\(f.biasTFlag)", [("0", "Off"), ("1", "On")])
         s += "<br><br>"
         s += "<input class='button button-primary' type='submit' value='Save'>"
@@ -2115,17 +2134,53 @@ final class AntennaHeadHTTPServer {
         htmlText(s).replacingOccurrences(of: "'", with: "&#39;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
-    /// Formats a "USB Device" field value for display. A bare single digit
-    /// ("0"-"9") is a USB device index and is left as-is; anything else that's
-    /// all digits is assumed to be an RTL-SDR EEPROM serial number (see
-    /// rtl_eeprom) and is zero-padded to the standard 8-digit serial format,
-    /// e.g. "1234" -> "00001234". Non-numeric values (or already-8-digit
-    /// values) pass through unchanged.
-    nonisolated private func formattedUSBDeviceValue(_ value: String) -> String {
-        guard value.count > 1, value.count < 8, value.allSatisfy(\.isNumber) else {
+    /// Zero-pads an all-digit value shorter than 8 digits to the standard
+    /// 8-digit RTL-SDR EEPROM serial format, e.g. "1234" -> "00001234".
+    /// Non-numeric or already-8-digit-or-longer values pass through unchanged.
+    nonisolated private func zeroPadded8DigitSerial(_ value: String) -> String {
+        guard !value.isEmpty, value.count < 8, value.allSatisfy(\.isNumber) else {
             return value
         }
         return String(repeating: "0", count: 8 - value.count) + value
+    }
+
+    /// Formats a "USB Device" field value for display. A bare single digit
+    /// ("0"-"9") is a USB device index and is left as-is; anything else that's
+    /// all digits is assumed to be an RTL-SDR EEPROM serial number (see
+    /// rtl_eeprom) and is zero-padded via `zeroPadded8DigitSerial`.
+    nonisolated private func formattedUSBDeviceValue(_ value: String) -> String {
+        guard value.count > 1 else {
+            return value
+        }
+        return zeroPadded8DigitSerial(value)
+    }
+
+    /// One entry in the "USB Device" combo box's `<datalist>` — see
+    /// `usbDeviceOptionsJSON`.
+    private struct USBDeviceOption: Encodable {
+        /// What gets written into the USB Device field when this option is
+        /// picked: the device's zero-padded serial if it has one, else its
+        /// USB device index.
+        let value: String
+        /// Human-readable text shown in the dropdown alongside `value`.
+        let label: String
+    }
+
+    /// JSON body for `/rtlsdrdevices.html`: the currently connected RTL-SDR
+    /// devices, one `USBDeviceOption` each, for the web UI's USB Device
+    /// combo box. `devices` should come from `RTLSDRDeviceList.enumerate()`
+    /// run off the main actor (see that call site) since it blocks briefly
+    /// on libusb enumeration.
+    nonisolated private func usbDeviceOptionsJSON(devices: [RTLSDRDevice]) -> Data {
+        let options: [USBDeviceOption] = devices.map { device in
+            let serial = zeroPadded8DigitSerial(device.serial)
+            let productLabel = device.product.isEmpty ? device.name : device.product
+            if serial.isEmpty {
+                return USBDeviceOption(value: "\(device.index)", label: "Index \(device.index) — \(productLabel)")
+            }
+            return USBDeviceOption(value: serial, label: "\(serial) — \(productLabel) (index \(device.index))")
+        }
+        return (try? JSONEncoder().encode(options)) ?? Data("[]".utf8)
     }
 
     /// The hostname portion of a `Host` header, dropping any `:port`. Used to
