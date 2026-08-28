@@ -283,6 +283,11 @@
 				0EAEB8B72FF3BA2700BA711A /* stereodemux */,
 				0EAEB6772FED562F00BA711A /* sox */,
 				0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */,
+				0E966DEF303C1BE6004CF465 /* rtl_fm */,
+				0E966DF1303C1BE6004CF465 /* rtl_sdr */,
+				0E966DF2303C1BE6004CF465 /* rtl_tcp */,
+				0E966DF0303C1BE6004CF465 /* rtl_test */,
+				0E966DF7303C1BE6004CF465 /* rtl_eeprom */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -290,11 +295,6 @@
 		0EF469AD2FCE8911001510D3 = {
 			isa = PBXGroup;
 			children = (
-				0E966DEF303C1BE6004CF465 /* rtl_fm */,
-				0E966DF1303C1BE6004CF465 /* rtl_sdr */,
-				0E966DF2303C1BE6004CF465 /* rtl_tcp */,
-				0E966DF0303C1BE6004CF465 /* rtl_test */,
-				0E966DF7303C1BE6004CF465 /* rtl_eeprom */,
 				0EA488A3300DD6D70030FD73 /* README.md */,
 				0EA488A2300DD6B70030FD73 /* Docs */,
 				0EF469B82FCE8911001510D3 /* AntennaHead */,
@@ -790,7 +790,7 @@
 		0EF469DA2FCE8913001510D3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AntennaHead;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AntennaHead/AntennaHead.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -837,7 +837,7 @@
 		0EF469DB2FCE8913001510D3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AntennaHead;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AntennaHead/AntennaHead.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -997,6 +997,7 @@
 				);
 				PRODUCT_NAME = rtl_fm_localradio;
 				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
 			};
 			name = Debug;
 		};
@@ -1037,6 +1038,7 @@
 				);
 				PRODUCT_NAME = rtl_fm_localradio;
 				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
