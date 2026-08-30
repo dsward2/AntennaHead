@@ -32,10 +32,10 @@ final class ControlBoothEventReceiver: NSObject {
 
     @MainActor
     init(sdrController: SDRController, lasManager: LiveAudioServerProcessManager,
-         sqlite: SQLiteController = .shared) {
+         sqlite: SQLiteController? = nil) {
         self.sdrController = sdrController
         self.lasManager = lasManager
-        self.sqlite = sqlite
+        self.sqlite = sqlite ?? .shared
         super.init()
 
         let manager = NSAppleEventManager.shared()

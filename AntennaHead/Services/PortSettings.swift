@@ -42,10 +42,11 @@ struct PortSettings: Equatable {
     ]
 
     /// Stored ports, falling back to the defaults for missing/invalid values.
-    @MainActor static func load(sqlite: SQLiteController? = .shared) -> PortSettings {
+    @MainActor static func load(sqlite: SQLiteController? = nil) -> PortSettings {
+        let sqlite = sqlite ?? .shared
         var settings = PortSettings()
         for (keyPath, key) in storageKeys {
-            if let stored = ((try? sqlite?.appSettingsValue(forKey: key)) ?? nil),
+            if let stored = ((try? sqlite.appSettingsValue(forKey: key)) ?? nil),
                let port = UInt16(stored), port > 0 {
                 settings[keyPath: keyPath] = port
             }
@@ -53,9 +54,10 @@ struct PortSettings: Equatable {
         return settings
     }
 
-    @MainActor func store(sqlite: SQLiteController? = .shared) {
+    @MainActor func store(sqlite: SQLiteController? = nil) {
+        let sqlite = sqlite ?? .shared
         for (keyPath, key) in Self.storageKeys {
-            try? sqlite?.storeAppSettingsValue("\(self[keyPath: keyPath])", forKey: key)
+            try? sqlite.storeAppSettingsValue("\(self[keyPath: keyPath])", forKey: key)
         }
     }
 }

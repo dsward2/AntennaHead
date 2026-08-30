@@ -50,7 +50,7 @@ final class LiveAudioServerProcessManager {
 
     /// UDP port LAS listens on for incoming PCM. `SDRController` points its
     /// PCMUDPSender stage at this port. Updated from `PortSettings` on start.
-    static let defaultUDPInputPort: UInt16 = 6020
+    nonisolated static let defaultUDPInputPort: UInt16 = 6020
     private(set) var udpInputPort: UInt16 = LiveAudioServerProcessManager.defaultUDPInputPort
 
     private(set) var isRunning = false
@@ -171,7 +171,7 @@ final class LiveAudioServerProcessManager {
         Task.detached {
             let deadline = Date().addingTimeInterval(2.0)
             while proc.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
+                try? await Task.sleep(for: .milliseconds(50))
             }
             if proc.isRunning {
                 kill(proc.processIdentifier, SIGKILL)

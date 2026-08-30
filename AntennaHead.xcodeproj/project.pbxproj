@@ -10,12 +10,12 @@
 		0E2AED6E300F2B0E007F4143 /* PCMUDPSender in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; };
 		0E2AED6F300F2B0E007F4143 /* PCMUDPReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; };
 		0E2AED70300F2B0E007F4143 /* PCMPassthrough in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; };
-		0E2AED76300F2B0E007F4143 /* PCMPrefix in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; };
 		0E2AED71300F2B0E007F4143 /* PCMMixer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; };
 		0E2AED72300F2B0E007F4143 /* PCMSpeechSynth in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; };
 		0E2AED73300F2B0E007F4143 /* AUProcessor in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; };
 		0E2AED74300F2B0E007F4143 /* AudioInputCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; };
 		0E2AED75300F2B0E007F4143 /* FMDeemphasis in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; };
+		0E2AED76300F2B0E007F4143 /* PCMPrefix in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; };
 		0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; };
 		0E966DF3303C1BE6004CF465 /* rtl_fm in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DEF303C1BE6004CF465 /* rtl_fm */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0E966DF4303C1BE6004CF465 /* rtl_test in Copy RTL Files */ = {isa = PBXBuildFile; fileRef = 0E966DF0303C1BE6004CF465 /* rtl_test */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -49,13 +49,13 @@
 		0EFDB0112FFB000000BA711A /* PCMUDPSender in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0122FFB000000BA711A /* PCMUDPReceiver in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0132FFB000000BA711A /* PCMPassthrough in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		0EFDB01B2FFB000000BA711A /* PCMPrefix in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0142FFB000000BA711A /* PCMMixer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0152FFB000000BA711A /* PCMSpeechSynth in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0162FFB000000BA711A /* AUProcessor in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0172FFB000000BA711A /* AudioInputCapture in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0072FFB000000BA711A /* AudioInputCapture */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0182FFB000000BA711A /* FMDeemphasis in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0082FFB000000BA711A /* FMDeemphasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0192FFB000000BA711A /* PCMJitterBuffer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB01B2FFB000000BA711A /* PCMPrefix in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; };
 		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
@@ -191,6 +191,16 @@
 		AA000017AA000017AA000017 /* rtl_convenience.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = rtl_convenience.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0E4B699D304458BB007C564B /* Exceptions for "AntennaHead" folder in "AntennaHead" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0EF469B52FCE8911001510D3 /* AntennaHead */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0EA488A2300DD6B70030FD73 /* Docs */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -199,6 +209,9 @@
 		};
 		0EF469B82FCE8911001510D3 /* AntennaHead */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0E4B699D304458BB007C564B /* Exceptions for "AntennaHead" folder in "AntennaHead" target */,
+			);
 			path = AntennaHead;
 			sourceTree = "<group>";
 		};
@@ -599,6 +612,7 @@
 		};
 		0ECF58DA2FDC92D1006943DA /* run install_name_tool */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -613,7 +627,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Must be positioned after Link Binary With Libraries, and before code-signing\nBIN=\"${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}\"\n   install_name_tool -change \\\n       /opt/local/lib/libusb-1.0.0.dylib \\\n       @rpath/libusb-1.0.0.dylib \\\n       \"$BIN\"\n";
+			shellScript = "# Must be positioned after Link Binary With Libraries, and before code-signing\nBIN=\"${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}\"\nif otool -L \"$BIN\" | grep -q \"/opt/local/lib/libusb-1.0.0.dylib\"; then\n    install_name_tool -change \\\n        /opt/local/lib/libusb-1.0.0.dylib \\\n        @rpath/libusb-1.0.0.dylib \\\n        \"$BIN\"\n    codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" \"$BIN\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1194,11 +1208,6 @@
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMPassthrough;
 		};
-		0EFDB0202FFB000000BA711A /* PCMPrefix */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
-			productName = PCMPrefix;
-		};
 		0EFDB0042FFB000000BA711A /* PCMMixer */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
@@ -1228,6 +1237,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMJitterBuffer;
+		};
+		0EFDB0202FFB000000BA711A /* PCMPrefix */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
+			productName = PCMPrefix;
 		};
 		308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */ = {
 			isa = XCSwiftPackageProductDependency;

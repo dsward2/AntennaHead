@@ -46,7 +46,7 @@ struct ConfigurationView: View {
                 portRow("Streaming Server HTTP Port:", lasProcess.httpPort)
                 httpsPortRow("Streaming Server HTTPS Port:", Int(streamingHTTPSPort))
                 if let lastError = httpServer.lastError {
-                    Text("\(lastError)")
+                    Text(lastError.localizedDescription)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
@@ -170,7 +170,7 @@ struct ConfigurationView: View {
                 if airPlayReceiverEnabled {
                     LabeledContent("Status:", value: airPlayReceiverProcessManager.isRunning ? "Running" : "Stopped")
                     if let lastError = airPlayReceiverProcessManager.lastError {
-                        Text("\(lastError)")
+                        Text(lastError.localizedDescription)
                             .font(.caption)
                             .foregroundStyle(.red)
                     }

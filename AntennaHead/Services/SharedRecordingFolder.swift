@@ -8,11 +8,11 @@ import Foundation
 /// entitlements — no picker, no bookmark, and ControlBooth (unsandboxed) can
 /// read/write the same path with no extra grant of its own.
 enum SharedRecordingFolder {
-    static let appGroupIdentifier = "group.com.dsward.antennahead"
+    nonisolated static let appGroupIdentifier = "group.com.dsward.antennahead"
 
     /// Creates the folder on first access if it doesn't exist yet. `nil`
     /// only if the App Group entitlement itself is missing or misconfigured.
-    static var url: URL? {
+    nonisolated static var url: URL? {
         guard let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
             return nil

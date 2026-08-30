@@ -216,7 +216,7 @@ final class AntennaHeadHTTPServer {
             self?.handle(connection, auth: auth, isSecure: isSecure, webConfig: webConfig)
         }
         listener.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.handleListenerState(state, isSecure: isSecure)
             }
         }
@@ -360,7 +360,7 @@ final class AntennaHeadHTTPServer {
         var headers: [String: String]
         var body: Data
 
-        static let notFound = HTTPResponse(status: 404, reason: "Not Found",
+        nonisolated static let notFound = HTTPResponse(status: 404, reason: "Not Found",
                                            headers: ["Content-Type": "text/plain; charset=utf-8"],
                                            body: Data("Not Found".utf8))
     }
@@ -1332,12 +1332,12 @@ final class AntennaHeadHTTPServer {
     /// AntennaHead's own AAC recorder and ControlBooth's LiveAudioRecorder
     /// helper can produce, plus the common formats `PCMFilePlayer` (backed by
     /// `AVAudioFile`) can decode.
-    private static let recordingsFileExtensions: Set<String> = ["aac", "mp3", "m4a", "wav", "caf"]
+    nonisolated private static let recordingsFileExtensions: Set<String> = ["aac", "mp3", "m4a", "wav", "caf"]
 
     /// Route prefix for the fast-download playback route (see
     /// `recordingDownloadResponse`) — the bare filename is appended,
     /// percent-encoded, e.g. `/recordings-download/AntennaHead-2026...aac`.
-    private static let recordingsDownloadPrefix = "/recordings-download/"
+    nonisolated private static let recordingsDownloadPrefix = "/recordings-download/"
 
     /// Where `remuxedM4A(forRecordingAt:)` caches its output. Lives in this
     /// (sandboxed) app's own Caches directory rather than the shared App
@@ -1795,7 +1795,7 @@ final class AntennaHeadHTTPServer {
         if task.id != nil {
             try? sqlite?.updateCustomTaskRecord(task)
         } else {
-            try? sqlite?.insertCustomTaskRecord(&task)
+            _ = try? sqlite?.insertCustomTaskRecord(&task)
         }
     }
 
@@ -2014,9 +2014,9 @@ final class AntennaHeadHTTPServer {
         let fields = formFields(fromBody: body)
         let name = (fields["category_name"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        if let existing = try? sqlite?.categoryRecord(forName: name), existing != nil { return }
+        if (try? sqlite?.categoryRecord(forName: name)) != nil { return }
         var record = Category.prototype(name: name)
-        try? sqlite?.insertCategoryRecord(&record)
+        _ = try? sqlite?.insertCategoryRecord(&record)
     }
 
     /// Applies edited scan settings to a category (storecategory.html). Unlisted
@@ -2806,7 +2806,24 @@ final class AntennaHeadHTTPServer {
     /// model — see `proxyToLiveAudioServer`'s doc comment for that constraint.
     nonisolated private func remux(from sourceURL: URL, to destinationURL: URL) -> Bool {
         let asset = AVURLAsset(url: sourceURL)
-        guard let track = asset.tracks(withMediaType: .audio).first,
+
+        // `loadTracks(withMediaType:)` is async-only; bridge it to this
+        // function's synchronous, blocks-the-calling-thread model (see the
+        // doc comment above) the same way `writer.finishWriting` is bridged
+        // further down, via a semaphore.
+        var loadedTracks: [AVAssetTrack] = []
+        var loadedFormatDescriptions: [CMFormatDescription] = []
+        let trackLoadSemaphore = DispatchSemaphore(value: 0)
+        Task {
+            loadedTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+            if let track = loadedTracks.first {
+                loadedFormatDescriptions = (try? await track.load(.formatDescriptions)) ?? []
+            }
+            trackLoadSemaphore.signal()
+        }
+        trackLoadSemaphore.wait()
+
+        guard let track = loadedTracks.first,
               let reader = try? AVAssetReader(asset: asset),
               let writer = try? AVAssetWriter(outputURL: destinationURL, fileType: .m4a) else {
             return false
@@ -2827,7 +2844,7 @@ final class AntennaHeadHTTPServer {
         guard reader.canAdd(output) else { return false }
         reader.add(output)
 
-        guard let formatDescription = (track.formatDescriptions as? [CMFormatDescription])?.first else {
+        guard let formatDescription = loadedFormatDescriptions.first else {
             return false
         }
         let sourceFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)

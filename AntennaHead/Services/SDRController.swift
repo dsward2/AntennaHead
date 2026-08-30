@@ -184,7 +184,8 @@ final class SDRController {
     private func startStatusListener() {
         statusListener = RTLSDRStatusListener(port: statusUDPPort)
         statusListener?.onRMSPower = { [weak self] rms in
-            Task { @MainActor in self?.signalLevel = rms }
+            guard let self else { return }
+            Task { @MainActor in self.signalLevel = rms }
         }
         statusListener?.start()
     }
