@@ -742,7 +742,10 @@ html {
 :root[data-theme="dark"]  { color-scheme: dark; }
 
 :root {
-    --ah-bg:          light-dark(#ffffff, #1c1c1e);
+    /* Keep in sync with the `AppBackground` asset-catalog colour and the
+       `--bg` token in StatusWebView's shell — this is the one window
+       background shared by the web tabs and the native SwiftUI tabs. */
+    --ah-bg:          light-dark(#f2f2f7, #1c1c1e);
     --ah-fg:          light-dark(#222222, #f2f2f7);
     --ah-muted:       light-dark(#6e6e73, #9e9ea3);
     --ah-bar-bg:      light-dark(#d3d3d3, #2c2c2e);  /* was the literal `lightgray` */

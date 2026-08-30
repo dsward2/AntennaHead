@@ -178,6 +178,7 @@ struct TLSSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .harmonizedFormBackground()
         .navigationTitle("TLS / Security")
         .onAppear {
             if let current = authCredentials.current {

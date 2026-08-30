@@ -45,6 +45,7 @@ struct ContentView: View {
 
             tabs
         }
+        .background(Color.appBackground)
         .frame(minWidth: 800, minHeight: 540)
         .toolbar {
             // Share the web UI URL (AirDrop, Messages, …) — ported from

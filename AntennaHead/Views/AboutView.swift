@@ -54,5 +54,6 @@ struct AboutView: View {
         }
         .padding(24)
         .frame(width: 300)
+        .background(Color.appBackground)
     }
 }

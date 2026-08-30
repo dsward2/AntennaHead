@@ -79,6 +79,9 @@ struct StatusWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.isInspectable = true
+        // Match the shared window background so the shell load doesn't flash
+        // pure black in Dark Mode before the CSS `--bg` paints.
+        webView.underPageBackgroundColor = NSColor(named: "AppBackground") ?? .windowBackgroundColor
         webView.navigationDelegate = context.coordinator
         webView.loadHTMLString(Self.htmlShell, baseURL: nil)
         return webView
@@ -138,6 +141,9 @@ private extension StatusWebView {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
+    /* --bg: keep in sync with the AppBackground asset-catalog colour and
+       custom.css's --ah-bg — the one window background shared by the web
+       tabs and the native SwiftUI tabs. */
     --bg: #f2f2f7;
     --card: #ffffff;
     --card-border: rgba(0,0,0,0.08);

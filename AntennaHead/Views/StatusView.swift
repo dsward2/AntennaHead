@@ -27,6 +27,7 @@ struct StatusView: View {
             StatusWebView(snapshot: snapshot)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(Color.appBackground)
         .task {
             while !Task.isCancelled {
                 let found = await Task.detached(priority: .utility) {

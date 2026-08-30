@@ -75,6 +75,7 @@ struct FCCSearchView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .frame(height: 230)
 
             Table(results, selection: $selection) {
@@ -93,6 +94,7 @@ struct FCCSearchView: View {
                 TableColumn("ERP", value: \.erp)
                     .width(min: 60, ideal: 80)
             }
+            .scrollContentBackground(.hidden)
 
             Divider()
 
@@ -106,6 +108,7 @@ struct FCCSearchView: View {
             }
             .padding()
         }
+        .background(Color.appBackground)
         .navigationTitle("FCC Database Search")
         .frame(minWidth: 640, minHeight: 520)
         .alert("Existing record found for this frequency", isPresented: $showingReplaceAlert) {

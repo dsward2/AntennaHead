@@ -26,6 +26,10 @@ struct WebRadioView: NSViewRepresentable {
         let webView = WKWebView()
         webView.isInspectable = true
         webView.customUserAgent = "AntennaHead/1.0"
+        // Match the shared window background so page load / post-restart reloads
+        // don't flash pure black in Dark Mode (and the overscroll rubber-band
+        // stays on-palette). The page's own `--ah-bg` takes over once CSS paints.
+        webView.underPageBackgroundColor = NSColor(named: "AppBackground") ?? .windowBackgroundColor
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.configuration.userContentController.add(context.coordinator, name: "recorderBridge")

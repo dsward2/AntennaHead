@@ -196,6 +196,7 @@ struct ConfigurationView: View {
             }
         }
         .formStyle(.grouped)
+        .harmonizedFormBackground()
         .onAppear(perform: reloadSettings)
         .sheet(isPresented: $showingEditSheet, onDismiss: reloadSettings) {
             EditConfigurationSheet(ports: PortSettings.load(), outputBitrate: outputBitrate)
@@ -372,6 +373,7 @@ private struct EditConfigurationSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
 
             Divider()
 
@@ -393,6 +395,7 @@ private struct EditConfigurationSheet: View {
             }
             .padding()
         }
+        .background(Color.appBackground)
         .frame(width: 460, height: 480)
     }
 
