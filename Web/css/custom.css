@@ -758,6 +758,10 @@ html {
        slate in dark mode (per request). */
     --ah-primary-bg:         light-dark(#33C3F0, #334950);
     --ah-primary-bg-hover:   light-dark(#1EAEDB, #3d565e);
+    /* Frequency-tuner digit highlighted for +/- editing (js/antennahead.js
+       tunerDigitClicked). Was an inline literal `lightgray`, which left the
+       light digit text almost unreadable in dark mode. */
+    --ah-digit-selected-bg:  light-dark(#cfcfcf, #4a4a4e);
 }
 
 body {
@@ -824,6 +828,11 @@ code { background: var(--ah-panel-bg); border-color: var(--ah-border); }
 
 /* Tuner readout border was a literal `black`. */
 span.tuner-digit { border-color: var(--ah-fg); }
+
+/* The digit picked for +/- editing. tunerDigitClicked() toggles this class
+   (it used to set an inline background-color instead); the token keeps the
+   highlight readable against the light digit text in dark mode. */
+span.tuner-digit.tuner-digit-selected { background-color: var(--ah-digit-selected-bg); }
 
 /* Home-screen menu icons (images/*.svg, inlined into index2.html by
    loadSVG). The files now draw their line-art in `currentColor` and

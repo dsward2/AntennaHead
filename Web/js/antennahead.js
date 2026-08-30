@@ -730,11 +730,11 @@ function tunerDigitClicked(element)
     var tunerDigitsArray = document.getElementsByClassName("tuner-digit");
     var i;
     for (i = 0; i < tunerDigitsArray.length; i++) {
-        tunerDigitsArray[i].style.backgroundColor = "white";
+        tunerDigitsArray[i].classList.remove("tuner-digit-selected");
         tunerDigitsArray[i].selected = false;
     }
-    
-    element.style.backgroundColor = "lightgray";
+
+    element.classList.add("tuner-digit-selected");
     element.selected = true;
 }
 
