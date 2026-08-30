@@ -948,14 +948,26 @@ final class SDRController {
     /// Modulation maps to a spoken band: fm/wfm/nfm → "F M", am → "A M",
     /// usb/lsb → "upper/lower sideband", everything else → omit the band.
     static func announcementText(forFrequency f: Frequency) -> String {
-        let name = f.stationName.trimmingCharacters(in: .whitespacesAndNewlines)
-        var text = "Now playing \(name.isEmpty ? "this station" : name)."
-        guard f.frequencyMode == 0 else { return text }
+        let rawName = f.stationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An ad-hoc web-Tuner tuning has no real name: SDRController fills
+        // stationName with a formatted readout ("89.1000 MHz") for the UI.
+        // Don't speak that back verbatim — the zero-padded, "MHz"-suffixed
+        // form reads badly. Treat it as unnamed and let the phrase below say
+        // the frequency cleanly ("89.1 F M").
+        let name = isFrequencyOnlyName(rawName) ? "" : rawName
 
         let number = spokenFrequencyNumber(f)
         let band = spokenBand(f.modulation)
         let phrase = band.isEmpty ? "\(number) megahertz" : "\(number) \(band)"
 
+        guard f.frequencyMode == 0 else {
+            return "Now playing \(name.isEmpty ? "this station" : name)."
+        }
+        if name.isEmpty {
+            return "Now playing \(phrase)."
+        }
+
+        var text = "Now playing \(name)."
         // Skip the tail if the name already spells the frequency or band out.
         let nameKey = name.lowercased().filter { !$0.isWhitespace }
         let saysNumber = nameKey.contains(number.filter { !$0.isWhitespace })
@@ -964,6 +976,22 @@ final class SDRController {
             text += " \(phrase)."
         }
         return text
+    }
+
+    /// True when `name` is just a frequency readout — digits with a decimal
+    /// point and/or an "MHz"/"kHz" suffix — i.e. the placeholder
+    /// `startTasksForFrequency` stores for an ad-hoc tuning, not a name the
+    /// listener chose. A bare integer ("1010") is left alone: it could be a
+    /// station's on-air name.
+    private static func isFrequencyOnlyName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        let hadUnit = lower.contains("mhz") || lower.contains("khz")
+        let digits = lower
+            .replacingOccurrences(of: "mhz", with: "")
+            .replacingOccurrences(of: "khz", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isNumber || $0 == "." }) else { return false }
+        return hadUnit || digits.contains(".")
     }
 
     /// "89.1", "162.4", "1010" — trailing zeros trimmed, spoken as a number.
