@@ -38,17 +38,55 @@ final class AntennaHeadHTTPServer {
     /// output bitrate is baked into both `WebConfig` and the LAS launch args).
     static let settingsDidChangeNotification = Notification.Name("AntennaHeadHTTPServer.settingsDidChange")
 
+    /// Posted after the web Settings page stores a new colour scheme. The
+    /// embedded `WebRadioView`s observe this to re-sync their WKWebView's
+    /// `appearance` (native form controls, the `<audio>` transport, scroll
+    /// bars) with a forced Light/Dark choice — no service restart, and the
+    /// page CSS has already reacted to the live `data-theme` change.
+    static let webUIThemeDidChangeNotification = Notification.Name("AntennaHeadHTTPServer.webUIThemeDidChange")
+
     /// `app_config` key holding the system-wide stream output bitrate
     /// in bits/sec (key name retained from LocalRadio's database).
     static let outputBitrateConfigKey = "AACBitrate"
     static let defaultOutputBitrate = 128_000
     static let outputBitrateOptions = [32_000, 48_000, 64_000, 96_000, 128_000, 192_000, 256_000]
 
+    /// `app_config` key for the web UI colour scheme: `"auto"` (follow the
+    /// viewer's OS setting), `"light"`, or `"dark"`. Baked into `index.html`
+    /// as a `data-theme` attribute on `<html>` (see `renderHTML` and
+    /// `css/custom.css`). Unlike `AACBitrate` this is purely cosmetic and
+    /// needs no service restart — only a page reload — so the web Settings
+    /// page updates it through its own lightweight `/applywebuitheme.html`
+    /// route rather than the "save and restart" AAC form.
+    static let webUIThemeConfigKey = "AntennaHeadWebUITheme"
+    static let webUIThemeOptions = ["auto", "light", "dark"]
+    static let defaultWebUITheme = "auto"
+
+    /// App-settings keys for the "Text to Speech" folder chosen on the Audio
+    /// Devices page. The bookmark is security-scoped (created from an
+    /// NSOpenPanel selection, same pattern as ConfigurationView's ControlBooth
+    /// picker); the plain path is kept alongside it for display and as a
+    /// fallback. Both persist in the app-settings table across launches.
+    static let textToSpeechFolderBookmarkKey = "AntennaHeadTextToSpeechFolderBookmark"
+    static let textToSpeechFolderPathKey = "AntennaHeadTextToSpeechFolderPath"
+    /// Guard rails when reading the folder — a spoken sequence far larger than
+    /// this is almost certainly a mistaken folder choice.
+    private static let textToSpeechMaxFiles = 500
+    private static let textToSpeechMaxTotalCharacters = 1_000_000
+
     /// The stored output bitrate (bits/sec), falling back to the default.
     @MainActor static func storedOutputBitrate(sqlite: SQLiteController?) -> Int {
         let stored = ((try? sqlite?.appSettingsValue(forKey: outputBitrateConfigKey)) ?? nil)
             .flatMap(Int.init)
         guard let stored, outputBitrateOptions.contains(stored) else { return defaultOutputBitrate }
+        return stored
+    }
+
+    /// The stored web UI colour scheme, falling back to `defaultWebUITheme`
+    /// for a missing or unrecognised value.
+    @MainActor static func storedWebUITheme(sqlite: SQLiteController?) -> String {
+        let stored = (try? sqlite?.appSettingsValue(forKey: webUIThemeConfigKey)) ?? nil
+        guard let stored, webUIThemeOptions.contains(stored) else { return defaultWebUITheme }
         return stored
     }
 
@@ -443,6 +481,26 @@ final class AntennaHeadHTTPServer {
     /// that aren't app-state, so the caller falls back to static/dynamic serving.
     @MainActor private func appStateResponse(path: String, request: HTTPRequest, host: String, isSecure: Bool, webConfig: WebConfig) async -> HTTPResponse? {
         switch path {
+        case "/", "/index.html":
+            // The shell page is rendered here (not on the nonisolated
+            // static/dynamic path) so the stored colour scheme can be baked
+            // in as `<html data-theme=…>` — every fragment is injected into
+            // this page's `#content_frame`, so setting it once on the shell
+            // themes the whole UI.
+            return renderHTML(relativePath: "index.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["THEME": Self.storedWebUITheme(sqlite: sqlite)])
+
+        case "/applywebuitheme.html":
+            // POST body is `{theme: "auto"|"light"|"dark"}` from
+            // applyWebUITheme() in js/antennahead.js. Cosmetic only: persist
+            // it for subsequent renders, no notification / no restart.
+            let theme = jsonObject(fromBody: request.body).string("theme")
+            if Self.webUIThemeOptions.contains(theme) {
+                try? sqlite?.storeAppSettingsValue(theme, forKey: Self.webUIThemeConfigKey)
+                NotificationCenter.default.post(name: Self.webUIThemeDidChangeNotification, object: nil)
+            }
+            return okResponse()
+
         case "/favorites.html":
             return renderHTML(relativePath: "favorites.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["FAVORITES_TABLE": favoritesTableHTML()])
@@ -476,7 +534,8 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "devices.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["DEVICES_FORM": devicesFormHTML(),
                                       "CUSTOM_TASKS_FORM": customTasksFormHTML(),
-                                      "GQRX_FORM": gqrxFormHTML()])
+                                      "GQRX_FORM": gqrxFormHTML(),
+                                      "TEXT_TO_SPEECH_FORM": textToSpeechFormHTML()])
 
         case "/devicelistenbuttonclicked.html":
             // Buttons are wired; the Core Audio device-input pipeline is deferred
@@ -497,9 +556,30 @@ final class AntennaHeadHTTPServer {
             sdrController?.startGqrxListening(channels: gqrxChannels)
             return okResponse()
 
+        case "/texttospeechchoosefolder.html":
+            // Runs a native folder chooser on the host Mac and persists the
+            // selection (security-scoped bookmark + path). Responds with the
+            // currently-saved path so the web UI can update its label.
+            let path = chooseTextToSpeechFolder()
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "text/plain; charset=utf-8"],
+                                body: Data(path.utf8))
+
+        case "/texttospeechlistenbuttonclicked.html":
+            // Body is a JSON *object*: {sequence, repeat}. The folder itself is
+            // the saved setting — resolve its bookmark and read the .txt files
+            // here, then hand them to SDRController.
+            let o = jsonObject(fromBody: request.body)
+            let randomOrder = (o["sequence"] as? String) == "random"
+            let repeatForever = (o["repeat"] as? String) == "1"
+            sdrController?.startTextToSpeech(files: textToSpeechFolderFiles(),
+                                            randomOrder: randomOrder, repeatForever: repeatForever)
+            return okResponse()
+
         case "/settings.html":
             return renderHTML(relativePath: "settings.html", host: host, isSecure: isSecure, webConfig: webConfig,
-                              extra: ["AAC_BITRATE_SELECT": outputBitrateSelectOptionsHTML()])
+                              extra: ["AAC_BITRATE_SELECT": outputBitrateSelectOptionsHTML(),
+                                      "WEB_UI_THEME_SELECT": webUIThemeSelectOptionsHTML()])
 
         case "/applyaacsettings.html":
             // POST body is a JSON object {bitrate: "<bps>"} from applyAACSettings().
@@ -1234,6 +1314,18 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
+    /// `%%WEB_UI_THEME_SELECT%%` — `<option>`s for the colour-scheme pop-up,
+    /// with the stored `app_config` value selected.
+    @MainActor private func webUIThemeSelectOptionsHTML() -> String {
+        let current = Self.storedWebUITheme(sqlite: sqlite)
+        let labels = ["auto": "Auto (match system)", "light": "Light", "dark": "Dark"]
+        var s = ""
+        for value in Self.webUIThemeOptions {
+            s += "<option value='\(value)'\(value == current ? " selected" : "")>\(labels[value] ?? value)</option>"
+        }
+        return s
+    }
+
     // MARK: Recordings page (browse + play files from the shared Recordings folder)
 
     /// Audio file extensions listed on the Recordings page — everything
@@ -1365,8 +1457,10 @@ final class AntennaHeadHTTPServer {
     /// bridge. Sox normalizes to 48 kHz/2ch; `channels` must match Gqrx's
     /// Audio→Stereo setting (see `SDRController.startGqrxListening`).
     @MainActor private func gqrxFormHTML() -> String {
+        let gqrxPort = sdrController?.gqrxReceivePort ?? 7355
         var s = "<form class='gqrx_form' id='gqrxForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Listen to Gqrx</label>"
+        s += "<p>Receiving on UDP port <strong>\(gqrxPort)</strong> — set Gqrx's Audio ▸ UDP output to this port.</p>"
         s += "<label>Channels</label>"
         s += "<select class='u-full-width' name='gqrx_channels'>"
         s += "<option value='2'>2 – Stereo (Gqrx Audio ▸ Stereo checkbox enabled)</option>"
@@ -1374,9 +1468,128 @@ final class AntennaHeadHTTPServer {
         s += "</select>"
         s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
         s += "onclick=\"gqrxListenButtonClicked(this.form);\" "
-        s += "title='Receive Gqrx&#39;s UDP audio output (port 7355), normalize via sox, forward to LiveAudioServer.'>"
+        s += "title='Receive Gqrx&#39;s UDP audio output (port \(gqrxPort)), normalize via sox, forward to LiveAudioServer.'>"
         s += "</form><br>&nbsp;<br>"
         return s
+    }
+
+    /// `%%TEXT_TO_SPEECH_FORM%%` — a persistent folder setting (chosen with a
+    /// native NSOpenPanel via `/texttospeechchoosefolder.html`), an order, and a
+    /// repeat toggle, then Listen. `/texttospeechlistenbuttonclicked.html`
+    /// resolves the saved security-scoped bookmark, reads the folder's `.txt`
+    /// files, and hands them to `SDRController.startTextToSpeech` → PCMSpeechSynth
+    /// → sox → PCMUDPSender.
+    @MainActor private func textToSpeechFormHTML() -> String {
+        let storedPath = ((try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderPathKey)) ?? nil) ?? ""
+        let folderLabel = storedPath.isEmpty ? "No folder selected." : storedPath
+
+        var s = "<form class='text_to_speech_form' id='textToSpeechForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label>Text to Speech</label>"
+        s += "<p>Speak the <code>.txt</code> files from a folder through the live audio pipeline "
+        s += "(<code>PCMSpeechSynth</code> synthesizes each one in turn).</p>"
+        s += "<label for='tts_folder_status'>Text Files Folder</label>"
+        s += "<p id='tts_folder_status' class='tts-folder-path'>\(htmlText(folderLabel))</p>"
+        s += "<input class='twelve columns button' type='button' value='Select Text Folder…' "
+        s += "onclick='textToSpeechChooseFolderButtonClicked();' "
+        s += "title='Open a folder chooser on the Mac running AntennaHead and press Select. The choice is remembered.'>"
+        s += "<label for='tts_sequence'>Sequence</label>"
+        s += "<select id='tts_sequence' name='tts_sequence' class='u-full-width' "
+        s += "title='Chronological plays the oldest file first; Random shuffles the order.'>"
+        s += "<option value='chronological'>Chronological (oldest file first)</option>"
+        s += "<option value='random'>Random</option>"
+        s += "</select>"
+        s += "<label for='tts_repeat' title='Loop through the folder continuously until you play something else.'>"
+        s += "<input type='checkbox' id='tts_repeat' name='tts_repeat' value='1'> Repeat indefinitely</label>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"textToSpeechListenButtonClicked(getElementById('textToSpeechForm'));\" "
+        s += "title='Synthesize the selected folder&#39;s text files and stream them through the live audio pipeline.'>"
+        s += "</form><br>&nbsp;<br>"
+        return s
+    }
+
+    /// Runs a native folder chooser on the host Mac and, on "Select", persists
+    /// the choice as a security-scoped bookmark plus a plain path (same storage
+    /// pattern as ConfigurationView's ControlBooth picker). Returns the saved
+    /// path — the freshly chosen one, or the previously stored value if the
+    /// user cancels — for the web UI to display.
+    @MainActor private func chooseTextToSpeechFolder() -> String {
+        let stored = ((try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderPathKey)) ?? nil) ?? ""
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select"
+        panel.message = "Choose the folder that holds the text (.txt) files to speak"
+        if !stored.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: stored)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return stored }
+
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? sqlite?.storeAppSettingsValue(data.base64EncodedString(),
+                                               forKey: Self.textToSpeechFolderBookmarkKey)
+        }
+        try? sqlite?.storeAppSettingsValue(url.path, forKey: Self.textToSpeechFolderPathKey)
+        return url.path
+    }
+
+    /// Resolves the saved Text-to-Speech folder bookmark and reads its `.txt`
+    /// files (name, modification date, contents) while holding security-scoped
+    /// access. Returns `[]` when no folder is configured or it can't be read.
+    @MainActor private func textToSpeechFolderFiles() -> [SDRController.SpeechTextFile] {
+        guard let base64 = (try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderBookmarkKey)) ?? nil,
+              let data = Data(base64Encoded: base64) else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Text to Speech: no folder selected — use \"Select Text Folder…\" first")
+            return []
+        }
+        var isStale = false
+        guard let folderURL = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                       relativeTo: nil, bookmarkDataIsStale: &isStale) else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Text to Speech: saved folder bookmark could not be resolved — re-select the folder")
+            return []
+        }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        if isStale, let fresh = try? folderURL.bookmarkData(options: .withSecurityScope,
+                                                           includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? sqlite?.storeAppSettingsValue(fresh.base64EncodedString(),
+                                               forKey: Self.textToSpeechFolderBookmarkKey)
+        }
+
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles])) ?? [])
+            .filter { $0.pathExtension.lowercased() == "txt" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        var files: [SDRController.SpeechTextFile] = []
+        var totalCharacters = 0
+        for url in entries {
+            guard files.count < Self.textToSpeechMaxFiles,
+                  totalCharacters < Self.textToSpeechMaxTotalCharacters else {
+                LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+                                    "Text to Speech: folder has more text than the \(Self.textToSpeechMaxFiles)-file / "
+                                    + "\(Self.textToSpeechMaxTotalCharacters)-character cap — speaking the first part only")
+                break
+            }
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            files.append(SDRController.SpeechTextFile(name: url.lastPathComponent, modified: modified, text: text))
+            totalCharacters += text.count
+        }
+        if files.isEmpty {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Text to Speech: no readable .txt files in \(folderURL.path)")
+        }
+        return files
     }
 
     // MARK: Custom-task web manager (list / edit / upsert / delete)
@@ -1537,7 +1750,7 @@ final class AntennaHeadHTTPServer {
         let isKnownTool = !path.isEmpty && !path.contains("/") && tools.contains(path)
         let selected = path.isEmpty ? (tools.first ?? "__custom__") : (isKnownTool ? path : "__custom__")
 
-        var s = "<div class='task-stage' style='border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:10px;'>"
+        var s = "<div class='task-stage' style='border:1px solid var(--ah-border, #bbb); border-radius:4px; padding:10px; margin-bottom:10px;'>"
         s += "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
         s += "<label>Tool</label>"
         s += "<select class='task-tool u-full-width' onchange='customTaskToolChanged(this);'>"
@@ -2291,6 +2504,11 @@ final class AntennaHeadHTTPServer {
         case "index.html":
             dict["NAV_BAR"]      = navBarHTML()
             dict["AUDIO_PLAYER"] = audioPlayerHTML(host: host, isSecure: isSecure, webConfig: webConfig)
+            // Safety net so `%%THEME%%` is never left raw on this nonisolated
+            // path; the `/` and `/index.html` routes override it via `extra`
+            // with the stored value (see `appStateResponse`). Literal rather
+            // than `Self.defaultWebUITheme` to stay off the MainActor here.
+            dict["THEME"]        = "auto"
         case "index2.html":
             func col(_ svg: String, onclick: String, title: String, label: String, description: String) -> String {
                 """

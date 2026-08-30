@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -21,6 +22,14 @@ struct ConfigurationView: View {
     @State private var launchControlBoothOnStartup = false
     @State private var airPlayReceiverEnabled = false
     @State private var airPlayReceiverDeviceName = "AntennaHead"
+    @State private var announcementEnabled = false
+    @State private var announcementVoiceID = ""
+    @State private var previewSynth = AVSpeechSynthesizer()
+
+    /// System speech voices, sorted by language then name, for the announcement
+    /// picker. Only installed voices are returned, so the menu is self-limiting.
+    private let installedVoices: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices()
+        .sorted { ($0.language, $0.name) < ($1.language, $1.name) }
 
     private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
@@ -55,6 +64,30 @@ struct ConfigurationView: View {
                     Text("\(outputBitrate / 1000) kbps")
                         .monospacedDigit()
                 }
+            }
+
+            Section {
+                Toggle("Announce the station before playback", isOn: $announcementEnabled)
+                    .onChange(of: announcementEnabled) { _, _ in saveAnnouncementSettings() }
+                Picker("Voice", selection: $announcementVoiceID) {
+                    Text("System Default").tag("")
+                    ForEach(installedVoices, id: \.identifier) { voice in
+                        Text(voiceLabel(voice)).tag(voice.identifier)
+                    }
+                }
+                .onChange(of: announcementVoiceID) { _, _ in saveAnnouncementSettings() }
+                .disabled(!announcementEnabled)
+                HStack {
+                    Button("Preview Voice") { previewAnnouncementVoice() }
+                        .disabled(!announcementEnabled)
+                    Spacer()
+                }
+            } header: {
+                Text("Announcements")
+            } footer: {
+                Text("When enabled, a synthesized voice says \u{201C}Now playing \u{2026}\u{201D} \u{2014} the station name, plus the frequency and band for a fixed tuning \u{2014} before a Favorite or category scan starts. Only voices installed on this Mac are listed; add more in System Settings \u{203A} Accessibility \u{203A} Spoken Content \u{203A} System Voice.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("ControlBooth") {
@@ -219,6 +252,15 @@ struct ConfigurationView: View {
         airPlayReceiverEnabled = airPlayEnabled == "1"
         let storedDeviceName = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
         airPlayReceiverDeviceName = storedDeviceName ?? "AntennaHead"
+        let announceEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementEnabledKey)) ?? nil
+        announcementEnabled = announceEnabled == "1"
+        let storedVoice = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementVoiceKey)) ?? nil
+        // Drop a saved voice that's no longer installed so the picker shows a valid selection.
+        if let storedVoice, !storedVoice.isEmpty, AVSpeechSynthesisVoice(identifier: storedVoice) != nil {
+            announcementVoiceID = storedVoice
+        } else {
+            announcementVoiceID = ""
+        }
     }
 
     private func saveControlBoothSettings() {
@@ -235,6 +277,32 @@ struct ConfigurationView: View {
             airPlayReceiverEnabled ? "1" : "0", forKey: Self.airPlayReceiverEnabledKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             airPlayReceiverDeviceName, forKey: Self.airPlayReceiverDeviceNameKey)
+    }
+
+    private func saveAnnouncementSettings() {
+        try? SQLiteController.shared.storeAppSettingsValue(
+            announcementEnabled ? "1" : "0", forKey: SDRController.announcementEnabledKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            announcementVoiceID, forKey: SDRController.announcementVoiceKey)
+    }
+
+    private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
+        let quality: String
+        switch voice.quality {
+        case .enhanced: quality = " (Enhanced)"
+        case .premium: quality = " (Premium)"
+        default: quality = ""
+        }
+        return "\(voice.name) — \(voice.language)\(quality)"
+    }
+
+    private func previewAnnouncementVoice() {
+        previewSynth.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: "Now playing K U A R. 89.1 F M.")
+        if !announcementVoiceID.isEmpty {
+            utterance.voice = AVSpeechSynthesisVoice(identifier: announcementVoiceID)
+        }
+        previewSynth.speak(utterance)
     }
 
     private func chooseControlBoothApp() {

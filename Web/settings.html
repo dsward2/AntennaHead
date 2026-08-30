@@ -25,6 +25,27 @@
             <br>&nbsp;
             <br>
             Restarting will stop current audio stream.
+
+            <br>&nbsp;
+            <br>
+
+            <h3 class="title">Appearance</h3>
+            <form id="web-ui-theme-form" onsubmit="event.preventDefault(); return applyWebUITheme(this);" method="POST">
+
+                <label for="web_ui_theme_select">Color scheme:</label>
+                <select class="twelve columns value-prop" id="web_ui_theme_select" name="web_ui_theme_select" onchange="applyWebUITheme(this.form);">
+                    %%WEB_UI_THEME_SELECT%%
+                </select>
+
+                <br>
+                <br>&nbsp;
+                <br>
+
+                <input class="twelve columns button button-primary" type="button" value="Apply" onclick="event.preventDefault(); return applyWebUITheme(this);">
+            </form>
+            <br>&nbsp;
+            <br>
+            &ldquo;Auto&rdquo; follows this device&rsquo;s Light/Dark setting. Takes effect immediately &mdash; no restart.
         </section>
 
         

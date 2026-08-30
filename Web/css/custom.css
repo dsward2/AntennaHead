@@ -650,33 +650,33 @@ html {
     margin-bottom: 12px;
 }
 .ct-pipeline .ct-idle {
-    color: #6e6e73;
+    color: var(--ah-muted, #6e6e73);
     font-style: italic;
     margin: 6px 2px;
 }
 .ct-pipeline rect.ct-node {
-    fill: #f5f9ff;
-    stroke: #0a84ff;
+    fill: var(--ah-node-fill, #f5f9ff);
+    stroke: var(--ah-node-stroke, #0a84ff);
     stroke-width: 1.5;
 }
 .ct-pipeline g.ct-pnode { cursor: pointer; }
-.ct-pipeline g.ct-pnode:hover rect.ct-node { fill: #e6f1ff; }
+.ct-pipeline g.ct-pnode:hover rect.ct-node { fill: var(--ah-node-hover, #e6f1ff); }
 .ct-pipeline text.ct-node-index {
-    fill: #6e6e73;
+    fill: var(--ah-muted, #6e6e73);
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 .ct-pipeline text.ct-node-name {
-    fill: #1c1c1e;
+    fill: var(--ah-fg, #1c1c1e);
     font-size: 13px;
     font-weight: 600;
 }
 .ct-pipeline line.ct-arrow { stroke: #8e8e93; stroke-width: 1.5; }
 .ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
 .ct-pipeline text.ct-link-label {
-    fill: #6e6e73;
+    fill: var(--ah-muted, #6e6e73);
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
@@ -687,17 +687,6 @@ html {
     font-size: 11px;
     text-decoration: none;
     margin-bottom: 4px;
-}
-
-@media (prefers-color-scheme: dark) {
-    .ct-pipeline rect.ct-node { fill: #25303f; stroke: #409cff; }
-    .ct-pipeline g.ct-pnode:hover rect.ct-node { fill: #2e3d52; }
-    .ct-pipeline text.ct-node-name { fill: #f2f2f7; }
-    .ct-pipeline text.ct-node-index,
-    .ct-pipeline text.ct-link-label,
-    .ct-pipeline .ct-idle { fill: #9e9ea3; color: #9e9ea3; }
-    .ct-pipeline line.ct-arrow { stroke: #8e8e93; }
-    .ct-pipeline path.ct-arrowhead { fill: #8e8e93; }
 }
 
 /* AAC recorder toggle, shown next to the <audio> element in the bottom bar.
@@ -731,4 +720,130 @@ html {
 @keyframes aac-rec-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+
+/* ============================================================
+   Colour-scheme theming — Settings page offers Light / Dark /
+   Auto. index.html's <html> carries data-theme="auto|light|dark"
+   (server token %%THEME%%, see AntennaHeadHTTPServer
+   .storedWebUITheme). Every fragment is injected into that page's
+   #content_frame, so theming the shell covers the whole UI.
+
+   `color-scheme` per data-theme drives the CSS `light-dark()`
+   picks below (and the native form-control / scrollbar rendering):
+   "auto" resolves to the OS appearance, "light"/"dark" force it.
+   skeleton.css / normalize.css hardcode light colours; the tokens
+   here are the single place the structural chrome reads.
+   ============================================================ */
+:root                     { color-scheme: light dark; }  /* attr missing → follow OS */
+:root[data-theme="auto"]  { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+:root {
+    --ah-bg:          light-dark(#ffffff, #1c1c1e);
+    --ah-fg:          light-dark(#222222, #f2f2f7);
+    --ah-muted:       light-dark(#6e6e73, #9e9ea3);
+    --ah-bar-bg:      light-dark(#d3d3d3, #2c2c2e);  /* was the literal `lightgray` */
+    --ah-bar-fg:      light-dark(#222222, #f2f2f7);
+    --ah-border:      light-dark(#d1d1d1, #48484a);
+    --ah-field-bg:    light-dark(#ffffff, #2c2c2e);
+    --ah-field-fg:    light-dark(#333333, #f2f2f7);
+    --ah-panel-bg:    light-dark(#eeeeee, #2c2c2e);
+    --ah-node-fill:   light-dark(#f5f9ff, #25303f);
+    --ah-node-stroke: light-dark(#0a84ff, #409cff);
+    --ah-node-hover:  light-dark(#e6f1ff, #2e3d52);
+    /* .button-primary fill: keep Skeleton's blue in light mode, a muted
+       slate in dark mode (per request). */
+    --ah-primary-bg:         light-dark(#33C3F0, #334950);
+    --ah-primary-bg-hover:   light-dark(#1EAEDB, #3d565e);
+}
+
+body {
+    background: var(--ah-bg);
+    color: var(--ah-fg); }
+
+/* Top nav + its links (skeleton hardcodes lightgray / #222). */
+.navbar,
+.navbar-spacer { background: var(--ah-bar-bg); }
+.navbar-link { color: var(--ah-bar-fg); }
+
+/* Form fields (skeleton: #fff bg, #333 text, #D1D1D1 border). */
+input[type="email"],
+input[type="number"],
+input[type="search"],
+input[type="text"],
+input[type="tel"],
+input[type="url"],
+input[type="password"],
+textarea,
+select {
+    background-color: var(--ah-field-bg);
+    color: var(--ah-field-fg);
+    border-color: var(--ah-border); }
+
+/* Plain buttons only — leave .button-primary's blue fill alone. */
+.button:not(.button-primary),
+button:not(.button-primary),
+input[type="submit"]:not(.button-primary),
+input[type="reset"]:not(.button-primary),
+input[type="button"]:not(.button-primary) {
+    color: var(--ah-fg);
+    border-color: var(--ah-border); }
+
+/* Primary (blue) buttons: light mode unchanged (Skeleton #33C3F0),
+   dark mode uses --ah-primary-bg (#334950). Text stays white. */
+.button.button-primary,
+button.button-primary,
+input[type="submit"].button-primary,
+input[type="reset"].button-primary,
+input[type="button"].button-primary {
+    background-color: var(--ah-primary-bg);
+    border-color: var(--ah-primary-bg); }
+.button.button-primary:hover,
+button.button-primary:hover,
+input[type="submit"].button-primary:hover,
+input[type="reset"].button-primary:hover,
+input[type="button"].button-primary:hover,
+.button.button-primary:focus,
+button.button-primary:focus,
+input[type="submit"].button-primary:focus,
+input[type="reset"].button-primary:focus,
+input[type="button"].button-primary:focus {
+    background-color: var(--ah-primary-bg-hover);
+    border-color: var(--ah-primary-bg-hover); }
+
+th, td { border-bottom-color: var(--ah-border); }
+code { background: var(--ah-panel-bg); border-color: var(--ah-border); }
+.docs-section { border-top-color: var(--ah-border); }
+.example-grid .column,
+.example-grid .columns { background: var(--ah-panel-bg); }
+.popover { background: var(--ah-bg); border-color: var(--ah-border); }
+.popover-link { color: var(--ah-fg); border-bottom-color: var(--ah-border); }
+
+/* Tuner readout border was a literal `black`. */
+span.tuner-digit { border-color: var(--ah-fg); }
+
+/* Home-screen menu icons (images/*.svg, inlined into index2.html by
+   loadSVG). The files now draw their line-art in `currentColor` and
+   their "paper" fills in `var(--ah-bg)`; this anchors currentColor to
+   the theme foreground regardless of any ancestor `color`. */
+svg.localradio_icon { color: var(--ah-fg); }
+
+/* Info-page illustration (AntennaHead-animation.svg via
+   %%LOCALRADIO_ANIMATION%%): a fixed-palette scene with embedded raster
+   images and black title text — none of it recolourable. Sit it on its
+   own white figure card so it reads correctly in every theme, instead
+   of losing the title and showing a hard white edge mid-drawing. */
+svg.lr-animation {
+    display: block;
+    width: 100%;
+    max-width: 460px;
+    margin: 12px auto;
+    background: #ffffff;
+    border: 1px solid var(--ah-border);
+    border-radius: 8px;
+    padding: 10px;
+    box-sizing: border-box;
 }

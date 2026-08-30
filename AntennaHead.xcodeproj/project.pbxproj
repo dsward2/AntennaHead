@@ -10,6 +10,7 @@
 		0E2AED6E300F2B0E007F4143 /* PCMUDPSender in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; };
 		0E2AED6F300F2B0E007F4143 /* PCMUDPReceiver in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; };
 		0E2AED70300F2B0E007F4143 /* PCMPassthrough in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; };
+		0E2AED76300F2B0E007F4143 /* PCMPrefix in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; };
 		0E2AED71300F2B0E007F4143 /* PCMMixer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; };
 		0E2AED72300F2B0E007F4143 /* PCMSpeechSynth in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; };
 		0E2AED73300F2B0E007F4143 /* AUProcessor in Frameworks */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; };
@@ -48,6 +49,7 @@
 		0EFDB0112FFB000000BA711A /* PCMUDPSender in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0012FFB000000BA711A /* PCMUDPSender */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0122FFB000000BA711A /* PCMUDPReceiver in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0022FFB000000BA711A /* PCMUDPReceiver */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0132FFB000000BA711A /* PCMPassthrough in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0032FFB000000BA711A /* PCMPassthrough */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0EFDB01B2FFB000000BA711A /* PCMPrefix in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0202FFB000000BA711A /* PCMPrefix */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0142FFB000000BA711A /* PCMMixer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0042FFB000000BA711A /* PCMMixer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0152FFB000000BA711A /* PCMSpeechSynth in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0052FFB000000BA711A /* PCMSpeechSynth */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EFDB0162FFB000000BA711A /* AUProcessor in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 0EFDB0062FFB000000BA711A /* AUProcessor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -118,6 +120,7 @@
 				0EAEB6782FED566300BA711A /* sox in Copy Helper Files */,
 				0EAEB8B82FF3BA2800BA711A /* stereodemux in Copy Helper Files */,
 				0EFDB0132FFB000000BA711A /* PCMPassthrough in Copy Helper Files */,
+				0EFDB01B2FFB000000BA711A /* PCMPrefix in Copy Helper Files */,
 				0EFDB0112FFB000000BA711A /* PCMUDPSender in Copy Helper Files */,
 				0EFDB0122FFB000000BA711A /* PCMUDPReceiver in Copy Helper Files */,
 				0EFDB0142FFB000000BA711A /* PCMMixer in Copy Helper Files */,
@@ -227,6 +230,7 @@
 				0E2AED72300F2B0E007F4143 /* PCMSpeechSynth in Frameworks */,
 				0E2AED71300F2B0E007F4143 /* PCMMixer in Frameworks */,
 				0E2AED70300F2B0E007F4143 /* PCMPassthrough in Frameworks */,
+				0E2AED76300F2B0E007F4143 /* PCMPrefix in Frameworks */,
 				0E2AED6F300F2B0E007F4143 /* PCMUDPReceiver in Frameworks */,
 				0E2AED6E300F2B0E007F4143 /* PCMUDPSender in Frameworks */,
 				0EA033AE3020485000F3BE37 /* LiveAudioServer in Frameworks */,
@@ -369,6 +373,7 @@
 				0EFDB0012FFB000000BA711A /* PCMUDPSender */,
 				0EFDB0022FFB000000BA711A /* PCMUDPReceiver */,
 				0EFDB0032FFB000000BA711A /* PCMPassthrough */,
+				0EFDB0202FFB000000BA711A /* PCMPrefix */,
 				0EFDB0042FFB000000BA711A /* PCMMixer */,
 				0EFDB0052FFB000000BA711A /* PCMSpeechSynth */,
 				0EFDB0062FFB000000BA711A /* AUProcessor */,
@@ -1188,6 +1193,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PCMPassthrough;
+		};
+		0EFDB0202FFB000000BA711A /* PCMPrefix */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
+			productName = PCMPrefix;
 		};
 		0EFDB0042FFB000000BA711A /* PCMMixer */ = {
 			isa = XCSwiftPackageProductDependency;

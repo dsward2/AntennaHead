@@ -1728,6 +1728,30 @@ function applyAACSettings(form)
 }
 
 
+// Settings page: Light / Dark / Auto colour scheme. Persists the choice
+// (POST -> /applywebuitheme.html; cosmetic, no service restart) and applies
+// it live. settings.html is injected into index.html's #content_frame, so
+// document.documentElement here is index.html's own <html> element — the
+// one that carries data-theme (see css/custom.css and the %%THEME%% token).
+function applyWebUITheme(form)
+{
+    var select = document.getElementById("web_ui_theme_select");
+    if (select === null) { return false; }
+    var theme = select.options[select.selectedIndex].value;
+
+    document.documentElement.setAttribute("data-theme", theme);
+
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.open("POST", baseUrl + "applywebuitheme.html", true);
+    xhttp.send(JSON.stringify({theme: theme}));
+
+    return false;
+}
+
+
 // AAC recorder toggle (button + elapsed-time span next to the <audio>
 // element — see AntennaHeadHTTPServer.aacRecorderToggleHTML()). Talks to
 // this server's own /api/aac-recorder/* routes, which drive
@@ -1855,4 +1879,68 @@ function aacRecorderTick()
 // below (mirrors the Now Playing periodicUpdate() pattern) — this script
 // runs in <head>, before #aac-rec-btn exists in the DOM.
 var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
+
+
+// ---- Text to Speech (Audio Devices page) --------------------------------
+//
+// "Select Text Folder…" asks the server to run a native folder chooser on the
+// Mac running AntennaHead; the choice is saved as a persistent setting
+// (security-scoped bookmark). Listen just tells the server the order and the
+// repeat flag — the server resolves the saved folder, reads its .txt files,
+// and feeds them to the PCMSpeechSynth pipeline stage.
+
+function textToSpeechChooseFolderButtonClicked()
+{
+  var status = document.getElementById("tts_folder_status");
+  if (status) { status.textContent = "Choose a folder in the panel on the AntennaHead Mac…"; }
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4)
+      {
+        if (this.status == 200)
+        {
+          var path = (this.responseText || "").trim();
+          if (status) { status.textContent = path ? path : "No folder selected."; }
+        }
+        else if (status)
+        {
+          status.textContent = "Could not open the folder chooser.";
+        }
+      }
+    };
+  xhttp.open("POST", baseUrl + "texttospeechchoosefolder.html", true);
+  xhttp.send();
+}
+
+function textToSpeechListenButtonClicked(form)
+{
+  var sequenceSelect = form.querySelector("#tts_sequence");
+  var repeatCheckbox = form.querySelector("#tts_repeat");
+  var payload = {
+    sequence: sequenceSelect ? sequenceSelect.value : "chronological",
+    repeat: (repeatCheckbox && repeatCheckbox.checked) ? "1" : "0"
+  };
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "texttospeechlistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        // response received ok
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.setRequestHeader("Content-Type", "application/json");
+  xhttp.send(JSON.stringify(payload));
+
+  // handle the audio tag with the new source
+  window.top.postMessage("startaudio", "*");
+}
 

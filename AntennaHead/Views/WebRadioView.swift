@@ -33,6 +33,7 @@ struct WebRadioView: NSViewRepresentable {
             WKUserScript(source: Self.recorderBridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
         context.coordinator.startObservingReload(of: webView)
+        context.coordinator.applyStoredAppearance()
         return webView
     }
 
@@ -159,6 +160,25 @@ struct WebRadioView: NSViewRepresentable {
                                                    name: WebRadioView.reloadNotification, object: nil)
             NotificationCenter.default.addObserver(self, selector: #selector(pauseAudioElement),
                                                    name: WebRadioView.stopAudioNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(webUIThemeChanged),
+                                                   name: AntennaHeadHTTPServer.webUIThemeDidChangeNotification, object: nil)
+        }
+
+        @objc private func webUIThemeChanged() {
+            MainActor.assumeIsolated { applyStoredAppearance() }
+        }
+
+        /// Forces the WKWebView's AppKit appearance to match the stored web UI
+        /// colour scheme, so native form controls, the `<audio>` transport and
+        /// the scroll bars follow a Light/Dark choice too — not just the CSS.
+        /// `"auto"` clears the override so the view tracks the system again.
+        @MainActor func applyStoredAppearance() {
+            guard let webView else { return }
+            switch AntennaHeadHTTPServer.storedWebUITheme(sqlite: .shared) {
+            case "light": webView.appearance = NSAppearance(named: .aqua)
+            case "dark":  webView.appearance = NSAppearance(named: .darkAqua)
+            default:      webView.appearance = nil
+            }
         }
 
         @objc private func reloadWebView() {

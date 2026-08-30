@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 import PipelineRunner
@@ -75,10 +76,60 @@ final class SDRController {
     /// AirPlay session.
     private(set) var airPlayReceivePort: UInt16 = 6022
     /// UDP port PCMUDPReceiver listens on for Gqrx's 2-channel PCM audio
-    /// output — Gqrx's own default UDP audio port (see NETWORK_PORTS.md), not
-    /// currently exposed in the Configuration sheet like the other ports.
-    private let gqrxReceivePort: UInt16 = 7355
+    /// output — Gqrx's own default UDP audio port (see NETWORK_PORTS.md). Not
+    /// exposed in the Configuration sheet like the other ports, but surfaced
+    /// read-only in the "Listen to Gqrx" web UI.
+    let gqrxReceivePort: UInt16 = 7355
     private var statusListener: RTLSDRStatusListener?
+
+    /// One text file picked in the "Text to Speech" web UI. The browser reads
+    /// the folder and posts these; `startTextToSpeech` orders them, concatenates
+    /// the text, and feeds it to PCMSpeechSynth.
+    struct SpeechTextFile {
+        let name: String
+        let modified: Date
+        let text: String
+    }
+
+    /// Sample rate PCMSpeechSynth is told to emit for the Text-to-Speech
+    /// pipeline; the downstream sox stage resamples it to the 48 kHz / 2 ch
+    /// LiveAudioServer contract.
+    private static let speechSynthSampleRate = 22_050
+
+    /// Combined-text temp file staged for the running PCMSpeechSynth stage, if
+    /// any. Deleted when the next pipeline starts or all tasks are stopped.
+    private var speechSynthTextFileURL: URL?
+
+    // MARK: Spoken station announcement
+
+    /// App-settings keys for the optional voice that says "Now playing …" before
+    /// a tuning starts. Read fresh each time a pipeline is built, and edited in
+    /// the Configuration view.
+    static let announcementEnabledKey = "AntennaHeadAnnouncementEnabled"
+    static let announcementVoiceKey = "AntennaHeadAnnouncementVoiceIdentifier"
+
+    /// Whether the spoken announcement is switched on in Configuration.
+    var announcementEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.announcementEnabledKey)) ?? nil) == "1"
+    }
+
+    /// The announcement clip rendered for the current pipeline, if any. Deleted
+    /// when the next pipeline starts or all tasks are stopped.
+    private var announcementClipURL: URL?
+
+    /// PCMSpeechSynth renders the announcement at this rate/format; PCMPrefix
+    /// plays it (up-mixing mono → stereo) with no resampling, so it must match
+    /// the LiveAudioServer contract rate.
+    private static let announcementRenderRate = 48_000
+
+    /// One announcement queued for the deferred pipeline launch: the text to
+    /// speak, the chosen voice (nil = system default), and where PCMSpeechSynth
+    /// should write the clip that the already-added PCMPrefix stage will read.
+    private struct PendingAnnouncement: Sendable {
+        let text: String
+        let voiceIdentifier: String?
+        let clipURL: URL
+    }
 
     let radioTaskPipelineManager = TaskPipelineManager()
     /// Pending async pipeline launch; cancelled and replaced whenever a new
@@ -501,10 +552,240 @@ final class SDRController {
         return item
     }
 
+    /// Start a PCMSpeechSynth → sox → PCMUDPSender pipeline that speaks the text
+    /// files picked in the "Text to Speech" web UI. The files' text arrives from
+    /// the browser (the sandboxed app can't read an arbitrary folder), so this
+    /// just orders them — by modification date, or shuffled when `randomOrder` —
+    /// concatenates the text into one container-local temp file, and points
+    /// PCMSpeechSynth at it. `repeatForever` maps to the helper's `--repeat`
+    /// (the whole concatenated sequence loops, with a short gap between passes).
+    func startTextToSpeech(files: [SpeechTextFile], randomOrder: Bool, repeatForever: Bool) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        radioTaskPipelineManager.terminate()
+
+        let ordered = randomOrder ? files.shuffled() : files.sorted { $0.modified < $1.modified }
+        let combined = ordered
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        guard !combined.isEmpty else {
+            lastError = SDRError.notImplemented("Text to Speech — no text to speak (choose a folder of .txt files first)")
+            LogStore.shared.log(.error, source: "SDRController", "Text to Speech: nothing to speak")
+            return
+        }
+
+        // Stage the combined text in the app's own temp dir (inside the sandbox
+        // container, so the PCMSpeechSynth child can read it) rather than passing
+        // it as a --text argument, which would risk ARG_MAX for a large folder.
+        let textFileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntennaHead-TTS-\(UUID().uuidString).txt")
+        do {
+            try combined.write(to: textFileURL, atomically: true, encoding: .utf8)
+        } catch {
+            lastError = error
+            LogStore.shared.log(.error, source: "SDRController", "Text to Speech: could not stage text file: \(error)")
+            return
+        }
+        cleanUpSpeechSynthTextFile()
+        speechSynthTextFileURL = textFileURL
+
+        taskMode = .customTask
+        activeFrequencyID = nil
+        statusFunction = "Text to Speech" + (repeatForever ? " (repeating)" : "")
+        stationName = "Text to Speech"
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        lastError = nil
+
+        guard let synth = makeSpeechSynthTaskItem(textFileURL: textFileURL, repeatForever: repeatForever),
+              let resample = makeResampleTaskItem(inputRate: Self.speechSynthSampleRate,
+                                                  inputChannels: 1,
+                                                  audioOutputFilter: "vol 1"),
+              let sender = makeUDPSenderTaskItem() else {
+            taskMode = .stopped
+            return
+        }
+        radioTaskPipelineManager.add(synth)
+        radioTaskPipelineManager.add(resample)
+        radioTaskPipelineManager.add(sender)
+        launchCurrentPipeline(dying: dying)
+    }
+
+    private func makeSpeechSynthTaskItem(textFileURL: URL, repeatForever: Bool) -> TaskItem? {
+        let path = helperPath("PCMSpeechSynth")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("PCMSpeechSynth helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "PCMSpeechSynth helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMSpeechSynth")
+        item.addArgument("--input"); item.addArgument("file:\(textFileURL.path)")
+        item.addArgument("--rate"); item.addArgument(Self.speechSynthSampleRate)
+        if repeatForever {
+            item.addArgument("--repeat")
+            item.addArgument("--gap"); item.addArgument(2)
+        }
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    private func cleanUpSpeechSynthTextFile() {
+        if let url = speechSynthTextFileURL {
+            try? FileManager.default.removeItem(at: url)
+            speechSynthTextFileURL = nil
+        }
+    }
+
+    // MARK: Announcement pipeline plumbing
+
+    private struct PreparedAnnouncement {
+        let stage: TaskItem
+        let pending: PendingAnnouncement
+    }
+
+    /// Builds the PCMPrefix stage and the matching render request for `text`,
+    /// or returns `nil` when announcements are off, there's nothing to say, or
+    /// the helper is missing. `holdInput` picks PCMPrefix's `--during-prefix`
+    /// mode: `false` (drop) for a live source that must not block, `true`
+    /// (hold) for a self-pacing file player that should resume from its start.
+    private func prepareAnnouncement(text: String, holdInput: Bool) -> PreparedAnnouncement? {
+        cleanUpAnnouncementClip()   // drop any clip staged for a previous tuning
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard announcementEnabled, !trimmed.isEmpty else { return nil }
+
+        let clipURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntennaHead-announce-\(UUID().uuidString).raw")
+
+        guard let stage = makeAnnouncementPrefixTaskItem(clipURL: clipURL, holdInput: holdInput) else {
+            return nil
+        }
+        announcementClipURL = clipURL
+        return PreparedAnnouncement(
+            stage: stage,
+            pending: PendingAnnouncement(text: trimmed,
+                                         voiceIdentifier: validatedAnnouncementVoiceIdentifier(),
+                                         clipURL: clipURL))
+    }
+
+    /// PCMPrefix stage: plays the announcement clip, then passes the live audio
+    /// through. Sits immediately before PCMUDPSender. A missing/empty clip file
+    /// makes PCMPrefix a plain passthrough, so a failed render is harmless.
+    private func makeAnnouncementPrefixTaskItem(clipURL: URL, holdInput: Bool) -> TaskItem? {
+        let path = helperPath("PCMPrefix")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMPrefix helper missing at \(path) — announcement skipped")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMPrefix")
+        item.addArgument("--prefix-file"); item.addArgument(clipURL.path)
+        item.addArgument("--prefix-channels"); item.addArgument(1)   // PCMSpeechSynth emits mono
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--during-prefix"); item.addArgument(holdInput ? "hold" : "drop")
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    /// The configured announcement voice, but only if the system still has it —
+    /// PCMSpeechSynth aborts on an unknown identifier, so an uninstalled voice
+    /// falls back to the system default (nil).
+    private func validatedAnnouncementVoiceIdentifier() -> String? {
+        guard let id = (try? sqliteController.appSettingsValue(forKey: Self.announcementVoiceKey)) ?? nil,
+              !id.isEmpty else { return nil }
+        if AVSpeechSynthesisVoice(identifier: id) != nil { return id }
+        LogStore.shared.log(.info, source: "SDRController",
+                            "announcement: saved voice '\(id)' is unavailable; using the system default")
+        return nil
+    }
+
+    private func cleanUpAnnouncementClip() {
+        if let url = announcementClipURL {
+            try? FileManager.default.removeItem(at: url)
+            announcementClipURL = nil
+        }
+    }
+
+    /// Renders `announcement.text` to a raw S16LE mono clip at
+    /// `announcementRenderRate` by running PCMSpeechSynth once (not through the
+    /// pipeline manager). Best-effort: on any failure the clip file is left
+    /// missing/empty and PCMPrefix simply plays nothing.
+    private static func renderAnnouncementClip(_ announcement: PendingAnnouncement) async {
+        let synthPath = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/PCMSpeechSynth").path
+        guard FileManager.default.isExecutableFile(atPath: synthPath) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "announcement: PCMSpeechSynth helper missing at \(synthPath)")
+            return
+        }
+
+        FileManager.default.createFile(atPath: announcement.clipURL.path, contents: nil)
+        guard let outHandle = try? FileHandle(forWritingTo: announcement.clipURL) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "announcement: could not open clip file for writing")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: synthPath)
+        var args = ["--text", announcement.text,
+                    "--rate", "\(announcementRenderRate)",
+                    "--no-pace", "--exit-with-parent"]
+        if let voice = announcement.voiceIdentifier, !voice.isEmpty {
+            args.append(contentsOf: ["--voice", voice])
+        }
+        process.arguments = args
+        process.standardOutput = outHandle
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "announcement: could not start PCMSpeechSynth: \(error)")
+            try? outHandle.close()
+            return
+        }
+
+        await withTaskCancellationHandler {
+            await waitForProcessExit(process, timeout: 10)
+        } onCancel: {
+            process.terminate()
+        }
+        try? outHandle.close()
+
+        if process.isRunning {
+            process.terminate()
+            LogStore.shared.log(.error, source: "SDRController", "announcement: render timed out")
+        } else if process.terminationStatus != 0 {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "announcement: PCMSpeechSynth exited \(process.terminationStatus)")
+        }
+    }
+
+    private static func waitForProcessExit(_ process: Process, timeout: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            if Task.isCancelled { return }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+    }
+
     func terminateTasks() {
         pipelineStartTask?.cancel()
         pipelineStartTask = nil
         radioTaskPipelineManager.terminate()
+        cleanUpSpeechSynthTextFile()
+        cleanUpAnnouncementClip()
         taskMode = .stopped
         activeFrequencyID = nil
         statusFunction = "No active tuning"
@@ -551,7 +832,8 @@ final class SDRController {
     /// first moment of audio after switching sources, or logs a stray UDP bind
     /// failure right after a Listen click, check here first.
     private func launchCurrentPipeline(dying: [Process], waitForPort5000: Bool = false,
-                                       waitForDyingProcesses: Bool = true) {
+                                       waitForDyingProcesses: Bool = true,
+                                       announcement: PendingAnnouncement? = nil) {
         pipelineStartTask?.cancel()
         pipelineStartTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
@@ -561,6 +843,11 @@ final class SDRController {
             }
             if waitForPort5000 {
                 await HelperProcessPreflight.waitForTCPPortFree(5000, timeout: 2.0)
+                guard !Task.isCancelled else { return }
+            }
+            if let announcement {
+                // Render the "Now playing …" clip the PCMPrefix stage will read.
+                await Self.renderAnnouncementClip(announcement)
                 guard !Task.isCancelled else { return }
             }
             do {
@@ -597,6 +884,8 @@ final class SDRController {
         var frequencyArgs: [String]
         var stationName: String
         var statusFunction: String
+        /// What the optional spoken announcement says before playback starts.
+        var announcementText: String
     }
 
     private func makeTuning(forFrequency f: Frequency) -> Tuning {
@@ -618,7 +907,8 @@ final class SDRController {
             audioOutputFilter: f.audioOutputFilter,
             frequencyArgs: frequencyArguments(for: f),
             stationName: f.stationName,
-            statusFunction: "Tuned to \(f.stationName)"
+            statusFunction: "Tuned to \(f.stationName)",
+            announcementText: Self.announcementText(forFrequency: f)
         )
     }
 
@@ -645,8 +935,54 @@ final class SDRController {
             audioOutputFilter: c.scanAudioOutputFilter,
             frequencyArgs: freqArgs,
             stationName: c.categoryName,
-            statusFunction: "Scanning category: \(c.categoryName)"
+            statusFunction: "Scanning category: \(c.categoryName)",
+            announcementText: "Scanning \(c.categoryName.trimmingCharacters(in: .whitespacesAndNewlines))."
         )
+    }
+
+    // MARK: Announcement text
+
+    /// The line the spoken announcement reads for a saved or ad-hoc frequency:
+    /// `"Now playing <station name>."`, plus `" <freq> <band>."` for a fixed
+    /// (non-scan) tuning when the station name doesn't already carry them.
+    /// Modulation maps to a spoken band: fm/wfm/nfm → "F M", am → "A M",
+    /// usb/lsb → "upper/lower sideband", everything else → omit the band.
+    static func announcementText(forFrequency f: Frequency) -> String {
+        let name = f.stationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = "Now playing \(name.isEmpty ? "this station" : name)."
+        guard f.frequencyMode == 0 else { return text }
+
+        let number = spokenFrequencyNumber(f)
+        let band = spokenBand(f.modulation)
+        let phrase = band.isEmpty ? "\(number) megahertz" : "\(number) \(band)"
+
+        // Skip the tail if the name already spells the frequency or band out.
+        let nameKey = name.lowercased().filter { !$0.isWhitespace }
+        let saysNumber = nameKey.contains(number.filter { !$0.isWhitespace })
+        let saysBand = !band.isEmpty && nameKey.contains(band.lowercased().filter { !$0.isWhitespace })
+        if !(saysNumber && (band.isEmpty || saysBand)) {
+            text += " \(phrase)."
+        }
+        return text
+    }
+
+    /// "89.1", "162.4", "1010" — trailing zeros trimmed, spoken as a number.
+    private static func spokenFrequencyNumber(_ f: Frequency) -> String {
+        let mhz = Double(f.frequency) / 1_000_000.0
+        var s = String(format: "%.3f", mhz)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
+    }
+
+    private static func spokenBand(_ modulation: String) -> String {
+        switch modulation.lowercased() {
+        case "fm", "wfm", "nfm": return "F M"
+        case "am": return "A M"
+        case "usb": return "upper sideband"
+        case "lsb": return "lower sideband"
+        default: return ""
+        }
     }
 
     /// rtl_fm frequency argument(s) for a record: a single frequency, or a
@@ -697,13 +1033,20 @@ final class SDRController {
             return  // lastError already set by the failing builder
         }
 
+        // Optional spoken "Now playing …" clip, played by a PCMPrefix stage
+        // just before the UDP sender. `drop` mode: the live rtl_fm source keeps
+        // running and its first ~clip-length of audio is discarded rather than
+        // stalling the tuner.
+        let announcement = prepareAnnouncement(text: tuning.announcementText, holdInput: false)
+
         radioTaskPipelineManager.add(source)
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         radioTaskPipelineManager.add(udpSender)
 
-        launchCurrentPipeline(dying: dying)
+        launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
     }
 
     /// AudioInputCapture source stage: captures the named Core Audio input and
