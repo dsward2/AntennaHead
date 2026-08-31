@@ -717,6 +717,12 @@ html {
     color: #ff3b30;
     margin-left: 2px;
 }
+/* Compact file size shown beside each recording's name in the list. */
+.rec-size {
+    color: var(--ah-muted, #6e6e73);
+    font-size: 85%;
+    white-space: nowrap;
+}
 @keyframes aac-rec-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }

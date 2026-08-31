@@ -1437,8 +1437,9 @@ function recordingDownloadButtonClicked(form)
 
 
 // Client-side filter/sort for the Recordings page table (js only — no round
-// trip to the server while typing). Rows carry data-name (lowercased) and
-// data-date (epoch seconds) attributes rendered by recordingsListHTML().
+// trip to the server while typing). Rows carry data-name (lowercased),
+// data-date (epoch seconds) and data-size (bytes) attributes rendered by
+// recordingsListHTML().
 function filterRecordingsTable()
 {
   var filterInput = document.getElementById("recordings_filter");
@@ -1463,6 +1464,10 @@ function sortRecordingsTable()
     if (mode === "date")
     {
       return parseFloat(b.getAttribute("data-date")) - parseFloat(a.getAttribute("data-date"));
+    }
+    if (mode === "size")
+    {
+      return (parseFloat(b.getAttribute("data-size")) || 0) - (parseFloat(a.getAttribute("data-size")) || 0);
     }
     var nameA = a.getAttribute("data-name") || "";
     var nameB = b.getAttribute("data-name") || "";

@@ -1362,7 +1362,8 @@ final class AntennaHeadHTTPServer {
             return "<p>AntennaHead's shared Recordings folder isn't available — check its App Group entitlement.</p>"
         }
         let entries = ((try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])) ?? [])
+            at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles])) ?? [])
             .filter { Self.recordingsFileExtensions.contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
@@ -1370,14 +1371,29 @@ final class AntennaHeadHTTPServer {
         df.dateStyle = .medium
         df.timeStyle = .short
 
+        // Compact byte count shown next to each name, e.g. "(19.8 MB)". Cheap
+        // (a stat, already in the resource-values fetch above) — unlike a
+        // playing-time column, which would need a per-file AVAsset probe on
+        // every page load and, for this app's raw ADTS `.aac` recordings,
+        // couldn't be trusted anyway (no container duration box — see the
+        // estimate quirk noted in `recordingDownloadResponse`).
+        let byteFormatter = ByteCountFormatter()
+        byteFormatter.countStyle = .file
+        byteFormatter.allowedUnits = [.useKB, .useMB, .useGB]
+
         var rows = ""
         for (index, url) in entries.enumerated() {
             let name = url.lastPathComponent
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            let byteCount = values?.fileSize ?? 0
+            let sizeText = byteFormatter.string(fromByteCount: Int64(byteCount))
             let rowID = "rec-\(index)"
-            rows += "<tr class='recording-row' data-name='\(htmlAttribute(name.lowercased()))' data-date='\(modified.timeIntervalSince1970)'>"
+            rows += "<tr class='recording-row' data-name='\(htmlAttribute(name.lowercased()))' "
+            rows += "data-date='\(modified.timeIntervalSince1970)' data-size='\(byteCount)'>"
             rows += "<td><input type='radio' name='selected_file' id='\(rowID)' value='\(htmlAttribute(name))'></td>"
-            rows += "<td><label for='\(rowID)'>\(htmlText(name))</label></td>"
+            rows += "<td><label for='\(rowID)'>\(htmlText(name)) "
+            rows += "<span class='rec-size'>(\(htmlText(sizeText)))</span></label></td>"
             rows += "<td>\(htmlText(df.string(from: modified)))</td>"
             rows += "</tr>"
         }
@@ -1393,6 +1409,7 @@ final class AntennaHeadHTTPServer {
         s += "<select id='recordings_sort' class='twelve columns value-prop' onchange='sortRecordingsTable();' title='Choose how the list below is ordered.'>"
         s += "<option value='name'>Name</option>"
         s += "<option value='date'>Date (Newest First)</option>"
+        s += "<option value='size'>Size (Largest First)</option>"
         s += "</select>"
         s += "<table class='u-full-width' id='recordingsTable'>"
         s += "<thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>"
