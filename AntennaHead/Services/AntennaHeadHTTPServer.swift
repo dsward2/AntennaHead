@@ -2671,8 +2671,24 @@ final class AntennaHeadHTTPServer {
     // Tokens shared across every dynamic page. Extend as pages migrate from
     // LocalRadio (e.g. NAV_BAR, COMPUTER_NAME, device-health messages).
     nonisolated private func globalReplacements() -> [String: String] {
-        ["ERROR_MESSAGE": ""]
+        ["ERROR_MESSAGE": "", "ASSET_VERSION": Self.assetCacheToken]
     }
+
+    /// Cache-busting token appended to versioned Web asset URLs (see
+    /// `?v=%%ASSET_VERSION%%` in `Web/index.html`). Ties each `css/*.css` /
+    /// `js/*.js` cache key to this build so mobile Safari — which caches those
+    /// hard and ignores the HTML's no-cache meta — reloads a rebuilt asset
+    /// instead of serving a stale copy. Derived from the app executable's
+    /// modification time (bumps on every rebuild); falls back to the launch
+    /// time if that can't be read. The `?v=` query is stripped before the
+    /// static-file lookup (`pathWithoutQuery`), so it only affects the browser.
+    nonisolated static let assetCacheToken: String = {
+        if let exe = Bundle.main.executableURL,
+           let modified = (try? FileManager.default.attributesOfItem(atPath: exe.path))?[.modificationDate] as? Date {
+            return String(Int(modified.timeIntervalSince1970))
+        }
+        return String(Int(Date().timeIntervalSince1970))
+    }()
 
     nonisolated private func loadSVG(named name: String) -> String {
         guard let webRoot = Bundle.main.url(forResource: "Web", withExtension: nil) else {
