@@ -60,8 +60,9 @@ SPM dependencies are fetched automatically on first build. No `brew` or manual t
 | Pipeline audio input | UDP | 6020 |
 | ControlBooth audio input | UDP | 6019 |
 | AirPlay receiver audio input | UDP | 6022 |
+| Speech-to-text caption feed | UDP | 6023 |
 
-All ports are configurable from the **Configuration** tab → **Change Configuration…** sheet, except ControlBooth audio input and AirPlay receiver audio input, which are stored in the same settings database but not currently exposed in that sheet. Changes restart the streaming servers.
+All ports are configurable from the **Configuration** tab → **Change Configuration…** sheet, except ControlBooth audio input, AirPlay receiver audio input, and the speech-to-text caption feed, which are stored in the same settings database (or fixed constants) and not currently exposed in that sheet. Changes restart the streaming servers.
 
 ## Features
 

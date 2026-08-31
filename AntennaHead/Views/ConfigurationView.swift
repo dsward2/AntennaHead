@@ -25,6 +25,9 @@ struct ConfigurationView: View {
     @State private var announcementEnabled = false
     @State private var announcementVoiceID = ""
     @State private var previewSynth = AVSpeechSynthesizer()
+    @State private var transcriptionEnabled = false
+    @State private var transcriptionLocale = "en-US"
+    @State private var transcriptionSavesTranscript = false
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -86,6 +89,23 @@ struct ConfigurationView: View {
                 Text("Announcements")
             } footer: {
                 Text("When enabled, a synthesized voice says \u{201C}Now playing \u{2026}\u{201D} \u{2014} the station name, plus the frequency and band for a fixed tuning \u{2014} before a Favorite or category scan starts. Only voices installed on this Mac are listed; add more in System Settings \u{203A} Accessibility \u{203A} Spoken Content \u{203A} System Voice.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Transcribe the audio (on-device speech recognition)", isOn: $transcriptionEnabled)
+                    .onChange(of: transcriptionEnabled) { _, _ in saveTranscriptionSettings() }
+                TextField("Language", text: $transcriptionLocale, prompt: Text("en-US"))
+                    .onSubmit { saveTranscriptionSettings() }
+                    .disabled(!transcriptionEnabled)
+                Toggle("Also save an SRT transcript to the Recordings folder", isOn: $transcriptionSavesTranscript)
+                    .onChange(of: transcriptionSavesTranscript) { _, _ in saveTranscriptionSettings() }
+                    .disabled(!transcriptionEnabled)
+            } header: {
+                Text("Speech-to-Text")
+            } footer: {
+                Text("Runs a \u{201C}PCMTranscriber\u{201D} tap on the outgoing audio using Apple\u{2019}s on-device SpeechAnalyzer (requires macOS 26). Recognition results stream as JSON on UDP port \(Int(sdrController.transcriptionUDPPort)) for a caption client; the optional SRT file lands in the shared Recordings folder. Broadcast audio \u{2014} music, weak FM, overlapping speech \u{2014} transcribes unevenly. Language is a BCP-47 code such as \u{201C}en-US\u{201D}; the model downloads once on first use.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -262,6 +282,12 @@ struct ConfigurationView: View {
         } else {
             announcementVoiceID = ""
         }
+        let transcribeEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionEnabledKey)) ?? nil
+        transcriptionEnabled = transcribeEnabled == "1"
+        let storedLocale = ((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionLocaleKey)) ?? nil) ?? ""
+        transcriptionLocale = storedLocale.isEmpty ? "en-US" : storedLocale
+        let saveTranscript = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionSaveFileKey)) ?? nil
+        transcriptionSavesTranscript = saveTranscript == "1"
     }
 
     private func saveControlBoothSettings() {
@@ -285,6 +311,17 @@ struct ConfigurationView: View {
             announcementEnabled ? "1" : "0", forKey: SDRController.announcementEnabledKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             announcementVoiceID, forKey: SDRController.announcementVoiceKey)
+    }
+
+    private func saveTranscriptionSettings() {
+        let locale = transcriptionLocale.trimmingCharacters(in: .whitespaces)
+        if locale.isEmpty { transcriptionLocale = "en-US" }
+        try? SQLiteController.shared.storeAppSettingsValue(
+            transcriptionEnabled ? "1" : "0", forKey: SDRController.transcriptionEnabledKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            locale.isEmpty ? "en-US" : locale, forKey: SDRController.transcriptionLocaleKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            transcriptionSavesTranscript ? "1" : "0", forKey: SDRController.transcriptionSaveFileKey)
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {

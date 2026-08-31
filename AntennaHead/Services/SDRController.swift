@@ -80,7 +80,13 @@ final class SDRController {
     /// exposed in the Configuration sheet like the other ports, but surfaced
     /// read-only in the "Listen to Gqrx" web UI.
     let gqrxReceivePort: UInt16 = 7355
+    /// UDP port the optional `PCMTranscriber` tap sends newline-delimited
+    /// speech-recognition JSON to (`{"type":"partial"|"final","text":…,
+    /// "start":…,"end":…}`), for an in-app listener to surface as live captions.
+    /// Fixed like `gqrxReceivePort`; not exposed in the Configuration sheet.
+    let transcriptionUDPPort: UInt16 = 6023
     private var statusListener: RTLSDRStatusListener?
+    private var captionListener: TranscriptionCaptionListener?
 
     /// One text file picked in the "Text to Speech" web UI. The browser reads
     /// the folder and posts these; `startTextToSpeech` orders them, concatenates
@@ -99,6 +105,46 @@ final class SDRController {
     /// Combined-text temp file staged for the running PCMSpeechSynth stage, if
     /// any. Deleted when the next pipeline starts or all tasks are stopped.
     private var speechSynthTextFileURL: URL?
+
+    // MARK: Speech-to-text tap
+
+    /// App-settings keys for the optional `PCMTranscriber` stage that runs
+    /// on-device speech recognition on the outgoing audio. Read fresh each time
+    /// a pipeline is built, and edited in the Configuration view.
+    static let transcriptionEnabledKey = "AntennaHeadTranscriptionEnabled"
+    static let transcriptionLocaleKey = "AntennaHeadTranscriptionLocale"
+    static let transcriptionSaveFileKey = "AntennaHeadTranscriptionSaveTranscript"
+
+    /// Whether the speech-to-text tap is switched on in Configuration.
+    var transcriptionEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.transcriptionEnabledKey)) ?? nil) == "1"
+    }
+
+    /// BCP-47 locale `PCMTranscriber` recognizes in; defaults to `en-US`.
+    private var transcriptionLocale: String {
+        let stored = ((try? sqliteController.appSettingsValue(forKey: Self.transcriptionLocaleKey)) ?? nil) ?? ""
+        let trimmed = stored.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "en-US" : trimmed
+    }
+
+    /// Whether the tap also appends an SRT transcript to the shared Recordings
+    /// folder (in addition to the always-on `transcriptionUDPPort` caption feed).
+    private var transcriptionSavesFile: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.transcriptionSaveFileKey)) ?? nil) == "1"
+    }
+
+    /// The SRT transcript being written for the current pipeline, if any. Unlike
+    /// the speech-synth temp file this is a user artifact — left in the
+    /// Recordings folder when the pipeline stops, only the reference is cleared.
+    private var transcriptFileURL: URL?
+
+    /// Timestamp fragment for transcript filenames (sortable, filename-safe).
+    private static let transcriptTimestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HHmmss"
+        return f
+    }()
 
     // MARK: Spoken station announcement
 
@@ -156,6 +202,16 @@ final class SDRController {
     /// Latest RMS signal level reported by rtl_fm (raw, matches LocalRadio's
     /// "signal level" display). Zero when no tuner is running.
     private(set) var signalLevel: Int = 0
+
+    /// Most recent not-yet-final caption hypothesis from the `PCMTranscriber`
+    /// tap, or "" when there is none pending. Cleared when it finalizes and
+    /// whenever a pipeline is (re)built or stopped.
+    private(set) var liveCaption: String = ""
+    /// Finalized caption segments for the current listening session, oldest
+    /// first, capped at `captionHistoryLimit`. Reset on each retune.
+    private(set) var captionHistory: [String] = []
+    private static let captionHistoryLimit = 200
+
     private(set) var lastError: Error?
 
     init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
@@ -166,6 +222,7 @@ final class SDRController {
             LogStore.shared.log(.info, source: source, message)
         }
         startStatusListener()
+        startCaptionListener()
     }
 
     /// Applies the configured UDP ports (Configuration sheet). The audio port
@@ -188,6 +245,40 @@ final class SDRController {
             Task { @MainActor in self.signalLevel = rms }
         }
         statusListener?.start()
+    }
+
+    /// Starts the always-on listener for the `PCMTranscriber` tap's caption
+    /// feed on `transcriptionUDPPort`. Runs for the lifetime of the controller
+    /// (the port is fixed); it simply sees no traffic when no tap is active.
+    private func startCaptionListener() {
+        captionListener = TranscriptionCaptionListener(port: transcriptionUDPPort)
+        captionListener?.onCaption = { [weak self] event in
+            guard let self else { return }
+            Task { @MainActor in self.applyCaption(event) }
+        }
+        captionListener?.start()
+    }
+
+    @MainActor private func applyCaption(_ event: CaptionEvent) {
+        let text = event.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch event.kind {
+        case .partial:
+            liveCaption = text
+        case .final:
+            liveCaption = ""
+            guard !text.isEmpty else { return }
+            captionHistory.append(text)
+            if captionHistory.count > Self.captionHistoryLimit {
+                captionHistory.removeFirst(captionHistory.count - Self.captionHistoryLimit)
+            }
+        }
+    }
+
+    /// Clears the caption display + transcript. Called whenever a pipeline is
+    /// (re)built or all tasks stop, so captions never carry across sources.
+    private func resetCaptions() {
+        liveCaption = ""
+        captionHistory.removeAll()
     }
 
     // MARK: Public control API (ported from SDRController.h)
@@ -274,6 +365,7 @@ final class SDRController {
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -319,8 +411,9 @@ final class SDRController {
             return
         }
         items.append(resample)
-        items.append(udpSender)
         items.forEach { radioTaskPipelineManager.add($0) }
+        addTranscriberStageIfEnabled()
+        radioTaskPipelineManager.add(udpSender)
 
         // waitForPort5000: custom tasks may include shairport-sync (port 5000),
         // which conflicts if the AirPlay receiver hasn't fully released it yet.
@@ -370,6 +463,7 @@ final class SDRController {
 
         radioTaskPipelineManager.add(player)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -481,6 +575,7 @@ final class SDRController {
 
         radioTaskPipelineManager.add(receiver)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
@@ -516,6 +611,7 @@ final class SDRController {
         guard let receiver = makeUDPReceiverTaskItem(port: airPlayReceivePort),
               let sender = makeUDPSenderTaskItem() else { return }
         radioTaskPipelineManager.add(receiver)
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
     }
@@ -558,6 +654,7 @@ final class SDRController {
               let sender = makeUDPSenderTaskItem() else { return }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
     }
@@ -641,6 +738,7 @@ final class SDRController {
         }
         radioTaskPipelineManager.add(synth)
         radioTaskPipelineManager.add(resample)
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying)
     }
@@ -811,6 +909,10 @@ final class SDRController {
         radioTaskPipelineManager.terminate()
         cleanUpSpeechSynthTextFile()
         cleanUpAnnouncementClip()
+        // The SRT transcript itself is a user artifact — leave it on disk, just
+        // drop the reference so the next pipeline's log line is accurate.
+        transcriptFileURL = nil
+        resetCaptions()
         taskMode = .stopped
         activeFrequencyID = nil
         statusFunction = "No active tuning"
@@ -1121,6 +1223,7 @@ final class SDRController {
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addTranscriberStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -1294,6 +1397,70 @@ final class SDRController {
         // even on a crash where app-side cleanup can't run.
         item.addArgument("--exit-with-parent")
         return item
+    }
+
+    /// Adds the optional `PCMTranscriber` speech-to-text tap immediately before
+    /// the terminal `PCMUDPSender`. Every pipeline builder calls this right
+    /// before adding its UDP sender; it's a no-op unless transcription is
+    /// enabled in Configuration and the helper binary is present. Because the
+    /// stage is a byte-for-byte passthrough, a missing helper or a recognizer
+    /// failure never affects the audio the listener hears.
+    ///
+    /// The tap runs on the normalized 48 kHz / 2 ch stream (every pipeline has
+    /// resampled or bridged to the LiveAudioServer contract by this point), so
+    /// its `--rate`/`--channels` are the fixed output constants regardless of
+    /// the source. Caption JSON always goes to `transcriptionUDPPort`; an SRT
+    /// transcript is also written to the shared Recordings folder when the
+    /// "save transcript" setting is on.
+    private func addTranscriberStageIfEnabled() {
+        transcriptFileURL = nil
+        // A new pipeline means a new (or no) tap — start its transcript fresh.
+        resetCaptions()
+        guard transcriptionEnabled else { return }
+
+        let path = helperPath("PCMTranscriber")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMTranscriber helper missing at \(path) — captions disabled for this tuning")
+            return
+        }
+
+        let locale = transcriptionLocale
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMTranscriber")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--locale"); item.addArgument(locale)
+        item.addArgument("--udp-port"); item.addArgument(Int(transcriptionUDPPort))
+        // Volatile hypotheses too, so a caption consumer gets low-latency text;
+        // the SRT file still only ever receives finalized segments.
+        item.addArgument("--partials")
+        if transcriptionSavesFile, let url = makeTranscriptFileURL() {
+            transcriptFileURL = url
+            item.addArgument("--transcript-file"); item.addArgument(url.path)
+        }
+        item.addArgument("--exit-with-parent")
+        radioTaskPipelineManager.add(item)
+
+        LogStore.shared.log(.info, source: "SDRController",
+                            "speech-to-text tap on (\(locale)) — captions → udp:\(transcriptionUDPPort)"
+                            + (transcriptFileURL.map { ", transcript → \($0.lastPathComponent)" } ?? ""))
+    }
+
+    /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`
+    /// in the shared App Group Recordings folder (same folder tab recordings and
+    /// ControlBooth-triggered captures use). `nil` if that folder can't be
+    /// resolved, in which case the tap still emits the UDP caption feed.
+    private func makeTranscriptFileURL() -> URL? {
+        guard let folder = SharedRecordingFolder.url else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "transcription: shared Recordings folder unavailable — no SRT file written")
+            return nil
+        }
+        let stamp = Self.transcriptTimestampFormatter.string(from: Date())
+        let rawName = stationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = rawName.isEmpty ? "transcript" : rawName
+        let safe = base.components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
+        return folder.appendingPathComponent("\(safe) \(stamp).srt")
     }
 
     private func helperPath(_ name: String) -> String {

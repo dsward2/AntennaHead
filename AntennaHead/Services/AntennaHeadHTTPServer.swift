@@ -756,6 +756,16 @@ final class AntennaHeadHTTPServer {
                                 headers: ["Content-Type": "application/json"],
                                 body: nowPlayingStatusJSON())
 
+        case "/captions.html":
+            return renderHTML(relativePath: "captions.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: [:])
+
+        case "/captions.json":
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json",
+                                          "Cache-Control": "no-cache, no-store"],
+                                body: captionsJSON())
+
         case "/listenbuttonclicked.html":
             // POST body is a serialized form: [{"name":"id","value":"N"}, ...]
             if let id = frequencyID(fromListenBody: request.body), id > 0 {
@@ -2272,6 +2282,19 @@ final class AntennaHeadHTTPServer {
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
     }
 
+    /// Live speech-to-text state for a polling caption client: whether the
+    /// `PCMTranscriber` tap is enabled, the current volatile hypothesis, and
+    /// the finalized transcript so far (oldest first). Empty/blank when
+    /// transcription is off or nothing has been recognized yet.
+    @MainActor private func captionsJSON() -> Data {
+        let dict: [String: Any] = [
+            "enabled": sdrController?.transcriptionEnabled ?? false,
+            "live": sdrController?.liveCaption ?? "",
+            "final": sdrController?.captionHistory ?? []
+        ]
+        return (try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
     /// Parses a jQuery `serializeArray()` body — `[{"name":..,"value":..}, ...]`
     /// — into a `[name: value]` dictionary.
     nonisolated private func formFields(fromBody body: Data) -> [String: String] {
@@ -2586,6 +2609,7 @@ final class AntennaHeadHTTPServer {
                   <li class="navbar-item"><a class="navbar-link" href="#" onclick="backButtonClicked(self);" title="Click the Back button to return to the previous page in the web interface">Back</a></li>
                   <li class="navbar-item"><a class="navbar-link" href="#" onclick="loadContent('index2.html');" title="Click the Top button to reload the web interface.">Top</a></li>
                   <li class="navbar-item"><a class="navbar-link" id="nowPlayingNavBarLink" href="#" onclick="loadContent('nowplaying.html');" title="Click the Now Playing button to see the current activity on the radio, including the live Signal Level.">Now Playing</a></li>
+                  <li class="navbar-item"><a class="navbar-link" id="captionsNavBarLink" href="#" onclick="loadContent('captions.html');" title="Click the Captions button to see live speech-to-text of the audio that is currently streaming.">Captions</a></li>
                 </ul>
               </div>
             </nav>

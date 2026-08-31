@@ -59,8 +59,10 @@
 		132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */; };
 		55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; };
 		63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; };
+		D1AF7E5C000000000000000B /* PCMTranscriber in Frameworks */ = {isa = PBXBuildFile; productRef = D1AF7E5C000000000000000A /* PCMTranscriber */; };
 		A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */; };
 		A90985C3303A034385162080 /* LiveAudioRecorder in Copy Helper Files */ = {isa = PBXBuildFile; productRef = 926091239864FEF2D1C7078C /* LiveAudioRecorder */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D1AF7E5C000000000000000C /* PCMTranscriber in Copy Helper Files */ = {isa = PBXBuildFile; productRef = D1AF7E5C000000000000000A /* PCMTranscriber */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA000003AA000003AA000003 /* librtlsdr in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* librtlsdr */; };
 		AA00000EAA00000EAA00000E /* rtl_fm_localradio.m in Sources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */; };
 		AA00000FAA00000FAA00000F /* convenience.c in Sources */ = {isa = PBXBuildFile; fileRef = AA00000DAA00000DAA00000D /* convenience.c */; };
@@ -131,6 +133,7 @@
 				0EFDB01A2FFB000000BA711A /* PCMJitterBuffer in Copy Helper Files */,
 				A90985C3303A034385162080 /* LiveAudioRecorder in Copy Helper Files */,
 				E86EBCDD413546D7853FB8EB /* PCMFilePlayer in Copy Helper Files */,
+				D1AF7E5C000000000000000C /* PCMTranscriber in Copy Helper Files */,
 			);
 			name = "Copy Helper Files";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -233,6 +236,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				63BFD8D967259C3EFFB09DBE /* LiveAudioRecorder in Frameworks */,
+				D1AF7E5C000000000000000B /* PCMTranscriber in Frameworks */,
 				55FEDCE6E2AC4E308F09175D /* PCMFilePlayer in Frameworks */,
 				0EA033B13020488500F3BE37 /* AirPlayReceiver in Frameworks */,
 				0E543FA1301A3BE400506453 /* PCMJitterBuffer in Frameworks */,
@@ -394,6 +398,7 @@
 				0EFDB0082FFB000000BA711A /* FMDeemphasis */,
 				0EFDB0192FFB000000BA711A /* PCMJitterBuffer */,
 				926091239864FEF2D1C7078C /* LiveAudioRecorder */,
+				D1AF7E5C000000000000000A /* PCMTranscriber */,
 				DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */,
 				308A34B58DA5DBBDFF8BDCF2 /* SharedLogging */,
 				78E1D4F6DE12D683768BD01F /* AntennaHeadAPI */,
@@ -1269,6 +1274,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = LiveAudioRecorder;
+		};
+		D1AF7E5C000000000000000A /* PCMTranscriber */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
+			productName = PCMTranscriber;
 		};
 		AA000002AA000002AA000002 /* librtlsdr */ = {
 			isa = XCSwiftPackageProductDependency;

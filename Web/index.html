@@ -602,6 +602,12 @@
                     stopNowPlayingUpdates();
                 }
 
+                if (contentFileName == "captions.html")
+                {
+                    captionsLastFinalCount = -1;   // force a full rebuild
+                    captionsPoll();                // fill immediately, don't wait for the interval
+                }
+
                 if (contentFileName.indexOf("editcustomtask.html") == 0)
                 {
                     initCustomTaskEditor();

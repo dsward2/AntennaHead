@@ -865,3 +865,47 @@ svg.lr-animation {
     padding: 10px;
     box-sizing: border-box;
 }
+
+/* ---- Live Captions page (captions.html) -----------------------------------
+   Fed by /captions.json (SDRController.TranscriptionCaptionListener, which
+   consumes the PCMTranscriber tap on UDP 6023). All colours come from the
+   theme tokens so it tracks light/dark like the rest of the UI. */
+.caption-notice {
+    margin: 12px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--ah-border);
+    border-radius: 6px;
+    background: var(--ah-panel-bg);
+    color: var(--ah-fg);
+    font-size: 1.4rem;
+}
+.caption-panel { margin: 12px 0 28px; }
+.caption-transcript {
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--ah-border);
+    border-radius: 6px;
+    background: var(--ah-panel-bg);
+    color: var(--ah-fg);
+    font-size: 1.7rem;
+    line-height: 1.5;
+}
+.caption-transcript p { margin: 0 0 0.45em; }
+.caption-transcript p:last-child { margin-bottom: 0; }
+.caption-transcript:empty::before {
+    content: "Waiting for speech\2026";
+    opacity: 0.55;
+}
+.caption-live {
+    margin-top: 10px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--ah-bg);
+    color: var(--ah-fg);
+    opacity: 0.7;
+    font-style: italic;
+    font-size: 1.7rem;
+    line-height: 1.5;
+}
+.caption-live:empty { display: none; }

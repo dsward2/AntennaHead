@@ -20,6 +20,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AntennaHead captures audio from the selected input device to stream it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>AntennaHead transcribes the audio it is streaming, on this Mac, to produce live captions and optional transcripts.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>NSPrincipalClass</key>

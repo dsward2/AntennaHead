@@ -1886,6 +1886,77 @@ function aacRecorderTick()
 var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 
 
+// ---- Live Captions (captions.html) -------------------------------------
+//
+// Polls /captions.json — served by AntennaHeadHTTPServer from
+// SDRController's TranscriptionCaptionListener, which consumes the
+// PCMTranscriber tap's newline-delimited JSON on UDP 6023. Runs globally
+// like aacRecorderPoll(); it's a no-op until the captions fragment is in
+// the DOM. Shape: {"enabled":bool, "live":str, "final":[str,...]}.
+var captionsLastFinalCount = -1;
+
+function captionsPoll()
+{
+    if (!document.getElementById("caption-live")) return;   // fragment not loaded
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            try {
+                updateCaptionsDisplay(JSON.parse(this.responseText));
+            } catch (e) { /* ignore a malformed frame */ }
+        }
+    };
+    xhttp.open("GET", "/captions.json", true);
+    xhttp.send();
+}
+
+function captionsEscapeHTML(s)
+{
+    return String(s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function updateCaptionsDisplay(data)
+{
+    var enabled = !!(data && data.enabled);
+
+    var notice = document.getElementById("caption-disabled-notice");
+    if (notice) notice.style.display = enabled ? "none" : "";
+
+    var transcript = document.getElementById("caption-transcript");
+    if (transcript)
+    {
+        var finals = (data && data.final) || [];
+        // Rebuild only when the segment list changed (or the fragment was
+        // just re-opened, leaving the node empty) so scrolling isn't
+        // yanked on every poll.
+        if (finals.length !== captionsLastFinalCount ||
+            (transcript.innerHTML === "" && finals.length > 0))
+        {
+            captionsLastFinalCount = finals.length;
+            var html = "";
+            for (var i = 0; i < finals.length; i++)
+            {
+                html += "<p>" + captionsEscapeHTML(finals[i]) + "</p>";
+            }
+            transcript.innerHTML = html;
+            transcript.scrollTop = transcript.scrollHeight;   // keep newest in view
+        }
+    }
+
+    var live = document.getElementById("caption-live");
+    if (live)
+    {
+        var text = (data && data.live) || "";
+        if (live.textContent !== text) live.textContent = text;
+    }
+}
+
+var captionsPollIntervalID = setInterval(captionsPoll, 750);
+
+
 // ---- Text to Speech (Audio Devices page) --------------------------------
 //
 // "Select Text Folder…" asks the server to run a native folder chooser on the
