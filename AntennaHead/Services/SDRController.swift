@@ -265,11 +265,18 @@ final class SDRController {
             return  // lastError already set by the failing builder
         }
 
+        // Optional spoken "Now playing …" clip. `drop` mode: the live capture
+        // source keeps running and its first ~clip-length of audio is discarded
+        // rather than stalling.
+        let announcement = prepareAnnouncement(text: Self.announcementText(forDevice: deviceName),
+                                               holdInput: false)
+
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         radioTaskPipelineManager.add(udpSender)
 
-        launchCurrentPipeline(dying: dying)
+        launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
     }
 
     /// Listen to a custom task: a user-defined pipe of external executables
@@ -354,10 +361,18 @@ final class SDRController {
             taskMode = .stopped
             return
         }
+
+        // Optional spoken "Now playing …" clip. `hold` mode: PCMFilePlayer is
+        // self-pacing, so hold its output until the clip finishes and it plays
+        // the recording from the start rather than dropping the opening audio.
+        let announcement = prepareAnnouncement(text: Self.announcementText(forRecording: fileName),
+                                               holdInput: true)
+
         radioTaskPipelineManager.add(player)
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         radioTaskPipelineManager.add(udpSender)
 
-        launchCurrentPipeline(dying: dying)
+        launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
     }
 
     private func makeFilePlayerTaskItem(fileURL: URL, repeatAudio: Bool) -> TaskItem? {
@@ -457,9 +472,18 @@ final class SDRController {
 
         guard let receiver = makeUDPReceiverTaskItem(port: controlBoothReceivePort),
               let sender = makeUDPSenderTaskItem() else { return }
+
+        // Optional spoken "Now playing …" clip. `drop` mode: the ControlBooth
+        // UDP feed keeps arriving and its first ~clip-length of audio is
+        // discarded rather than stalling the bridge.
+        let announcement = prepareAnnouncement(text: Self.announcementText(forControlBooth: name),
+                                               holdInput: false)
+
         radioTaskPipelineManager.add(receiver)
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         radioTaskPipelineManager.add(sender)
-        launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
+                              announcement: announcement?.pending)
     }
 
     /// Start a PCMUDPReceiver → PCMUDPSender bridge pipeline that picks up PCM
@@ -977,6 +1001,30 @@ final class SDRController {
             text += " \(phrase)."
         }
         return text
+    }
+
+    /// The line the spoken announcement reads when listening to a Core Audio
+    /// input device: `"Now playing <device>."`, or a generic fallback when the
+    /// device name is blank.
+    static func announcementText(forDevice deviceName: String) -> String {
+        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Now playing audio input." : "Now playing \(name)."
+    }
+
+    /// The line the spoken announcement reads when playing a recording:
+    /// `"Now playing <name>."` with the file extension dropped so it isn't read
+    /// aloud, or a generic fallback when the name is blank.
+    static func announcementText(forRecording fileName: String) -> String {
+        let base = (fileName as NSString).deletingPathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return base.isEmpty ? "Now playing recording." : "Now playing \(base)."
+    }
+
+    /// The line the spoken announcement reads when a ControlBooth feed is the
+    /// source: `"Now playing <name>."`, or a generic fallback when blank.
+    static func announcementText(forControlBooth name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Now playing Control Booth." : "Now playing \(trimmed)."
     }
 
     /// True when `name` is just a frequency readout — digits with a decimal
