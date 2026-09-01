@@ -211,6 +211,11 @@ final class SDRController {
     /// first, capped at `captionHistoryLimit`. Reset on each retune.
     private(set) var captionHistory: [String] = []
     private static let captionHistoryLimit = 200
+    /// Monotonic count of finalized caption segments for the current session.
+    /// `captionHistory.count` plateaus at `captionHistoryLimit` once the ring
+    /// fills, so a polling client can't use it to spot new finals after that;
+    /// this keeps advancing. Reset with the history on each retune.
+    private(set) var captionSeq: Int = 0
 
     private(set) var lastError: Error?
 
@@ -268,6 +273,7 @@ final class SDRController {
             liveCaption = ""
             guard !text.isEmpty else { return }
             captionHistory.append(text)
+            captionSeq &+= 1
             if captionHistory.count > Self.captionHistoryLimit {
                 captionHistory.removeFirst(captionHistory.count - Self.captionHistoryLimit)
             }
@@ -279,6 +285,7 @@ final class SDRController {
     private func resetCaptions() {
         liveCaption = ""
         captionHistory.removeAll()
+        captionSeq = 0
     }
 
     // MARK: Public control API (ported from SDRController.h)

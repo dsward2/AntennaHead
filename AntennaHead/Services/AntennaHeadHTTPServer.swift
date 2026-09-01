@@ -2290,7 +2290,8 @@ final class AntennaHeadHTTPServer {
         let dict: [String: Any] = [
             "enabled": sdrController?.transcriptionEnabled ?? false,
             "live": sdrController?.liveCaption ?? "",
-            "final": sdrController?.captionHistory ?? []
+            "final": sdrController?.captionHistory ?? [],
+            "seq": sdrController?.captionSeq ?? 0
         ]
         return (try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])) ?? Data("{}".utf8)
     }

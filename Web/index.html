@@ -604,8 +604,9 @@
 
                 if (contentFileName == "captions.html")
                 {
-                    captionsLastFinalCount = -1;   // force a full rebuild
-                    captionsPoll();                // fill immediately, don't wait for the interval
+                    captionsLastRenderedSeq = -1;   // force a full rebuild
+                    captionsPollInFlight = false;   // drop any stale in-flight guard
+                    captionsPoll();                 // fill immediately, don't wait for the interval
                 }
 
                 if (contentFileName.indexOf("editcustomtask.html") == 0)
