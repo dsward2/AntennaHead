@@ -1893,20 +1893,28 @@ var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 // PCMTranscriber tap's newline-delimited JSON on UDP 6023. Runs globally
 // like aacRecorderPoll(); it's a no-op until the captions fragment is in
 // the DOM. Shape: {"enabled":bool, "live":str, "final":[str,...]}.
-var captionsLastFinalCount = -1;
+var captionsLastRenderedSeq = -1;
+var captionsPollInFlight = false;
 
 function captionsPoll()
 {
     if (!document.getElementById("caption-live")) return;   // fragment not loaded
+    if (captionsPollInFlight) return;                       // a slow server must not pile requests up
 
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-            try {
-                updateCaptionsDisplay(JSON.parse(this.responseText));
-            } catch (e) { /* ignore a malformed frame */ }
+        if (this.readyState == 4) {
+            captionsPollInFlight = false;
+            if (this.status == 200) {
+                try {
+                    updateCaptionsDisplay(JSON.parse(this.responseText));
+                } catch (e) { /* ignore a malformed frame */ }
+            }
         }
     };
+    xhttp.timeout = 4000;
+    xhttp.ontimeout = xhttp.onerror = function() { captionsPollInFlight = false; };
+    captionsPollInFlight = true;
     xhttp.open("GET", "/captions.json", true);
     xhttp.send();
 }
@@ -1929,13 +1937,17 @@ function updateCaptionsDisplay(data)
     if (transcript)
     {
         var finals = (data && data.final) || [];
-        // Rebuild only when the segment list changed (or the fragment was
-        // just re-opened, leaving the node empty) so scrolling isn't
-        // yanked on every poll.
-        if (finals.length !== captionsLastFinalCount ||
+        // Key the rebuild on the server's monotonic `seq`, not finals.length:
+        // once the server-side history ring hits its cap the length stops
+        // changing while new segments keep rolling in, and a length check would
+        // freeze the transcript. Fall back to the length if an older server
+        // omits `seq`. Also rebuild when the fragment was just re-opened and
+        // left the node empty. Skipping unchanged polls keeps scrolling steady.
+        var seq = (data && typeof data.seq === "number") ? data.seq : finals.length;
+        if (seq !== captionsLastRenderedSeq ||
             (transcript.innerHTML === "" && finals.length > 0))
         {
-            captionsLastFinalCount = finals.length;
+            captionsLastRenderedSeq = seq;
             var html = "";
             for (var i = 0; i < finals.length; i++)
             {
