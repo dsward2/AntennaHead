@@ -2575,9 +2575,7 @@ final class AntennaHeadHTTPServer {
                 """
             }
             var items: [String] = [
-                col(loadSVG(named: "favorites"),   onclick: "favorites.html",  title: "Click the Favorites button to listen to your favorite stations.",                                                                    label: "Favorites",   description: "Listen to your favorite frequencies."),
-                col(loadSVG(named: "categories"),  onclick: "categories.html", title: "Click the Categories button to organize your favorite stations by category, and for high-speed scanning of multiple frequencies.",   label: "Categories",  description: "Organize and scan frequencies."),
-                col(loadSVG(named: "tuner"),       onclick: "tuner.html",      title: "Click the Tuner button to enter the frequency for a new station, and save it as a Favorite station.",                                label: "Tuner",       description: "Enter a new frequency and listen."),
+                col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner.",                              label: "Radio",       description: "Listen to RTL-SDR radio"),
                 col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
                 col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Use audio input devices or custom tasks."),
             ]
@@ -2601,6 +2599,12 @@ final class AntennaHeadHTTPServer {
                 i += 2
             }
             dict["MENU_ROWS"] = rows
+        case "radio.html":
+            // Same icons the top-level menu used for these items before they
+            // were folded behind the single "Radio" entry.
+            dict["FAVORITES_ICON"]  = loadSVG(named: "favorites")
+            dict["CATEGORIES_ICON"] = loadSVG(named: "categories")
+            dict["TUNER_ICON"]      = loadSVG(named: "tuner")
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         default:
@@ -2611,8 +2615,8 @@ final class AntennaHeadHTTPServer {
 
     // MARK: %%NAV_BAR%% and %%AUDIO_PLAYER%% (ported from LocalRadio's HTTPWebServerConnection)
 
-    /// Static top navigation bar (Back / Top / Now Playing). The referenced JS
-    /// functions live in `index.html`.
+    /// Static top navigation bar (Back / Top / Captions / Now Playing). The
+    /// referenced JS functions live in `index.html`.
     nonisolated private func navBarHTML() -> String {
         """
            <div class="navbar-spacer"></div>
@@ -2621,8 +2625,8 @@ final class AntennaHeadHTTPServer {
                 <ul class="navbar-list">
                   <li class="navbar-item"><a class="navbar-link" href="#" onclick="backButtonClicked(self);" title="Click the Back button to return to the previous page in the web interface">Back</a></li>
                   <li class="navbar-item"><a class="navbar-link" href="#" onclick="loadContent('index2.html');" title="Click the Top button to reload the web interface.">Top</a></li>
-                  <li class="navbar-item"><a class="navbar-link" id="nowPlayingNavBarLink" href="#" onclick="loadContent('nowplaying.html');" title="Click the Now Playing button to see the current activity on the radio, including the live Signal Level.">Now Playing</a></li>
                   <li class="navbar-item"><a class="navbar-link" id="captionsNavBarLink" href="#" onclick="loadContent('captions.html');" title="Click the Captions button to see live speech-to-text of the audio that is currently streaming.">Captions</a></li>
+                  <li class="navbar-item"><a class="navbar-link" id="nowPlayingNavBarLink" href="#" onclick="loadContent('nowplaying.html');" title="Click the Now Playing button to see the current activity on the radio, including the live Signal Level.">Now Playing</a></li>
                 </ul>
               </div>
             </nav>
