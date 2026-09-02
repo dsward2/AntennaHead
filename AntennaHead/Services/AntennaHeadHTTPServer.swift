@@ -530,12 +530,24 @@ final class AntennaHeadHTTPServer {
             }
             return okResponse()
 
-        case "/devices.html":
-            return renderHTML(relativePath: "devices.html", host: host, isSecure: isSecure, webConfig: webConfig,
-                              extra: ["DEVICES_FORM": devicesFormHTML(),
-                                      "CUSTOM_TASKS_FORM": customTasksFormHTML(),
-                                      "GQRX_FORM": gqrxFormHTML(),
-                                      "TEXT_TO_SPEECH_FORM": textToSpeechFormHTML()])
+        // `devices.html` is now a plain hub of links (no DB-backed tokens), so
+        // it falls through to static/dynamic serving. Each Listen mode lives on
+        // its own sub-page below, carrying just its one form.
+        case "/deviceaudioinput.html":
+            return renderHTML(relativePath: "deviceaudioinput.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["DEVICES_FORM": devicesFormHTML()])
+
+        case "/devicecustomtask.html":
+            return renderHTML(relativePath: "devicecustomtask.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["CUSTOM_TASKS_FORM": customTasksFormHTML()])
+
+        case "/devicegqrx.html":
+            return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["GQRX_FORM": gqrxFormHTML()])
+
+        case "/devicetexttospeech.html":
+            return renderHTML(relativePath: "devicetexttospeech.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["TEXT_TO_SPEECH_FORM": textToSpeechFormHTML()])
 
         case "/devicelistenbuttonclicked.html":
             // Buttons are wired; the Core Audio device-input pipeline is deferred
