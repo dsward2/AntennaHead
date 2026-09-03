@@ -2299,9 +2299,6 @@ final class AntennaHeadHTTPServer {
                 col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
                 col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input, Gqrx, or text to speech."),
             ]
-            if webConfig.controlBoothEnabled {
-                items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to see remote control status.", label: "ControlBooth", description: "Remote control via ControlBooth."))
-            }
             if webConfig.airPlayReceiverEnabled {
                 items.append(col(loadSVG(named: "airplay"), onclick: "airplay.html", title: "Click the AirPlay Receiver button to listen to audio streamed from an iPhone, iPad, or Mac.", label: "AirPlay Receiver", description: "Stream audio here via AirPlay."))
             }
@@ -2327,6 +2324,19 @@ final class AntennaHeadHTTPServer {
             dict["TUNER_ICON"]      = loadSVG(named: "tuner")
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
+        case "devices.html":
+            // The ControlBooth remote-control page is reached from a tile on the
+            // Devices page (it used to be a top-level hub item). The tile only
+            // appears when ControlBooth integration is enabled in Configuration,
+            // mirroring the old hub gate.
+            dict["CONTROLBOOTH_TILE"] = webConfig.controlBoothEnabled ? """
+                            <div class="six columns value-prop">
+                                <div class="value-prop">
+                                    <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
+                                </div>
+                                Start a ControlBooth pipeline<br>as the audio source
+                            </div>
+                """ : ""
         default:
             break
         }
