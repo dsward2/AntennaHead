@@ -537,10 +537,6 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "deviceaudioinput.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["DEVICES_FORM": devicesFormHTML()])
 
-        case "/devicecustomtask.html":
-            return renderHTML(relativePath: "devicecustomtask.html", host: host, isSecure: isSecure, webConfig: webConfig,
-                              extra: ["CUSTOM_TASKS_FORM": customTasksFormHTML()])
-
         case "/devicegqrx.html":
             return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["GQRX_FORM": gqrxFormHTML()])
@@ -555,12 +551,6 @@ final class AntennaHeadHTTPServer {
             let fields = formFields(fromBody: request.body)
             sdrController?.startTasksForDevice(deviceName: fields["audio_input"] ?? "",
                                                deviceAudioOutputFilter: fields["audio_output_filter"] ?? "vol 1")
-            return okResponse()
-
-        case "/customtasklistenbuttonclicked.html":
-            if let id = formFields(fromBody: request.body)["custom_task_select"].flatMap(Int64.init) {
-                try? sdrController?.startTasksForCustomTask(id: id)
-            }
             return okResponse()
 
         case "/gqrxlistenbuttonclicked.html":
@@ -601,38 +591,6 @@ final class AntennaHeadHTTPServer {
                 NotificationCenter.default.post(name: Self.settingsDidChangeNotification, object: nil)
             }
             return okResponse()
-
-        case "/customtasks.html":
-            return htmlFragmentResponse(customTasksManagerHTML())
-
-        case "/editcustomtask.html":
-            let id = queryValue("id", in: request.path).flatMap(Int64.init)
-            return htmlFragmentResponse(editCustomTaskHTML(id: id))
-
-        case "/storecustomtask.html":
-            upsertCustomTask(fromBody: request.body)
-            return okResponse()
-
-        case "/deletecustomtask.html":
-            if let id = formFields(fromBody: request.body)["id"].flatMap(Int64.init) {
-                try? sqlite?.deleteCustomTaskRecord(forID: id)
-            }
-            return okResponse()
-
-        case "/customtaskpipelinetotext.html":
-            // "Copy Stage"/"Copy Pipeline": body is `{"tasks":[{"path":...,
-            // "arguments":[...]}, ...]}` (what buildCustomTaskJSON() produces);
-            // response is the `|`-joined CLI text.
-            return HTTPResponse(status: 200, reason: "OK",
-                                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                                body: Data(cliTextFromTasks(request.body).utf8))
-
-        case "/customtasktexttopipeline.html":
-            // "Paste Stage"/"Paste Pipeline": body is the pasted CLI text;
-            // response is `{"tasks":[...]}` for the JS to rebuild stage rows from.
-            return HTTPResponse(status: 200, reason: "OK",
-                                headers: ["Content-Type": "application/json"],
-                                body: tasksFromCLIText(request.body))
 
         case "/frequencylistenbuttonclicked.html":
             // Ad-hoc tune from the web Tuner. Body is a JSON *object*
@@ -1471,27 +1429,6 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
-    /// `%%CUSTOM_TASKS_FORM%%` — dropdown of saved custom tasks + Listen.
-    /// Ported from `generateCustomTasksFormString`.
-    @MainActor private func customTasksFormHTML() -> String {
-        let tasks = (try? sqlite?.allCustomTaskRecords()) ?? []
-        var s = "<form class='custom_task_form' id='customTaskForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
-        s += "<label for='custom_task_select'>Select Custom Task</label>"
-        s += "<select name='custom_task_select' class='twelve columns value-prop' title='Uses an external task pipeline as the audio source.'>"
-        for t in tasks {
-            guard let id = t.id else { continue }
-            s += "<option value='\(id)'>\(htmlText(t.taskName))</option>"
-        }
-        s += "</select>"
-        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
-        s += "onclick=\"customTaskListenButtonClicked(getElementById('customTaskForm'));\" "
-        s += "title='Listen to the selected custom task.'>"
-        s += "</form>"
-        s += "<form action='javascript:loadContent(&quot;customtasks.html&quot;)'>"
-        s += "<input class='twelve columns button' type='submit' value='Manage Custom Tasks'></form><br>&nbsp;<br>"
-        return s
-    }
-
     /// `%%GQRX_FORM%%` — starts a PCMUDPReceiver (port 7355) → sox → PCMUDPSender
     /// bridge. Sox normalizes to 48 kHz/2ch; `channels` must match Gqrx's
     /// Audio→Stereo setting (see `SDRController.startGqrxListening`).
@@ -1631,7 +1568,7 @@ final class AntennaHeadHTTPServer {
         return files
     }
 
-    // MARK: Custom-task web manager (list / edit / upsert / delete)
+    // MARK: Shared HTML helpers
 
     /// Fragment returned for pages that have no `%%…%%` template file. Loaded
     /// into index.html's content_frame by `loadContent`, so it uses the site CSS.
@@ -1641,202 +1578,10 @@ final class AntennaHeadHTTPServer {
                      body: Data(html.utf8))
     }
 
-    /// `customtasks.html` — list of custom tasks (each → editor) + Add button.
-    @MainActor private func customTasksManagerHTML() -> String {
-        let tasks = (try? sqlite?.allCustomTaskRecords()) ?? []
-        var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>AntennaHead</h2><h3 class='title'>Custom Tasks</h3>"
-        s += "<table class='u-full-width'><thead><tr><th>ID</th><th>Task</th></tr></thead><tbody>"
-        for t in tasks {
-            guard let id = t.id else { continue }
-            s += "<tr><td>"
-            s += "<a class='button button-primary' type='submit' onclick=\"loadContent('editcustomtask.html?id=\(id)');\">\(id)</a>"
-            s += "</td><td>\(htmlText(t.taskName))</td></tr>"
-        }
-        s += "</tbody></table>"
-        s += "<form action='javascript:loadContent(&quot;editcustomtask.html&quot;)'>"
-        s += "<br>&nbsp;<br>\n<input class='twelve columns button button-primary' type='submit' value='Add New Custom Task'></form>"
-        s += "<br><a href='pipelinetools.html' target='_blank'>Pipeline Tools documentation</a><br>&nbsp;<br>"
-        s += "<br>&nbsp;<br></section></div>"
-        return s
-    }
-
-    /// `editcustomtask.html` — edit an existing task (id) or create a new one.
-    /// Field names match the `custom_task` columns; `task_json` is edited as raw
-    /// JSON (`{"tasks":[{"path":..,"arguments":[..]}]}`). Save → storecustomtask.html.
-    @MainActor private func editCustomTaskHTML(id: Int64?) -> String {
-        let task: CustomTask = id.flatMap { try? sqlite?.customTask(forID: $0) ?? nil } ?? CustomTask.prototype()
-        let isEditing = task.id != nil
-
-        func text(_ label: String, _ name: String, _ value: String, type: String = "text") -> String {
-            "<label for='\(name)'>\(label)</label><input class='twelve columns value-prop' type='\(type)' \(Self.verbatimInputAttributes) "
-                + "id='\(name)' name='\(name)' value='\(htmlAttribute(value))'>"
-        }
-
-        var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>AntennaHead</h2><h3 class='title'>\(isEditing ? "Edit Custom Task" : "Add New Custom Task")</h3>"
-        s += "<form id='customTaskEditForm' onsubmit='event.preventDefault(); return storeCustomTaskRecord(this);' method='POST'>"
-        if let taskID = task.id { s += "<input type='hidden' name='id' value='\(taskID)'>" }
-        s += text("Task Name:", "task_name", task.taskName)
-        s += text("Sample Rate:", "sample_rate", "\(task.sampleRate)", type: "number")
-        s += text("Channels:", "channels", "\(task.channels)", type: "number")
-        s += text("Input Buffer Size:", "input_buffer_size", "\(task.inputBufferSize)", type: "number")
-        s += text("AudioConverter Buffer Size:", "audioconverter_buffer_size", "\(task.audioconverterBufferSize)", type: "number")
-        s += text("AudioQueue Buffer Size:", "audioqueue_buffer_size", "\(task.audioqueueBufferSize)", type: "number")
-        s += "<label>Task Pipeline — executables piped left → right (each stage's stdout feeds the next) "
-        s += "(<a href='pipelinetools.html' target='_blank'>tool documentation</a>):</label>"
-        // Graphical index of the pipeline. Built/refreshed by JS (initCustomTaskEditor
-        // in antennahead.js); clicking a node scrolls to that stage's editor below.
-        s += "<a id='pipeline-overview'></a><div id='pipeline-overview-graphic' class='ct-pipeline'></div>"
-        // data-tools feeds the JS mirror of customTaskStageHTML (new stages
-        // added client-side need the same Tool pop-up options).
-        let toolsAttribute = htmlAttribute(customTaskToolNames().joined(separator: ","))
-        s += "<div id='task-stages' data-tools='\(toolsAttribute)'>\(customTaskStagesHTML(task.taskJson))</div>"
-        s += "<input class='button' type='button' value='+ Add Stage' onclick='addCustomTaskStage();'> "
-        s += "<input class='button' type='button' value='Copy Pipeline' onclick='copyCustomTaskPipeline();' "
-        s += "title='Copy all stages as | -joined CLI text'> "
-        s += "<input class='button' type='button' value='Paste Pipeline' onclick='pasteCustomTaskPipeline();' "
-        s += "title='Replace all stages from CLI text on the clipboard'>"
-        // JS gathers the stage/argument fields into this hidden field on submit.
-        s += "<input type='hidden' name='task_json' id='task_json_hidden' value=''>"
-        s += "<br>&nbsp;<br><input class='twelve columns button button-primary' type='submit' value='Save Changes'>"
-        if isEditing {
-            // Like the Tuner pages' Listen button: plays what's on the form.
-            // Saves the edits first, since the pipeline is built from the DB.
-            s += "<br>&nbsp;<br><input class='twelve columns button button-primary' type='button' value='Listen' "
-            s += "onclick='editCustomTaskListenButtonClicked(this.form, \(task.id!));' "
-            s += "title='Save changes and listen to this custom task.'>"
-        }
-        s += "</form>"
-        if isEditing {
-            s += "<form id='deleteCustomTaskForm' onsubmit='event.preventDefault(); return deleteCustomTaskRecord(this);' method='POST'>"
-            s += "<input type='hidden' name='id' value='\(task.id!)'>"
-            s += "<input type='hidden' id='task_name' name='task_name' value='\(htmlAttribute(task.taskName))'>"
-            s += "<br>&nbsp;<br><input class='twelve columns button' type='submit' value='Delete This Custom Task'></form>"
-        }
-        s += "<br>&nbsp;<br></section></div>"
-        return s
-    }
-
-    /// Tool names offered by the stage editor's Tool pop-up: the bundled
-    /// Contents/Helpers executables plus whitelisted system tools. Stored as
-    /// bare names in `task_json`; `resolveToolPath` maps them back to real
-    /// paths when the pipeline starts or when exporting CLI text.
-    nonisolated static let systemToolPaths = ["nc": "/usr/bin/nc"]
-
-    /// Resolves a bare tool name to its full executable path. Bare names
-    /// (no "/") check `Contents/Helpers` first, then the system-tool
-    /// whitelist; paths already containing "/" pass through unchanged.
-    nonisolated static func resolveToolPath(_ path: String) -> String {
-        guard !path.isEmpty, !path.contains("/") else { return path }
-        let helper = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Helpers/\(path)")
-        if FileManager.default.isExecutableFile(atPath: helper.path) {
-            return helper.path
-        }
-        return systemToolPaths[path] ?? path
-    }
-
-    nonisolated private func customTaskToolNames() -> [String] {
-        var names: Set<String> = []
-        let helpersURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers")
-        if let entries = try? FileManager.default.contentsOfDirectory(at: helpersURL, includingPropertiesForKeys: nil) {
-            for url in entries
-            where FileManager.default.isExecutableFile(atPath: url.path) && !url.lastPathComponent.hasSuffix(".dylib") {
-                names.insert(url.lastPathComponent)
-            }
-        }
-        // The streaming sink is managed by the app itself; pipelines reach it
-        // over UDP (PCMUDPSender), so it makes no sense as a stage.
-        names.remove("LiveAudioServer")
-        names.formUnion(Self.systemToolPaths.keys)
-        return names.sorted()
-    }
-
-    /// Renders the structured task-pipeline editor from `task_json`. One block
-    /// per pipe stage (tool pop-up / custom path + argument list). The matching
-    /// JS in antennahead.js adds/removes stages/arguments and serializes them
-    /// back to `task_json` on save, so the markup here and there must stay in sync.
-    @MainActor private func customTaskStagesHTML(_ json: String) -> String {
-        var stages: [(path: String, args: [String])] = []
-        if let data = json.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let tasks = obj["tasks"] as? [[String: Any]] {
-            for t in tasks {
-                let path = (t["path"] as? String) ?? ""
-                let args = (t["arguments"] as? [Any])?.compactMap { $0 as? String } ?? []
-                stages.append((path, args))
-            }
-        }
-        if stages.isEmpty { stages = [("", [])] }
-        let tools = customTaskToolNames()
-        return stages.map { customTaskStageHTML(path: $0.path, args: $0.args, tools: tools) }.joined()
-    }
-
     /// Attributes that stop WebKit's smart quotes/dashes and autocorrect from
     /// mangling command-line text ("--text" would otherwise become an em dash).
     nonisolated static let verbatimInputAttributes =
         "autocomplete='off' autocorrect='off' autocapitalize='none' spellcheck='false'"
-
-    nonisolated private func customTaskStageHTML(path: String, args: [String], tools: [String]) -> String {
-        var argRows = ""
-        for arg in (args.isEmpty ? [""] : args) {
-            argRows += "<div class='task-arg-row'><input class='task-arg' type='text' \(Self.verbatimInputAttributes) value='\(htmlAttribute(arg))' style='width:80%;'> "
-            argRows += "<input class='button' type='button' value='-' onclick='removeCustomTaskArgument(this);'></div>"
-        }
-        // A bare name in `path` selects that tool; anything with a "/" (or an
-        // unknown name) falls back to the Custom path text field.
-        let isKnownTool = !path.isEmpty && !path.contains("/") && tools.contains(path)
-        let selected = path.isEmpty ? (tools.first ?? "__custom__") : (isKnownTool ? path : "__custom__")
-
-        var s = "<div class='task-stage' style='border:1px solid var(--ah-border, #bbb); border-radius:4px; padding:10px; margin-bottom:10px;'>"
-        s += "<a href='#pipeline-overview' class='ct-back-link' onclick='return scrollToPipelineOverview();'>↑ Pipeline overview</a>"
-        s += "<label>Tool</label>"
-        s += "<select class='task-tool u-full-width' onchange='customTaskToolChanged(this);'>"
-        for tool in tools {
-            s += "<option value='\(htmlAttribute(tool))'\(tool == selected ? " selected" : "")>\(htmlText(tool))</option>"
-        }
-        s += "<option value='__custom__'\(selected == "__custom__" ? " selected" : "")>Custom path…</option>"
-        s += "</select>"
-        let pathStyle = selected == "__custom__" ? "" : " style='display:none;'"
-        s += "<input class='task-path u-full-width' type='text' \(Self.verbatimInputAttributes) value='\(htmlAttribute(path))' placeholder='/path/to/tool'\(pathStyle)>"
-        s += "<label>Arguments</label><div class='task-args'>\(argRows)</div>"
-        s += "<input class='button' type='button' value='+ Argument' onclick='addCustomTaskArgument(this);'> "
-        s += "<input class='button' type='button' value='+ Insert Stage Above' onclick='insertCustomTaskStageAbove(this);'> "
-        s += "<input class='button' type='button' value='Remove Stage' onclick='removeCustomTaskStage(this);'> "
-        s += "<input class='button' type='button' value='Copy Stage' onclick='copyCustomTaskStage(this);' "
-        s += "title='Copy this stage as CLI text'> "
-        s += "<input class='button' type='button' value='Paste Stage' onclick='pasteCustomTaskStage(this);' "
-        s += "title='Replace this stage from CLI text on the clipboard'>"
-        s += "</div>"
-        return s
-    }
-
-    /// Inserts (no id) or updates (id present) a `custom_task` from the editor form.
-    @MainActor private func upsertCustomTask(fromBody body: Data) {
-        let fields = formFields(fromBody: body)
-        var task: CustomTask
-        if let idString = fields["id"], let id = Int64(idString),
-           let existing = (try? sqlite?.customTask(forID: id)) ?? nil {
-            task = existing
-        } else {
-            task = CustomTask.prototype()
-        }
-
-        if let v = fields["task_name"] { task.taskName = v }
-        if let v = fields["task_json"] { task.taskJson = v }
-        if let v = fields["sample_rate"], let n = Int(v) { task.sampleRate = n }
-        if let v = fields["channels"], let n = Int(v) { task.channels = n }
-        if let v = fields["input_buffer_size"], let n = Int(v) { task.inputBufferSize = n }
-        if let v = fields["audioconverter_buffer_size"], let n = Int(v) { task.audioconverterBufferSize = n }
-        if let v = fields["audioqueue_buffer_size"], let n = Int(v) { task.audioqueueBufferSize = n }
-
-        if task.id != nil {
-            try? sqlite?.updateCustomTaskRecord(task)
-        } else {
-            _ = try? sqlite?.insertCustomTaskRecord(&task)
-        }
-    }
 
     // MARK: Tuner (advanced form + insert-new-frequency)
 
@@ -2335,31 +2080,6 @@ final class AntennaHeadHTTPServer {
         return dict
     }
 
-    /// `{"tasks":[{"path":...,"arguments":[...]}, ...]}` → `|`-joined CLI text.
-    /// The parsing/quoting rules themselves live once, in PipelineHelpers'
-    /// `CLIStageText`, shared with ControlBooth — this just adapts the shape
-    /// the web UI already gathers (`buildCustomTaskJSON()` in antennahead.js).
-    nonisolated private func cliTextFromTasks(_ body: Data) -> String {
-        guard let parsed = try? JSONSerialization.jsonObject(with: body),
-              let obj = parsed as? [String: Any],
-              let tasks = obj["tasks"] as? [[String: Any]] else { return "" }
-        let stages = tasks.map { t -> CLIStage in
-            let path = Self.resolveToolPath((t["path"] as? String) ?? "")
-            let args = (t["arguments"] as? [Any])?.compactMap { $0 as? String } ?? []
-            return CLIStage(path: path, arguments: args)
-        }
-        return CLIStageText.export(pipeline: stages)
-    }
-
-    /// Pasted CLI text → `{"tasks":[{"path":...,"arguments":[...]}, ...]}`.
-    nonisolated private func tasksFromCLIText(_ body: Data) -> Data {
-        let text = String(data: body, encoding: .utf8) ?? ""
-        let tasks = CLIStageText.importPipeline(text).map {
-            ["path": $0.path, "arguments": $0.arguments] as [String: Any]
-        }
-        return (try? JSONSerialization.data(withJSONObject: ["tasks": tasks])) ?? Data(#"{"tasks":[]}"#.utf8)
-    }
-
     nonisolated private func okResponse() -> HTTPResponse {
         HTTPResponse(status: 200, reason: "OK",
                      headers: ["Content-Type": "text/plain; charset=utf-8"],
@@ -2577,7 +2297,7 @@ final class AntennaHeadHTTPServer {
             var items: [String] = [
                 col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner.",                              label: "Radio",       description: "Listen to RTL-SDR radio"),
                 col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
-                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Use audio input devices or custom tasks."),
+                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input, Gqrx, or text to speech."),
             ]
             if webConfig.controlBoothEnabled {
                 items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to see remote control status.", label: "ControlBooth", description: "Remote control via ControlBooth."))

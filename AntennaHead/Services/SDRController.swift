@@ -33,8 +33,6 @@ final class SDRController {
         case frequencyNotFound(Int64)
         case categoryNotFound(Int64)
         case categoryHasNoFrequencies(Int64)
-        case customTaskNotFound(Int64)
-        case customTaskHasNoStages(Int64)
         case recordingNotFound(String)
         case notImplemented(String)
 
@@ -43,8 +41,6 @@ final class SDRController {
             case .frequencyNotFound(let id): return "No frequency record found for id \(id)."
             case .categoryNotFound(let id): return "No category record found for id \(id)."
             case .categoryHasNoFrequencies(let id): return "Category \(id) has no frequencies to scan."
-            case .customTaskNotFound(let id): return "No custom task record found for id \(id)."
-            case .customTaskHasNoStages(let id): return "Custom task \(id) has no tasks defined."
             case .recordingNotFound(let name): return "Recording '\(name)' was not found in the shared Recordings folder."
             case .notImplemented(let what): return "\(what) is not yet implemented."
             }
@@ -378,55 +374,6 @@ final class SDRController {
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
     }
 
-    /// Listen to a custom task: a user-defined pipe of external executables
-    /// (`task_json`) whose final stage emits raw S16LE at the record's
-    /// `sample_rate`/`channels`, which sox then normalizes to 48 kHz / 2 ch.
-    ///
-    /// Note: under the App Sandbox, launching binaries at arbitrary external
-    /// paths (e.g. `/Applications/rtl-sdr/...`) may be denied; such a task will
-    /// fail to start and surface via `lastError`.
-    func startTasksForCustomTask(id: Int64) throws {
-        guard let task = try sqliteController.customTask(forID: id) else {
-            throw SDRError.customTaskNotFound(id)
-        }
-        let stages = Self.parseCustomTaskStages(task.taskJson)
-        guard !stages.isEmpty else {
-            throw SDRError.customTaskHasNoStages(id)
-        }
-
-        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
-        Self.sweepOrphanedHelpers()
-        radioTaskPipelineManager.terminate()
-
-        taskMode = .customTask
-        activeFrequencyID = nil
-        publishCustomTaskStatus(name: task.taskName)
-
-        var items: [TaskItem] = stages.map { stage in
-            let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: Self.resolveToolPath(stage.path),
-                                                             functionName: URL(fileURLWithPath: stage.path).lastPathComponent)
-            for arg in stage.arguments { item.addArgument(arg) }
-            return item
-        }
-        // sox normalizes the task's output rate/channels to the 48 kHz / 2 ch
-        // LiveAudioServer contract (time-based buffer avoids low-rate glitches).
-        guard let resample = makeResampleTaskItem(inputRate: task.sampleRate,
-                                                  inputChannels: max(1, task.channels),
-                                                  audioOutputFilter: "vol 1"),
-              let udpSender = makeUDPSenderTaskItem() else {
-            taskMode = .stopped
-            return
-        }
-        items.append(resample)
-        items.forEach { radioTaskPipelineManager.add($0) }
-        addTranscriberStageIfEnabled()
-        radioTaskPipelineManager.add(udpSender)
-
-        // waitForPort5000: custom tasks may include shairport-sync (port 5000),
-        // which conflicts if the AirPlay receiver hasn't fully released it yet.
-        launchCurrentPipeline(dying: dying, waitForPort5000: true)
-    }
-
     /// Listen to a recorded audio file from the shared App Group Recordings
     /// folder (see `SharedRecordingFolder`) via the `PCMFilePlayer` helper.
     /// That helper decodes straight to the 48 kHz / 2 ch LiveAudioServer
@@ -498,45 +445,6 @@ final class SDRController {
     private func publishRecordingStatus(fileName: String, repeatAudio: Bool) {
         statusFunction = "Playing Recording" + (repeatAudio ? " (repeating)" : "")
         stationName = fileName
-        modulation = ""
-        frequencyDisplay = ""
-        sampleRate = Self.outputSampleRate
-        tunerGain = 0
-        squelchLevel = 0
-        options = ""
-        audioOutputFilter = ""
-        tunerAGC = false
-        directSamplingQBranch = false
-    }
-
-    private struct CustomTaskStage {
-        let path: String
-        let arguments: [String]
-    }
-
-    /// Resolves a custom-task stage's executable path. Delegates to the
-    /// canonical implementation in `AntennaHeadHTTPServer` so the logic
-    /// stays in one place for both launch-time resolution and CLI export.
-    static func resolveToolPath(_ path: String) -> String {
-        AntennaHeadHTTPServer.resolveToolPath(path)
-    }
-
-    /// Parses `task_json` (`{"tasks":[{"path":..,"arguments":[..]}]}`) into stages.
-    private static func parseCustomTaskStages(_ json: String) -> [CustomTaskStage] {
-        struct Payload: Decodable {
-            struct Task: Decodable { let path: String; let arguments: [String]? }
-            let tasks: [Task]
-        }
-        guard let data = json.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return [] }
-        return payload.tasks
-            .filter { !$0.path.isEmpty }
-            .map { CustomTaskStage(path: $0.path, arguments: $0.arguments ?? []) }
-    }
-
-    private func publishCustomTaskStatus(name: String) {
-        statusFunction = "Using Custom Task '\(name)'"
-        stationName = name
         modulation = ""
         frequencyDisplay = ""
         sampleRate = Self.outputSampleRate

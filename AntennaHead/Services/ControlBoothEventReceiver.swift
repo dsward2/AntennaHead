@@ -5,8 +5,9 @@ import SharedLogging
 /// ControlBooth (see "AppleEvents control channel" in ControlBooth's SETUP.md).
 /// ControlBooth's `AntennaHeadClient` sends raw events of class 'AntH':
 ///
-///   'Strt'  start listening task   direct parameter: custom-task name
-///   'Stop'  stop listening task    direct parameter: custom-task name
+///   'Strt'  start listening task   direct parameter: source name (shown as the
+///                                  station name while ControlBooth is the source)
+///   'Stop'  stop listening task    direct parameter: source name
 ///   'Runs'  listening task names   reply: list of the listening tasks' names
 ///   'RecS'  start recording        direct parameter: filename to create.
 ///                                  Written into the shared App Group
@@ -22,20 +23,17 @@ import SharedLogging
 ///   'RecP'  stop recording         no parameters
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
-/// zero or one name, and 'Stop' naming anything other than the active custom
-/// task is a no-op. Receiving Apple events needs no sandbox entitlement (the
+/// zero or one name, and 'Stop' naming anything other than the active source
+/// is a no-op. Receiving Apple events needs no sandbox entitlement (the
 /// sender authorizes); errors are reported through the reply's errn/errs.
 final class ControlBoothEventReceiver: NSObject {
     private let sdrController: SDRController
     private let lasManager: LiveAudioServerProcessManager
-    private let sqlite: SQLiteController
 
     @MainActor
-    init(sdrController: SDRController, lasManager: LiveAudioServerProcessManager,
-         sqlite: SQLiteController? = nil) {
+    init(sdrController: SDRController, lasManager: LiveAudioServerProcessManager) {
         self.sdrController = sdrController
         self.lasManager = lasManager
-        self.sqlite = sqlite ?? .shared
         super.init()
 
         let manager = NSAppleEventManager.shared()
@@ -71,25 +69,14 @@ final class ControlBoothEventReceiver: NSObject {
         MainActor.assumeIsolated {
             guard let name = directParameter(of: event) else {
                 setError(on: reply, code: Self.errAEWrongNumberArgs,
-                         message: "'start listening' requires a custom-task name.")
+                         message: "'start listening' requires a source name.")
                 return
             }
-            if let id = customTaskID(named: name) {
-                do {
-                    try sdrController.startTasksForCustomTask(id: id)
-                    // startTasksForCustomTask reports pipeline launch failures via
-                    // lastError instead of throwing.
-                    if let error = sdrController.lastError {
-                        setError(on: reply, code: Self.errAEEventFailed, message: "\(error)")
-                    }
-                } catch {
-                    setError(on: reply, code: Self.errAEEventFailed, message: "\(error)")
-                }
-            } else {
-                // No local custom task with this name: ControlBooth sends PCM
-                // directly to LAS, so just update AntennaHead's status/mode.
-                sdrController.startControlBoothListening(name: name)
-            }
+            // ControlBooth runs its own pipeline and sends PCM to AntennaHead
+            // over UDP; this just switches AntennaHead's status/mode to show
+            // ControlBooth as the active source. (Custom-task pipelines were
+            // removed from AntennaHead — build them in ControlBooth instead.)
+            sdrController.startControlBoothListening(name: name)
         }
     }
 
@@ -98,7 +85,7 @@ final class ControlBoothEventReceiver: NSObject {
         MainActor.assumeIsolated {
             guard let name = directParameter(of: event) else {
                 setError(on: reply, code: Self.errAEWrongNumberArgs,
-                         message: "'stop listening' requires a custom-task name.")
+                         message: "'stop listening' requires a source name.")
                 return
             }
             if sdrController.taskMode == .customTask, sdrController.stationName == name {
@@ -164,12 +151,6 @@ final class ControlBoothEventReceiver: NSObject {
         }
     }
 
-    @MainActor
-    private func customTaskID(named name: String) -> Int64? {
-        let tasks = (try? sqlite.allCustomTaskRecords()) ?? []
-        return tasks.first { $0.taskName == name }?.id
-    }
-
     private func directParameter(of event: NSAppleEventDescriptor) -> String? {
         guard let name = event.paramDescriptor(forKeyword: Self.keyDirectObject)?.stringValue,
               !name.isEmpty else {
@@ -199,6 +180,5 @@ final class ControlBoothEventReceiver: NSObject {
     private static let keyUseToneFiller = fourCC("Tone")
 
     private static let errAEWrongNumberArgs: Int32 = -1721
-    private static let errAENoSuchObject: Int32 = -1728
     private static let errAEEventFailed: Int32 = -10000
 }
