@@ -2325,12 +2325,20 @@ final class AntennaHeadHTTPServer {
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         case "devices.html":
+            // Tile icons, in the same inlined-SVG style as the top-level menu.
+            // "Select Audio Input" and "ControlBooth" reuse the icons those
+            // items carried when they lived on the top-level hub; Gqrx and
+            // Text-to-Speech get their own matching line-art icons.
+            dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "devices")
+            dict["GQRX_ICON"]            = loadSVG(named: "gqrx")
+            dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
             // The ControlBooth remote-control page is reached from a tile on the
             // Devices page (it used to be a top-level hub item). The tile only
             // appears when ControlBooth integration is enabled in Configuration,
             // mirroring the old hub gate.
             dict["CONTROLBOOTH_TILE"] = webConfig.controlBoothEnabled ? """
                             <div class="six columns value-prop">
+                                \(loadSVG(named: "controlbooth"))
                                 <div class="value-prop">
                                     <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
                                 </div>
