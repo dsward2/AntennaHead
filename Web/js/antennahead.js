@@ -1050,6 +1050,123 @@ function setFrequencyDigits(frequency)
 }
 
 
+// --- Keyboard support for the tuner-digit frequency widget -----------------
+//
+// Called from loadContent() after every page injection; a no-op on pages
+// that have no <div class="tuner-digits"> widget. Makes each visible digit
+// focusable (tabindex=0) so Tab / Shift-Tab step through the digits and on
+// to the next field the way they do for text inputs, and wires:
+//
+//   0-9              write that digit, then advance to the next digit
+//   Backspace        reset the digit to 0 and step back one digit
+//   Delete           reset the digit to 0, stay put
+//   ArrowLeft/Right  move the selection to the adjacent digit
+//   ArrowUp/Down     increment / decrement (same as the on-screen +/- buttons)
+//
+// Editing reuses the existing helpers (tunerDigitClicked, checkFrequencyRange,
+// updateFrequencyInput), so range clamping and the hidden #frequency field
+// stay in sync exactly as they do for mouse users.
+function initTunerDigitKeyboard()
+{
+    var widget = document.getElementsByClassName("tuner-digits")[0];
+    if (!widget) { return; }
+
+    // Visible, editable digits in left-to-right (document) order. The widget
+    // always carries all ten <span class="tuner-digit"> cells; the ones that
+    // don't apply to the current band are hidden with .tuner-digit-hidden.
+    function editableDigits()
+    {
+        var cells = widget.getElementsByClassName("tuner-digit");
+        var list = [];
+        for (var i = 0; i < cells.length; i++)
+        {
+            if (!cells[i].classList.contains("tuner-digit-hidden"))
+            {
+                list.push(cells[i]);
+            }
+        }
+        return list;
+    }
+
+    function setDigit(cell, text)
+    {
+        tunerDigitClicked(cell);
+        cell.innerText = text;
+        checkFrequencyRange();
+        updateFrequencyInput();
+    }
+
+    var digits = editableDigits();
+    for (var d = 0; d < digits.length; d++)
+    {
+        var digit = digits[d];
+        digit.setAttribute("tabindex", "0");
+        digit.setAttribute("role", "spinbutton");
+
+        // Focusing a digit (via Tab, or a click) selects it, so the +/-
+        // buttons and ArrowUp/Down act on whatever the keyboard last landed on.
+        digit.addEventListener("focus", function () { tunerDigitClicked(this); });
+
+        digit.addEventListener("keydown", function (event) {
+            // Leave browser/OS shortcuts (Cmd-R, Ctrl-L, ...) untouched.
+            if (event.ctrlKey || event.metaKey || event.altKey) { return; }
+
+            var list = editableDigits();
+            var index = list.indexOf(this);
+            if (index < 0) { return; }
+
+            // Plain digit key: overwrite this cell and jump to the next one.
+            if (event.key.length === 1 && event.key >= "0" && event.key <= "9")
+            {
+                event.preventDefault();
+                setDigit(this, event.key);
+                if (list[index + 1]) { list[index + 1].focus(); }
+                return;
+            }
+
+            switch (event.key)
+            {
+                case "Backspace":
+                    event.preventDefault();
+                    setDigit(this, "0");
+                    if (list[index - 1]) { list[index - 1].focus(); }
+                    break;
+
+                case "Delete":
+                    event.preventDefault();
+                    setDigit(this, "0");
+                    break;
+
+                case "ArrowLeft":
+                    event.preventDefault();
+                    if (list[index - 1]) { list[index - 1].focus(); }
+                    break;
+
+                case "ArrowRight":
+                    event.preventDefault();
+                    if (list[index + 1]) { list[index + 1].focus(); }
+                    break;
+
+                case "ArrowUp":
+                    event.preventDefault();
+                    tunerDigitClicked(this);
+                    frequencyUpButtonClicked(this);
+                    break;
+
+                case "ArrowDown":
+                    event.preventDefault();
+                    tunerDigitClicked(this);
+                    frequencyDownButtonClicked(this);
+                    break;
+
+                // Tab / Shift-Tab: left alone so the browser moves focus to
+                // the next/previous digit, then on to the next field natively.
+            }
+        });
+    }
+}
+
+
 
 function listenButtonClicked(form)
 {

@@ -843,6 +843,15 @@ span.tuner-digit { border-color: var(--ah-fg); }
    highlight readable against the light digit text in dark mode. */
 span.tuner-digit.tuner-digit-selected { background-color: var(--ah-digit-selected-bg); }
 
+/* Keyboard focus on a tuner digit (initTunerDigitKeyboard makes each visible
+   digit tabbable): mirror the click highlight and add a ring so Tab / arrow-key
+   users can see which digit they're editing. */
+span.tuner-digit:focus {
+    background-color: var(--ah-digit-selected-bg);
+    outline: 2px solid var(--ah-node-stroke);
+    outline-offset: 1px;
+}
+
 /* Home-screen menu icons (images/*.svg, inlined into index2.html by
    loadSVG). The files now draw their line-art in `currentColor` and
    their "paper" fills in `var(--ah-bg)`; this anchors currentColor to
