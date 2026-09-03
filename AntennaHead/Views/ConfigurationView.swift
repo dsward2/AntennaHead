@@ -11,7 +11,6 @@ struct ConfigurationView: View {
     var httpServer: AntennaHeadHTTPServer
     var lasProcess: LiveAudioServerProcessManager
     var sdrController: SDRController
-    var airPlayReceiverProcessManager: AirPlayReceiverProcessManager
 
     @State private var outputBitrate = AntennaHeadHTTPServer.defaultOutputBitrate
     /// LAS doesn't expose its TLS port, so show the configured value.
@@ -20,8 +19,6 @@ struct ConfigurationView: View {
     @State private var controlBoothEnabled = false
     @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
     @State private var launchControlBoothOnStartup = false
-    @State private var airPlayReceiverEnabled = false
-    @State private var airPlayReceiverDeviceName = "AntennaHead"
     @State private var announcementEnabled = false
     @State private var announcementVoiceID = ""
     @State private var previewSynth = AVSpeechSynthesizer()
@@ -38,8 +35,6 @@ struct ConfigurationView: View {
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
     static let controlBoothAutoLaunchKey = "AntennaHeadControlBoothAutoLaunch"
     static let controlBoothBookmarkKey = "AntennaHeadControlBoothBookmark"
-    private static let airPlayReceiverEnabledKey = "AntennaHeadAirPlayReceiverEnabled"
-    private static let airPlayReceiverDeviceNameKey = "AntennaHeadAirPlayReceiverDeviceName"
 
     var body: some View {
         Form {
@@ -59,7 +54,6 @@ struct ConfigurationView: View {
                 portRow("Status Port (UDP):", Int(sdrController.statusUDPPort))
                 portRow("Audio Port (UDP):", Int(sdrController.udpInputPort))
                 portRow("ControlBooth Receive Port (UDP):", Int(sdrController.controlBoothReceivePort))
-                portRow("AirPlay Receive Port (UDP):", Int(sdrController.airPlayReceivePort))
             }
 
             Section("AAC Settings") {
@@ -161,49 +155,6 @@ struct ConfigurationView: View {
             }
 
             Section {
-                Toggle("Enable AirPlay Receiver", isOn: $airPlayReceiverEnabled)
-                    .onChange(of: airPlayReceiverEnabled) { _, enabled in
-                        saveAirPlayReceiverSettings()
-                        // Start/stop only the AirPlay capture pipeline — posting the
-                        // broad settingsDidChangeNotification here used to also
-                        // restart the web server and LiveAudioServer, racing their
-                        // ports against the just-torn-down listeners (see
-                        // AntennaHeadHTTPServer's silent bind-failure bug this
-                        // uncovered). The capture pipeline always targets its own
-                        // dedicated airPlayReceivePort, not LiveAudioServer's input
-                        // directly — use the web UI's AirPlay "Listen" button to
-                        // route it to the live stream.
-                        if enabled {
-                            airPlayReceiverProcessManager.start(deviceName: airPlayReceiverDeviceName,
-                                                                udpPort: sdrController.airPlayReceivePort)
-                        } else {
-                            airPlayReceiverProcessManager.stop()
-                        }
-                    }
-                HStack {
-                    Text("Device Name:")
-                    TextField(text: $airPlayReceiverDeviceName, prompt: Text("AntennaHead")) { EmptyView() }
-                        .labelsHidden()
-                        .multilineTextAlignment(.trailing)
-                        .onSubmit(saveAirPlayReceiverSettings)
-                }
-                if airPlayReceiverEnabled {
-                    LabeledContent("Status:", value: airPlayReceiverProcessManager.isRunning ? "Running" : "Stopped")
-                    if let lastError = airPlayReceiverProcessManager.lastError {
-                        Text(lastError.localizedDescription)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-            } header: {
-                Text("AirPlay Receiver")
-            } footer: {
-                Text("Only one AirPlay receiver can be active on this Mac at a time — macOS's own built-in one (System Settings → General → AirDrop & Handoff), ControlBooth's, or this one — since all of them use RTSP port 5000. Enabling it here just starts capture; it keeps receiving in the background even while another source (radio tuning, a device, etc.) is playing. Use the AirPlay Listen button in the web UI to route its audio to the live stream — switching to a different source only stops listening to it, not the capture itself.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
                 HStack {
                     Button("Show Config Files in Finder") {
                         showConfigFilesInFinder()
@@ -269,10 +220,6 @@ struct ConfigurationView: View {
         }
         let autoLaunch = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
         launchControlBoothOnStartup = autoLaunch == "1"
-        let airPlayEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverEnabledKey)) ?? nil
-        airPlayReceiverEnabled = airPlayEnabled == "1"
-        let storedDeviceName = (try? SQLiteController.shared.appSettingsValue(forKey: Self.airPlayReceiverDeviceNameKey)) ?? nil
-        airPlayReceiverDeviceName = storedDeviceName ?? "AntennaHead"
         let announceEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementEnabledKey)) ?? nil
         announcementEnabled = announceEnabled == "1"
         let storedVoice = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementVoiceKey)) ?? nil
@@ -297,13 +244,6 @@ struct ConfigurationView: View {
             controlBoothAppPath, forKey: Self.controlBoothPathKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             launchControlBoothOnStartup ? "1" : "0", forKey: Self.controlBoothAutoLaunchKey)
-    }
-
-    private func saveAirPlayReceiverSettings() {
-        try? SQLiteController.shared.storeAppSettingsValue(
-            airPlayReceiverEnabled ? "1" : "0", forKey: Self.airPlayReceiverEnabledKey)
-        try? SQLiteController.shared.storeAppSettingsValue(
-            airPlayReceiverDeviceName, forKey: Self.airPlayReceiverDeviceNameKey)
     }
 
     private func saveAnnouncementSettings() {
@@ -396,7 +336,6 @@ private struct EditConfigurationSheet: View {
                     portField("Status Port (UDP):", $ports.statusUDP)
                     portField("Audio Port (UDP):", $ports.audioUDP)
                     portField("ControlBooth Receive Port (UDP):", $ports.controlBoothUDP)
-                    portField("AirPlay Receive Port (UDP):", $ports.airPlayUDP)
                 }
                 Section("AAC Settings") {
                     Picker("Bitrate:", selection: $outputBitrate) {
@@ -447,7 +386,7 @@ private struct EditConfigurationSheet: View {
     /// All ports non-zero and mutually distinct (each needs its own listener).
     private var portsAreValid: Bool {
         let all = [ports.webHTTP, ports.webHTTPS, ports.streamingHTTP, ports.streamingHTTPS,
-                   ports.statusUDP, ports.audioUDP, ports.controlBoothUDP, ports.airPlayUDP]
+                   ports.statusUDP, ports.audioUDP, ports.controlBoothUDP]
         return all.allSatisfy { $0 > 0 } && Set(all).count == all.count
     }
 

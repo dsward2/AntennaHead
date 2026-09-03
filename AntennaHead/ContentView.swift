@@ -8,7 +8,6 @@ struct ContentView: View {
     @State private var lasProcess = LiveAudioServerProcessManager()
     @State private var sdrController = SDRController(
         udpInputPort: LiveAudioServerProcessManager.defaultUDPInputPort)
-    @State private var airPlayReceiverProcessManager = AirPlayReceiverProcessManager()
     @State private var rtlsdrDeviceFound = true
     // ControlBooth's AppleEvents control channel ('AntH' Strt/Stop/Runs).
     @State private var controlBoothEvents: ControlBoothEventReceiver?
@@ -127,8 +126,7 @@ struct ContentView: View {
             StatusView(sdrController: sdrController, audioServer: audioServer, lasProcess: lasProcess)
                 .tabItem { Label("Status", systemImage: "waveform") }
 
-            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController,
-                             airPlayReceiverProcessManager: airPlayReceiverProcessManager)
+            ConfigurationView(httpServer: httpServer, lasProcess: lasProcess, sdrController: sdrController)
                 .tabItem { Label("Configuration", systemImage: "gearshape") }
 
             TLSSettingsView(tlsManager: tlsManager, authCredentials: authCredentials)
@@ -167,13 +165,10 @@ struct ContentView: View {
         httpServer.httpPort = ports.webHTTP
         httpServer.httpsPort = ports.webHTTPS
         sdrController.updatePorts(udpInput: ports.audioUDP, statusUDP: ports.statusUDP,
-                                   controlBoothReceive: ports.controlBoothUDP,
-                                   airPlayReceive: ports.airPlayUDP)
+                                   controlBoothReceive: ports.controlBoothUDP)
 
         let controlBoothEnabled = ((try? SQLiteController.shared.appSettingsValue(
             forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"
-        let airPlayReceiverEnabled = ((try? SQLiteController.shared.appSettingsValue(
-            forKey: "AntennaHeadAirPlayReceiverEnabled")) ?? nil) == "1"
 
         // The web UI's audio player is proxied through this server's own port
         // (selfHTTPPort/selfHTTPSPort) rather than pointed directly at
@@ -185,13 +180,11 @@ struct ContentView: View {
             streamHTTPSPort: tlsConfig?.port,
             aacBitrate: outputBitrate,
             controlBoothEnabled: controlBoothEnabled,
-            airPlayReceiverEnabled: airPlayReceiverEnabled,
             selfHTTPPort: Int(ports.webHTTP),
             selfHTTPSPort: identity != nil ? Int(ports.webHTTPS) : nil
         )
-        // Let web routes read favorites, drive tuning, and reflect AirPlay status.
+        // Let web routes read favorites and drive tuning.
         httpServer.sdrController = sdrController
-        httpServer.airPlayReceiverProcessManager = airPlayReceiverProcessManager
         httpServer.liveAudioServerProcessManager = lasProcess
         httpServer.sqlite = .shared
         httpServer.start(tlsIdentity: identity, auth: auth, webConfig: webConfig)
@@ -200,19 +193,10 @@ struct ContentView: View {
 
         lasProcess.start(auth: auth, tls: tlsConfig, outputBitrate: outputBitrate,
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
-
-        if airPlayReceiverEnabled {
-            let deviceName = ((try? SQLiteController.shared.appSettingsValue(
-                forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
-            airPlayReceiverProcessManager.start(deviceName: deviceName, udpPort: ports.airPlayUDP)
-        } else {
-            airPlayReceiverProcessManager.stop()
-        }
     }
 
     private func teardownServices() {
         sdrController.terminateTasks()
-        airPlayReceiverProcessManager.stop()
         httpServer.stop()
         audioServer.stopPolling()
         lasProcess.stop()

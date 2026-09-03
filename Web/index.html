@@ -364,7 +364,7 @@
         if (audioElementInDownloadMode == true && audioPlayer !== null && liveStreamAudioSrc !== null)
         {
             // Coming back from fast-download playback (recordingDownloadButtonClicked())
-            // to a live-stream action (Listen, Tuner, Devices, AirPlay, ...) —
+            // to a live-stream action (Listen, Tuner, Devices, ...) —
             // point the element back at the live HLS mount before doing anything else.
             audioElementLog(audioPlayer, "startAudioPlayer: restoring live stream src from download mode");
             audioPlayer.loop = false;
@@ -412,7 +412,7 @@
 
 
     // Dispatches postMessage() traffic used to (re)start the <audio> element:
-    // the plain "startaudio" string (Listen/Tuner/Devices/AirPlay — see
+    // the plain "startaudio" string (Listen/Tuner/Devices — see
     // startAudioPlayer()) or "startdownloadaudio:<0|1>:<encoded url>" for
     // fast-download recording playback (see recordingDownloadButtonClicked()
     // in antennahead.js and startDownloadAudioPlayer() above).

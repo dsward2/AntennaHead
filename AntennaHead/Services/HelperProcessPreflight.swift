@@ -10,8 +10,8 @@ import SharedLogging
 enum HelperProcessPreflight {
 
     // Helper executables that bind exclusive ports, matched against kinfo_proc.kp_proc.p_comm
-    // (p_comm is truncated to MAXCOMLEN=15 significant chars; both names fit exactly).
-    private static let helperNames = ["LiveAudioServer", "shairport-sync"]
+    // (p_comm is truncated to MAXCOMLEN=15 significant chars).
+    private static let helperNames = ["LiveAudioServer"]
 
     /// Finds all processes matching the known helper names (excluding this
     /// process), sends SIGTERM, waits up to 2 seconds for graceful exit,
@@ -62,7 +62,7 @@ enum HelperProcessPreflight {
     }
 
     /// Polls until the TCP port is available to bind, up to `timeout` seconds.
-    /// Used to confirm shairport-sync (port 5000) has fully released before a
+    /// Used to confirm a previous helper has fully released a port before a
     /// replacement is launched. No-op if the port is already free.
     static func waitForTCPPortFree(_ port: UInt16, timeout: TimeInterval = 2.0) async {
         let deadline = Date().addingTimeInterval(timeout)

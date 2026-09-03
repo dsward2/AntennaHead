@@ -95,7 +95,6 @@ final class AntennaHeadHTTPServer {
     /// them by awaiting a MainActor hop (see `appStateResponse`).
     var sdrController: SDRController?
     var sqlite: SQLiteController?
-    var airPlayReceiverProcessManager: AirPlayReceiverProcessManager?
     /// Drives the `%%AUDIO_PLAYER%%` bar's AAC recorder toggle (`/api/aac-recorder/*`).
     var liveAudioServerProcessManager: LiveAudioServerProcessManager?
 
@@ -130,7 +129,6 @@ final class AntennaHeadHTTPServer {
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
         var controlBoothEnabled: Bool = false
-        var airPlayReceiverEnabled: Bool = false
         /// AntennaHead's own web-server port(s). The `<audio>` element's HLS
         /// request is pointed at *this* server (proxied through to LAS
         /// internally) rather than LAS's separate port, so a browser
@@ -774,19 +772,6 @@ final class AntennaHeadHTTPServer {
             launchControlBooth()
             return htmlFragmentResponse(controlBoothPageHTML())
 
-        case "/airplay.html":
-            return htmlFragmentResponse(airPlayPageHTML())
-
-        case "/airplaylistenbuttonclicked.html":
-            let deviceName = ((try? sqlite?.appSettingsValue(
-                forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
-            sdrController?.startAirPlayListening(deviceName: deviceName)
-            return htmlFragmentResponse(airPlayPageHTML())
-
-        case "/airplaystop.html":
-            sdrController?.terminateTasks()
-            return htmlFragmentResponse(airPlayPageHTML())
-
         case "/api/aac-recorder/status":
             return aacRecorderStatusResponse()
 
@@ -843,15 +828,6 @@ final class AntennaHeadHTTPServer {
 
         case APIEndpoint.controlBoothStop:
             return apiControlBoothStopResponse()
-
-        case APIEndpoint.airPlayStatus:
-            return apiAirPlayStatusResponse()
-
-        case APIEndpoint.airPlayListen:
-            return apiAirPlayListenResponse()
-
-        case APIEndpoint.airPlayStop:
-            return apiAirPlayStopResponse()
 
         default:
             return nil
@@ -1014,7 +990,7 @@ final class AntennaHeadHTTPServer {
 
     /// Stops whatever's currently running, regardless of task mode — the
     /// JSON-API equivalent of the various `*stop.html` routes
-    /// (`airplaystop.html`, `controlboothstop.html`) collapsed into one, since
+    /// (e.g. `controlboothstop.html`) collapsed into one, since
     /// a remote client has no reason to distinguish which source it's
     /// stopping the way each source's own web page does.
     @MainActor private func apiStopResponse() -> HTTPResponse {
@@ -1114,59 +1090,6 @@ final class AntennaHeadHTTPServer {
         try? ControlBoothClient.stopAllPipelines()
         sdrController?.terminateTasks()
         return apiNowPlayingResponse()
-    }
-
-    /// The JSON-API equivalent of `airPlayPageHTML()`'s status portion.
-    @MainActor private func apiAirPlayStatusResponse() -> HTTPResponse {
-        let isRunning = airPlayReceiverProcessManager?.isRunning ?? false
-        let lastError = airPlayReceiverProcessManager?.lastError.map { "\($0)" }
-        return apiEncode(AirPlayReceiverStatus(isRunning: isRunning, lastError: lastError))
-    }
-
-    /// The JSON-API equivalent of `/airplaylistenbuttonclicked.html`.
-    @MainActor private func apiAirPlayListenResponse() -> HTTPResponse {
-        let deviceName = ((try? sqlite?.appSettingsValue(
-            forKey: "AntennaHeadAirPlayReceiverDeviceName")) ?? nil) ?? "AntennaHead"
-        sdrController?.startAirPlayListening(deviceName: deviceName)
-        return apiNowPlayingResponse()
-    }
-
-    /// The JSON-API equivalent of `/airplaystop.html`.
-    @MainActor private func apiAirPlayStopResponse() -> HTTPResponse {
-        sdrController?.terminateTasks()
-        return apiNowPlayingResponse()
-    }
-
-    /// Mirrors `controlBoothPageHTML()`: shows whether the AirPlay Receiver's
-    /// capture pipeline is running (enabled in the Configuration tab) and, if
-    /// so, offers a Listen button that bridges it to the live stream via
-    /// `SDRController.startAirPlayListening`. Clicking Listen again after
-    /// switching to another source just reconnects it — the capture pipeline
-    /// itself never stops on its own.
-    @MainActor private func airPlayPageHTML() -> String {
-        let isRunning = airPlayReceiverProcessManager?.isRunning ?? false
-        let statusText = isRunning ? "Running" : "Stopped"
-        let statusColor = isRunning ? "green" : "#cc0000"
-        var s = "<div class='container'><section class='header'>"
-        s += "<h2 class='title'>AntennaHead</h2>"
-        s += "<h3 class='title' id='listen_title'>AirPlay Receiver</h3>"
-        s += "<p>Stream audio here from an iPhone, iPad, or Mac via AirPlay.</p>"
-        s += "<p>AirPlay Receiver: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
-        if let lastError = airPlayReceiverProcessManager?.lastError {
-            s += "<p style='color:#cc0000'>\(htmlText("\(lastError)"))</p>"
-        }
-        if isRunning {
-            s += "<form action='javascript:loadContent(&quot;airplaylistenbuttonclicked.html&quot;)'>"
-            s += "<input class='twelve columns button button-primary' type='submit' value='Listen' "
-            s += "title='Route the AirPlay Receiver&#39;s audio to the live stream.'></form><br>&nbsp;<br>"
-            s += "<form action='javascript:loadContent(&quot;airplaystop.html&quot;)'>"
-            s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
-        } else {
-            s += "<p>Enable AirPlay Receiver in the Configuration tab first.</p>"
-        }
-        s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('airplay.html');\"><br>&nbsp;<br>"
-        s += "</section></div>"
-        return s
     }
 
     @MainActor private func controlBoothPageHTML() -> String {
@@ -2299,9 +2222,6 @@ final class AntennaHeadHTTPServer {
                 col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
                 col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input, Gqrx, or text to speech."),
             ]
-            if webConfig.airPlayReceiverEnabled {
-                items.append(col(loadSVG(named: "airplay"), onclick: "airplay.html", title: "Click the AirPlay Receiver button to listen to audio streamed from an iPhone, iPad, or Mac.", label: "AirPlay Receiver", description: "Stream audio here via AirPlay."))
-            }
             items.append(contentsOf: [
                 col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
                 col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about AntennaHead.",                                                           label: "Info",     description: "About AntennaHead."),

@@ -64,13 +64,6 @@ final class SDRController {
     private(set) var statusUDPPort: UInt16
     /// UDP port PCMUDPReceiver listens on for PCM datagrams from ControlBooth.
     private(set) var controlBoothReceivePort: UInt16 = 6019
-    /// UDP port PCMUDPReceiver listens on for PCM datagrams from the AirPlay
-    /// Receiver's own always-running capture pipeline (see
-    /// `AirPlayReceiverProcessManager`). Switching to another source just tears
-    /// down this relay bridge — the capture pipeline keeps running and sending
-    /// here regardless, so AirPlay listening can resume later without a fresh
-    /// AirPlay session.
-    private(set) var airPlayReceivePort: UInt16 = 6022
     /// UDP port PCMUDPReceiver listens on for Gqrx's 2-channel PCM audio
     /// output — Gqrx's own default UDP audio port (see NETWORK_PORTS.md). Not
     /// exposed in the Configuration sheet like the other ports, but surfaced
@@ -229,10 +222,9 @@ final class SDRController {
     /// Applies the configured UDP ports (Configuration sheet). The audio port
     /// takes effect when the next pipeline is built; a changed status port
     /// recreates the rtl_fm status listener immediately.
-    func updatePorts(udpInput: UInt16, statusUDP: UInt16, controlBoothReceive: UInt16 = 6019, airPlayReceive: UInt16 = 6022) {
+    func updatePorts(udpInput: UInt16, statusUDP: UInt16, controlBoothReceive: UInt16 = 6019) {
         udpInputPort = udpInput
         controlBoothReceivePort = controlBoothReceive
-        airPlayReceivePort = airPlayReceive
         guard statusUDP != statusUDPPort else { return }
         statusUDPPort = statusUDP
         statusListener?.stop()
@@ -494,41 +486,6 @@ final class SDRController {
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
-    }
-
-    /// Start a PCMUDPReceiver → PCMUDPSender bridge pipeline that picks up PCM
-    /// from the AirPlay Receiver's own always-running capture pipeline (on
-    /// `airPlayReceivePort`) and relays it to LiveAudioServer on `udpInputPort`.
-    /// Mirrors `startControlBoothListening`: switching to a *different* source
-    /// later just tears this bridge down via `terminateTasks()`/`launchCurrentPipeline`
-    /// — the AirPlay capture pipeline (shairport-sync/sox/PCMUDPSender) isn't
-    /// touched, so it keeps receiving silently and can be reconnected later by
-    /// calling this again.
-    func startAirPlayListening(deviceName: String) {
-        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
-        Self.sweepOrphanedHelpers()
-        radioTaskPipelineManager.terminate()
-        taskMode = .customTask
-        activeFrequencyID = nil
-        statusFunction = "AirPlay Receiver: \(deviceName)"
-        stationName = deviceName
-        modulation = ""
-        frequencyDisplay = ""
-        sampleRate = Self.outputSampleRate
-        tunerGain = 0
-        squelchLevel = 0
-        options = ""
-        audioOutputFilter = ""
-        tunerAGC = false
-        directSamplingQBranch = false
-        lastError = nil
-
-        guard let receiver = makeUDPReceiverTaskItem(port: airPlayReceivePort),
-              let sender = makeUDPSenderTaskItem() else { return }
-        radioTaskPipelineManager.add(receiver)
-        addTranscriberStageIfEnabled()
-        radioTaskPipelineManager.add(sender)
-        launchCurrentPipeline(dying: dying, waitForDyingProcesses: false)
     }
 
     /// Start a PCMUDPReceiver → sox → PCMUDPSender bridge pipeline that receives
@@ -851,15 +808,11 @@ final class SDRController {
 
     /// Defers `radioTaskPipelineManager.start()` to an async Task that first
     /// waits for `dying` processes to exit (avoiding port races on retune or
-    /// AirPlay↔radio transitions). Cancels any pending launch from a previous
+    /// source↔radio transitions). Cancels any pending launch from a previous
     /// call so rapid successive requests don't queue up stale pipelines.
     ///
-    /// `waitForPort5000`: pass `true` for custom tasks that may include
-    /// shairport-sync, so the task waits for TCP port 5000 to be free after
-    /// stopping the AirPlay receiver.
-    ///
     /// `waitForDyingProcesses`: skip when the pipeline being *started* is a
-    /// PCMUDPReceiver → PCMUDPSender bridge (ControlBooth/AirPlay listening) —
+    /// PCMUDPReceiver → PCMUDPSender bridge (ControlBooth listening) —
     /// regardless of what `dying` was (a radio tuning, a device capture, another
     /// bridge, …), since the bridge never contends for an exclusive OS resource
     /// (RTL-SDR USB, a Core Audio device) the way rtl_fm/AudioInputCapture do,
@@ -870,10 +823,10 @@ final class SDRController {
     /// means the new PCMUDPReceiver can bind its port a few milliseconds before
     /// the old one has actually exited (SIGTERM delivery + process teardown
     /// isn't instantaneous). SO_REUSEADDR should make this harmless on macOS,
-    /// but if AirPlay/ControlBooth listening ever intermittently drops the
+    /// but if ControlBooth listening ever intermittently drops the
     /// first moment of audio after switching sources, or logs a stray UDP bind
     /// failure right after a Listen click, check here first.
-    private func launchCurrentPipeline(dying: [Process], waitForPort5000: Bool = false,
+    private func launchCurrentPipeline(dying: [Process],
                                        waitForDyingProcesses: Bool = true,
                                        announcement: PendingAnnouncement? = nil) {
         pipelineStartTask?.cancel()
@@ -881,10 +834,6 @@ final class SDRController {
             guard let self, !Task.isCancelled else { return }
             if waitForDyingProcesses, !dying.isEmpty {
                 await Self.waitForProcessesToExit(dying)
-                guard !Task.isCancelled else { return }
-            }
-            if waitForPort5000 {
-                await HelperProcessPreflight.waitForTCPPortFree(5000, timeout: 2.0)
                 guard !Task.isCancelled else { return }
             }
             if let announcement {
