@@ -395,6 +395,8 @@ private struct EditConfigurationSheet: View {
                 Section("Other Ports") {
                     portField("Status Port (UDP):", $ports.statusUDP)
                     portField("Audio Port (UDP):", $ports.audioUDP)
+                    portField("ControlBooth Receive Port (UDP):", $ports.controlBoothUDP)
+                    portField("AirPlay Receive Port (UDP):", $ports.airPlayUDP)
                 }
                 Section("AAC Settings") {
                     Picker("Bitrate:", selection: $outputBitrate) {
@@ -445,7 +447,7 @@ private struct EditConfigurationSheet: View {
     /// All ports non-zero and mutually distinct (each needs its own listener).
     private var portsAreValid: Bool {
         let all = [ports.webHTTP, ports.webHTTPS, ports.streamingHTTP, ports.streamingHTTPS,
-                   ports.statusUDP, ports.audioUDP]
+                   ports.statusUDP, ports.audioUDP, ports.controlBoothUDP, ports.airPlayUDP]
         return all.allSatisfy { $0 > 0 } && Set(all).count == all.count
     }
 
