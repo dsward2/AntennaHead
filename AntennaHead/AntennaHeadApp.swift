@@ -38,7 +38,7 @@ struct AntennaHeadApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
         }
         .commands {
@@ -46,6 +46,11 @@ struct AntennaHeadApp: App {
                 AboutWindowCommand()
             }
             CommandGroup(replacing: .newItem) {}
+            // The main window has a close button but no ⌘N; without this the
+            // window can't be brought back once closed.
+            CommandGroup(after: .windowList) {
+                MainWindowCommand()
+            }
             // Port of LocalRadio's Commands menu. (Show Custom Tasks Window is
             // intentionally absent — custom tasks live in the web UI here.)
             CommandMenu("Commands") {
@@ -73,6 +78,17 @@ struct AntennaHeadApp: App {
             LogViewerView()
         }
         .defaultSize(width: 800, height: 500)
+    }
+}
+
+struct MainWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("AntennaHead Window") {
+            openWindow(id: "main")
+        }
+        .keyboardShortcut("1", modifiers: .command)
     }
 }
 
