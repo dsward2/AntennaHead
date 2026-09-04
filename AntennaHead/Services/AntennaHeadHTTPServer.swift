@@ -1761,6 +1761,56 @@ final class AntennaHeadHTTPServer {
         }
     }
 
+    // MARK: Radio-player status lines
+
+    /// Demodulated audio channel count for a tuning — 2 only when FM-stereo
+    /// decoding actually engages (matches `SDRController.startPipeline`'s
+    /// `isStereo` test), otherwise 1. The delivered stream is always 2 ch.
+    nonisolated private func demodulatedChannelCount(modulation: String, stereoFlag: Bool, sampleRate: Int) -> Int {
+        ((modulation == "fm" || modulation == "wfm") && stereoFlag && sampleRate > 106_000) ? 2 : 1
+    }
+
+    /// "1 (mono)" / "2 (stereo)" for a channel count.
+    nonisolated private func channelsLabel(_ count: Int) -> String {
+        switch count {
+        case 1: return "1 (mono)"
+        case 2: return "2 (stereo)"
+        default: return "\(count)"
+        }
+    }
+
+    /// rtl_fm tuner-gain readout: a plain dB value, "auto" for a non-positive
+    /// gain, with ", AGC on" appended when the tuner's internal AGC is enabled.
+    nonisolated private func gainLabel(gain: Double, agc: Bool) -> String {
+        let base: String
+        if gain <= 0 {
+            base = "auto"
+        } else if gain.truncatingRemainder(dividingBy: 1) == 0 {
+            base = "\(Int(gain)) dB"
+        } else {
+            base = "\(gain) dB"
+        }
+        return agc ? "\(base), AGC on" : base
+    }
+
+    /// "device:" line for the Now Playing views: the RTL-SDR dongle feeding the
+    /// active tuning, resolved to its EEPROM serial and USB index at tune time
+    /// by `SDRController`. Falls back to the value the favorite stores when
+    /// nothing is tuned or the configured device isn't connected.
+    @MainActor private func activeDeviceLabel(stored: String) -> String {
+        let storedLabel = formattedUSBDeviceValue(stored)
+        guard let sdr = sdrController, sdr.taskMode != .stopped else { return storedLabel }
+        let serial = sdr.activeDeviceSerial
+        let index = sdr.activeDeviceIndex
+        if serial.isEmpty && index < 0 {
+            return storedLabel.isEmpty ? "not connected" : "\(storedLabel) (not connected)"
+        }
+        var parts: [String] = []
+        if !serial.isEmpty { parts.append("serial \(serial)") }
+        parts.append(index >= 0 ? "USB index \(index)" : "USB index unknown")
+        return parts.joined(separator: ", ")
+    }
+
     /// `%%VIEW_FAVORITE_NAME%%` + `%%VIEW_FAVORITE_ITEM%%` — ported from
     /// `generateViewFavoriteItemStringForID`. Returns (station name, item HTML).
     @MainActor private func viewFavorite(id: Int64) -> (name: String, item: String) {
@@ -1778,7 +1828,24 @@ final class AntennaHeadHTTPServer {
         s += "<input class='twelve columns button' type='button' value='Edit' "
         s += "onclick=\"loadContent('editfavorite.html?id=\(id)');\" "
         s += "title='Click Edit to modify this favorite.'>"
-        s += "<br><br>frequency: \(htmlText(f.formattedFrequency))<br>modulation: \(htmlText(modulation))<br>sample rate: \(f.sampleRate)<br><br>"
+
+        // When this favorite is the one currently on the air, show the live
+        // resolved device and channel count; otherwise show what the record
+        // itself specifies. The Now Playing page always has the live view.
+        let isOnAir = sdrController?.activeFrequencyID == id && sdrController?.taskMode != .stopped
+        let deviceLabel = isOnAir
+            ? activeDeviceLabel(stored: f.usbDeviceString)
+            : (formattedUSBDeviceValue(f.usbDeviceString).isEmpty ? "0" : formattedUSBDeviceValue(f.usbDeviceString))
+        let channels = isOnAir
+            ? (sdrController?.activeChannelCount ?? 1)
+            : demodulatedChannelCount(modulation: f.modulation, stereoFlag: f.stereoFlag, sampleRate: f.sampleRate)
+
+        s += "<br><br>frequency: \(htmlText(f.formattedFrequency))<br>"
+        s += "modulation: \(htmlText(modulation))<br>"
+        s += "sample rate: \(f.sampleRate)<br>"
+        s += "device: \(htmlText(deviceLabel))<br>"
+        s += "gain: \(htmlText(gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1)))<br>"
+        s += "channels: \(htmlText(channelsLabel(channels)))<br><br>"
         return (f.stationName, s)
     }
 
@@ -1913,16 +1980,17 @@ final class AntennaHeadHTTPServer {
         d += row("squelch level", "\(f.squelchLevel)")
         d += row("modulation", f.modulation)
         d += row("sample rate", "\(f.sampleRate)")
+        d += row("channels", channelsLabel(sdr.activeChannelCount))
         d += row("sampling mode", "\(f.samplingMode)")
         d += row("oversampling", "\(f.oversampling)")
-        d += row("tuner gain", "\(f.tunerGain)")
+        d += row("tuner gain", gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1))
         d += row("tuner agc", "\(f.tunerAgc)")
         d += row("rtl-sdr options", "pad \(f.options)")
         d += row("fir size", "\(f.firSize)")
         d += row("atan math", f.atanMath)
         d += row("audio output filter", "rate 48000 \(f.audioOutputFilter)")
         d += row("bias-t", "\(f.biasTFlag)")
-        d += row("usb device", formattedUSBDeviceValue(f.usbDeviceString))
+        d += row("device", activeDeviceLabel(stored: f.usbDeviceString))
         return (f.stationName, d)
     }
 
@@ -1954,6 +2022,11 @@ final class AntennaHeadHTTPServer {
             dict["options"] = f.options
             dict["bias_t_flag"] = f.biasTFlag
             dict["usb_device_string"] = f.usbDeviceString
+            dict["usb_device_display"] = activeDeviceLabel(stored: f.usbDeviceString)
+            dict["tuner_gain_display"] = gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1)
+            let channelCount = sdrController?.activeChannelCount ?? 0
+            dict["channels"] = channelCount
+            dict["channels_display"] = channelsLabel(channelCount)
             dict["stereo_flag"] = f.stereoFlag ? 1 : 0
         } else {
             dict["station_name"] = sdrController?.statusFunction ?? "Not Playing"

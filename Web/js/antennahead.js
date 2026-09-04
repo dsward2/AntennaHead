@@ -1277,7 +1277,10 @@ function updateStatusDisplay(statusData)
     var station_name = statusObj.station_name;
     var tuner_agc = statusObj.tuner_agc;
     var tuner_gain = statusObj.tuner_gain;
+    var tuner_gain_display = statusObj.tuner_gain_display;
     var usb_device_string = statusObj.usb_device_string;
+    var usb_device_display = statusObj.usb_device_display;
+    var channels_display = statusObj.channels_display;
     
     if (rtlsdr_task_mode == "frequency")
     {
@@ -1345,6 +1348,12 @@ function updateStatusDisplay(statusData)
         statusHtml += "sample rate: ";
         statusHtml += sample_rate;
         statusHtml += "<br>";
+        if (channels_display)
+        {
+          statusHtml += "channels: ";
+          statusHtml += channels_display;
+          statusHtml += "<br>";
+        }
         statusHtml += "sampling mode: ";
         statusHtml += sampling_mode;
         statusHtml += "<br>";
@@ -1352,7 +1361,7 @@ function updateStatusDisplay(statusData)
         statusHtml += oversampling;
         statusHtml += "<br>";
         statusHtml += "tuner gain: ";
-        statusHtml += tuner_gain;
+        statusHtml += (tuner_gain_display != null && tuner_gain_display !== "") ? tuner_gain_display : tuner_gain;
         statusHtml += "<br>";
         statusHtml += "tuner agc: ";
         statusHtml += tuner_agc;
@@ -1372,8 +1381,8 @@ function updateStatusDisplay(statusData)
         statusHtml += "bias-t: ";
         statusHtml += bias_t_flag;
         statusHtml += "<br>";
-        statusHtml += "usb device: ";
-        statusHtml += usb_device_string;
+        statusHtml += "device: ";
+        statusHtml += (usb_device_display != null && usb_device_display !== "") ? usb_device_display : usb_device_string;
         statusHtml += "<br>";
         statusHtml += "<div>";
 

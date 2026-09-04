@@ -192,6 +192,28 @@ final class SDRController {
     /// "signal level" display). Zero when no tuner is running.
     private(set) var signalLevel: Int = 0
 
+    /// Identity of the RTL-SDR dongle feeding the active frequency tuning,
+    /// resolved once at tune time. librtlsdr can't read a device's EEPROM
+    /// strings once rtl_fm has it open, so these are captured in the brief
+    /// window after the previous pipeline is torn down and before the new one
+    /// launches (see `resolveActiveDevice`). `activeDeviceSerial` is "" when the
+    /// dongle carries no EEPROM serial; `activeDeviceIndex` is -1 when the
+    /// configured device isn't currently connected. Cleared by `terminateTasks`;
+    /// left untouched by the non-tuner sources (device input, recordings,
+    /// ControlBooth/AirPlay bridges), whose Now Playing view shows no tuner rows.
+    private(set) var activeDeviceSerial: String = ""
+    private(set) var activeDeviceIndex: Int = -1
+
+    /// Demodulated audio channel count for the active tuning: 2 when FM-stereo
+    /// decoding is engaged, otherwise 1. (LiveAudioServer always emits 2 ch.)
+    private(set) var activeChannelCount: Int = 0
+
+    /// USB index → EEPROM serial, accumulated across tunes. Once a dongle's
+    /// serial has been read it is kept here: a later enumeration while rtl_fm
+    /// holds the device open returns a blank serial, and `resolveActiveDevice`
+    /// falls back to this cache.
+    private var deviceSerialByIndex: [UInt32: String] = [:]
+
     /// Most recent not-yet-final caption hypothesis from the `PCMTranscriber`
     /// tap, or "" when there is none pending. Cleared when it finalizes and
     /// whenever a pipeline is (re)built or stopped.
@@ -789,6 +811,9 @@ final class SDRController {
         activeFrequencyID = nil
         statusFunction = "No active tuning"
         signalLevel = 0
+        activeDeviceSerial = ""
+        activeDeviceIndex = -1
+        activeChannelCount = 0
     }
 
     /// Waits for all processes to exit (polling `isRunning`), then SIGKILLs any
@@ -1045,8 +1070,6 @@ final class SDRController {
         Self.sweepOrphanedHelpers()
         radioTaskPipelineManager.terminate()
 
-        publishStatus(tuning)
-
         // FM-stereo stations decode the multiplex into L/R via stereodemux,
         // which then feeds sox as 2-channel; everything else stays mono into sox
         // (which upmixes to dual-mono on output).
@@ -1056,6 +1079,11 @@ final class SDRController {
         let isStereo = (tuning.modulation == "fm" || tuning.modulation == "wfm")
                     && tuning.stereoFlag
                     && tuning.sampleRate > 106_000
+
+        // Resolve + publish status now: the old rtl_fm has just been terminated
+        // above and the new one hasn't launched yet, so this is the one moment
+        // the RTL-SDR dongle's EEPROM serial can actually be read.
+        publishStatus(tuning, isStereo: isStereo)
         // wfm = wide/broadcast FM: apply de-emphasis after sox at 48 kHz so the
         // filter runs on clean audio-rate samples, not the raw FM multiplex.
         let isBroadcastFM = tuning.modulation == "wfm"
@@ -1394,7 +1422,7 @@ final class SDRController {
         return String(cString: buffer)
     }
 
-    private func publishStatus(_ tuning: Tuning) {
+    private func publishStatus(_ tuning: Tuning, isStereo: Bool) {
         statusFunction = tuning.statusFunction
         stationName = tuning.stationName
         modulation = tuning.modulation
@@ -1408,5 +1436,54 @@ final class SDRController {
         frequencyDisplay = tuning.frequencyArgs
             .filter { $0 != "-f" }
             .joined(separator: ", ")
+
+        let resolved = resolveActiveDevice(tuning.usbDevice)
+        activeDeviceSerial = resolved.serial
+        activeDeviceIndex = resolved.index
+        activeChannelCount = isStereo ? 2 : 1
+    }
+
+    /// Resolves a "USB Device" field value — a bare index ("0") or an RTL-SDR
+    /// EEPROM serial (optionally shorter than the canonical 8 digits, as typed
+    /// into the web UI) — against the connected dongles. Returns the matched
+    /// serial (possibly "") and USB index (-1 when the device isn't connected).
+    /// Mirrors librtlsdr's `verbose_device_search`: a single bare digit is a
+    /// device index, anything else is treated as a serial. Blocks briefly on
+    /// libusb enumeration; only ever called at tune time (see `startPipeline`).
+    private func resolveActiveDevice(_ value: String) -> (serial: String, index: Int) {
+        let devices = RTLSDRDeviceList.enumerate()
+        for device in devices where !device.serial.isEmpty {
+            deviceSerialByIndex[device.index] = device.serial
+        }
+
+        func serial(forIndex index: UInt32) -> String {
+            if let s = devices.first(where: { $0.index == index })?.serial, !s.isEmpty { return s }
+            return deviceSerialByIndex[index] ?? ""
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+
+        // Bare single digit → USB index.
+        if trimmed.count == 1, let index = Int(trimmed), index >= 0 {
+            let u = UInt32(index)
+            let connected = devices.contains { $0.index == u } || deviceSerialByIndex[u] != nil
+            return connected ? (serial(forIndex: u), index) : ("", -1)
+        }
+
+        // Otherwise a serial. Zero-pad an all-digit value to the 8-digit
+        // rtl_eeprom format and match either form.
+        let padded = (!trimmed.isEmpty && trimmed.count < 8 && trimmed.allSatisfy(\.isNumber))
+            ? String(repeating: "0", count: 8 - trimmed.count) + trimmed
+            : trimmed
+        if let device = devices.first(where: { $0.serial == padded || $0.serial == trimmed }) {
+            let s = device.serial.isEmpty ? serial(forIndex: device.index) : device.serial
+            return (s, Int(device.index))
+        }
+        // Fall back: the value also parses as a multi-digit device index.
+        if let index = Int(trimmed), index >= 0,
+           devices.contains(where: { $0.index == UInt32(index) }) {
+            return (serial(forIndex: UInt32(index)), index)
+        }
+        return ("", -1)
     }
 }
