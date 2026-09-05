@@ -21,6 +21,17 @@ import SharedLogging
 ///                                  so a test recording is verifiable by ear
 ///                                  even with no station tuned.
 ///   'RecP'  stop recording         no parameters
+///   'CBQt'  notify quitting        no parameters, no reply expected — sent
+///                                  from ControlBooth's `applicationWillTerminate`.
+///                                  Purely informational: `ControlBoothClient
+///                                  .isControlBoothRunning`'s own
+///                                  `NSRunningApplication` check is what
+///                                  actually drives the ControlBooth Remote
+///                                  Control web page's status, so this
+///                                  handler only logs — it exists so
+///                                  ControlBooth quitting is visible in
+///                                  AntennaHead's log right away rather than
+///                                  only inferable from the next poll.
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
 /// zero or one name, and 'Stop' naming anything other than the active source
@@ -57,8 +68,12 @@ final class ControlBoothEventReceiver: NSObject {
                                 andSelector: #selector(handleStopRecording(_:withReplyEvent:)),
                                 forEventClass: Self.eventClass,
                                 andEventID: Self.fourCC("RecP"))
+        manager.setEventHandler(self,
+                                andSelector: #selector(handleQuitting(_:withReplyEvent:)),
+                                forEventClass: Self.eventClass,
+                                andEventID: Self.fourCC("CBQt"))
         LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
-            "registered all 5 AE handlers (Strt/Stop/Runs/RecS/RecP) — PID \(ProcessInfo.processInfo.processIdentifier)")
+            "registered all 6 AE handlers (Strt/Stop/Runs/RecS/RecP/CBQt) — PID \(ProcessInfo.processInfo.processIdentifier)")
     }
 
     // NSAppleEventManager delivers on the main thread; the @objc entry points
@@ -76,7 +91,13 @@ final class ControlBoothEventReceiver: NSObject {
             // over UDP; this just switches AntennaHead's status/mode to show
             // ControlBooth as the active source. (Custom-task pipelines were
             // removed from AntennaHead — build them in ControlBooth instead.)
-            sdrController.startControlBoothListening(name: name)
+            // startControlBoothListening now waits for its receiver to report
+            // ready before returning; this handler doesn't need that guarantee
+            // itself (no reply value depends on it), so it's fire-and-forget
+            // here rather than holding up the AE reply — same pattern as
+            // handleStartRecording below.
+            let controller = sdrController
+            Task { @MainActor in await controller.startControlBoothListening(name: name) }
         }
     }
 
@@ -148,6 +169,14 @@ final class ControlBoothEventReceiver: NSObject {
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver", "handleStopRecording called")
             let mgr = lasManager
             Task { @MainActor in await mgr.stopRecording() }
+        }
+    }
+
+    @objc private func handleQuitting(_ event: NSAppleEventDescriptor,
+                                       withReplyEvent reply: NSAppleEventDescriptor) {
+        MainActor.assumeIsolated {
+            LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+                "ControlBooth is quitting")
         }
     }
 

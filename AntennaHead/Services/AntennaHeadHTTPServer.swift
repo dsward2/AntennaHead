@@ -758,7 +758,12 @@ final class AntennaHeadHTTPServer {
                 try? ControlBoothClient.stopAllPipelines()
                 // Start AntennaHead's receiver first so PCMUDPReceiver is bound
                 // on port 6019 before ControlBooth's PCMUDPSender begins sending.
-                sdrController?.startControlBoothListening(name: name)
+                // startControlBoothListening now actually waits for that binding
+                // to happen (rather than just for the launch to be scheduled)
+                // before returning, closing a race that used to intermittently
+                // collapse the ControlBooth pipeline with a "Connection refused"
+                // on its very first UDP send.
+                await sdrController?.startControlBoothListening(name: name)
                 try? ControlBoothClient.startPipeline(named: name)
             }
             return okResponse()
@@ -824,7 +829,7 @@ final class AntennaHeadHTTPServer {
             return apiControlBoothLaunchResponse()
 
         case APIEndpoint.controlBoothStart:
-            return apiControlBoothStartResponse(body: request.body)
+            return await apiControlBoothStartResponse(body: request.body)
 
         case APIEndpoint.controlBoothStop:
             return apiControlBoothStopResponse()
@@ -1075,12 +1080,12 @@ final class AntennaHeadHTTPServer {
     /// stop whatever ControlBooth pipeline is already running, start
     /// AntennaHead's receiver, then start the new pipeline — same ordering
     /// as the HTML route, for the same reason (see that route's comment).
-    @MainActor private func apiControlBoothStartResponse(body: Data) -> HTTPResponse {
+    @MainActor private func apiControlBoothStartResponse(body: Data) async -> HTTPResponse {
         guard let req = try? JSONDecoder().decode(StartControlBoothPipelineRequest.self, from: body) else {
             return jsonErrorResponse("malformed request body", status: 400)
         }
         try? ControlBoothClient.stopAllPipelines()
-        sdrController?.startControlBoothListening(name: req.pipelineName)
+        await sdrController?.startControlBoothListening(name: req.pipelineName)
         try? ControlBoothClient.startPipeline(named: req.pipelineName)
         return apiNowPlayingResponse()
     }
@@ -1100,7 +1105,11 @@ final class AntennaHeadHTTPServer {
         s += "<h2 class='title'>AntennaHead</h2>"
         s += "<h3 class='title' id='listen_title'>ControlBooth Remote Control</h3>"
         s += "<p>AntennaHead can be controlled remotely by the ControlBooth app on this Mac.</p>"
-        s += "<p>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        // data-running is read by controlBoothPoll() (Web/js/antennahead.js)
+        // so it can tell when this fragment's rendered status has gone
+        // stale — e.g. ControlBooth quit after this page loaded — and
+        // reload it, without any push channel from the server.
+        s += "<p id='controlbooth_status' data-running='\(isRunning)'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
         if isRunning {
             let pipelines = (try? ControlBoothClient.pipelines()) ?? []
             if pipelines.isEmpty {

@@ -170,6 +170,12 @@ final class SDRController {
     /// Pending async pipeline launch; cancelled and replaced whenever a new
     /// pipeline is requested before the previous one has fully started.
     private var pipelineStartTask: Task<Void, Never>?
+    /// Resumed by `radioTaskPipelineManager.onLog` (see `init`) the moment a
+    /// freshly-launched PCMUDPReceiver logs that it's bound and listening.
+    /// Stashed here rather than threaded through `TaskItem`/`TaskPipelineManager`
+    /// because their `onLog` is a single shared callback across every stage of
+    /// whichever pipeline is currently running. See `waitForControlBoothReceiverReady`.
+    private var controlBoothReceiverReadyContinuation: CheckedContinuation<Void, Never>?
 
     // MARK: Published status (replaces LocalRadio's AppKit IBOutlet status fields)
 
@@ -234,8 +240,16 @@ final class SDRController {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
         self.statusUDPPort = statusUDPPort
-        radioTaskPipelineManager.onLog = { source, message in
+        radioTaskPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            // Coupled to PCMUDPReceiver's own log wording (see its main.swift) —
+            // this is the readiness signal `startControlBoothListening` awaits
+            // so ControlBooth's PCMUDPSender never starts sending before this
+            // process has actually bound the port (see that function's doc).
+            guard source == "PCMUDPReceiver", message.contains("started — listening"),
+                  let self, let pending = self.controlBoothReceiverReadyContinuation else { return }
+            self.controlBoothReceiverReadyContinuation = nil
+            pending.resume()
         }
         startStatusListener()
         startCaptionListener()
@@ -474,7 +488,18 @@ final class SDRController {
     /// datagrams from ControlBooth on `controlBoothReceivePort` and relays them
     /// to LiveAudioServer on `udpInputPort`. Also updates published status so
     /// the UI reflects that ControlBooth is the active source.
-    func startControlBoothListening(name: String) {
+    ///
+    /// Doesn't return until the new PCMUDPReceiver has actually logged that
+    /// it's bound (or `waitForControlBoothReceiverReady`'s timeout elapses) —
+    /// callers that go on to tell ControlBooth to start sending (over the
+    /// AppleEvents or HTTP control channel) rely on that ordering: a caller
+    /// that told ControlBooth to start streaming right after merely *launching*
+    /// this bridge could win the race against PCMUDPReceiver's own bind() call,
+    /// so ControlBooth's PCMUDPSender's first send() got ECONNREFUSED (nothing
+    /// listening on the port yet) and exited, collapsing its whole pipeline via
+    /// cascading SIGPIPE — see the 2026-09-04 KABF-FM "stereodemux exit status
+    /// 13" investigation.
+    func startControlBoothListening(name: String) async {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
         radioTaskPipelineManager.terminate()
@@ -508,6 +533,37 @@ final class SDRController {
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
+        await waitForControlBoothReceiverReady()
+    }
+
+    /// Suspends until the ControlBooth bridge's PCMUDPReceiver stage reports
+    /// (via `radioTaskPipelineManager.onLog`, wired up in `init`) that it has
+    /// bound its port, or `timeout` elapses — whichever comes first. A timeout
+    /// is logged and otherwise treated like success: the caller proceeds
+    /// without the ordering guarantee rather than hanging an HTTP response
+    /// forever, exactly the risk this fix accepted in exchange for closing the
+    /// much more common race it was written for.
+    private func waitForControlBoothReceiverReady(timeout: TimeInterval = 3.0) async {
+        // A still-pending continuation here means a previous call's wait was
+        // superseded by this one before its own signal ever arrived (e.g. two
+        // rapid successive "Listen" clicks) — resume it now rather than leak
+        // it; that caller just proceeds without the guarantee, same as a
+        // timeout would give it.
+        if let stale = controlBoothReceiverReadyContinuation {
+            controlBoothReceiverReadyContinuation = nil
+            stale.resume()
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            controlBoothReceiverReadyContinuation = continuation
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard let self, let pending = self.controlBoothReceiverReadyContinuation else { return }
+                self.controlBoothReceiverReadyContinuation = nil
+                LogStore.shared.log(.error, source: "SDRController",
+                    "timed out after \(timeout)s waiting for PCMUDPReceiver to report ready on port \(self.controlBoothReceivePort); proceeding anyway")
+                pending.resume()
+            }
+        }
     }
 
     /// Start a PCMUDPReceiver → sox → PCMUDPSender bridge pipeline that receives

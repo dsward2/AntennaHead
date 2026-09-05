@@ -1603,6 +1603,43 @@ function aacRecorderTick()
 var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 
 
+// ---- ControlBooth Remote Control (controlbooth.html) --------------------
+//
+// Polls /api/v1/controlbooth/status — reflects ControlBoothClient
+// .isControlBoothRunning, an NSRunningApplication check that goes false
+// essentially the moment the process exits. ControlBooth also sends
+// AntennaHead a 'CBQt' AppleEvent from applicationWillTerminate (see
+// ControlBoothEventReceiver) so the quit is logged right away, but there's
+// no push channel from server to browser here — so if this page is open
+// when ControlBooth quits, it's this poll noticing isRunning no longer
+// matches what was rendered that reloads the fragment (same call the
+// Refresh button makes) to show "Not running". No-op until the fragment
+// (and its data-running marker) is in the DOM, same as aacRecorderPoll.
+function controlBoothPoll()
+{
+    var statusEl = document.getElementById("controlbooth_status");
+    if (!statusEl) return;
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            try {
+                var data = JSON.parse(this.responseText);
+                var renderedRunning = (statusEl.getAttribute("data-running") == "true");
+                if (!!data.isRunning !== renderedRunning)
+                {
+                    loadContent("controlbooth.html");
+                }
+            } catch (e) { /* ignore a malformed response */ }
+        }
+    };
+    xhttp.open("GET", "/api/v1/controlbooth/status", true);
+    xhttp.send();
+}
+
+var controlBoothPollIntervalID = setInterval(controlBoothPoll, 3000);
+
+
 // ---- Live Captions (captions.html) -------------------------------------
 //
 // Polls /captions.json — served by AntennaHeadHTTPServer from
