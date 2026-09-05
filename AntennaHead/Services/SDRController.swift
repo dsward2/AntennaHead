@@ -267,28 +267,50 @@ final class SDRController {
     //
     // When no real source is running, `startFillerPipeline()` loops the built-in
     // Monitor Beacon (a top-level bundle resource) through
-    // `PCMFilePlayer → PCMUDPSender` so LiveAudioServer always sees real PCM.
-    // Runs on its own `TaskPipelineManager` so its lifecycle is fully
-    // independent of the program pipeline. Phase 1: no gain stage, no fade —
-    // selecting a program stops the filler outright.
+    // `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` so LiveAudioServer
+    // always sees real PCM. Runs on its own `TaskPipelineManager` so its
+    // lifecycle is fully independent of the program pipeline. When fade is on
+    // (the default) an optional `PCMDistanceGain` stage on `fillerControlPort`
+    // ramps the level in on start and out again when a real source is selected.
 
     /// App-settings keys for the filler feature. Read fresh whenever the filler
     /// pipeline is (re)built, and edited in the Configuration view.
     static let fillerEnabledKey     = "AntennaHeadFillerEnabled"
     static let fillerFadeEnabledKey = "AntennaHeadFillerFadeOut"
+    static let fillerFadeMsKey      = "AntennaHeadFillerFadeMs"
     static let fillerUseCustomKey   = "AntennaHeadFillerUseCustomSource"
     static let fillerShuffleKey     = "AntennaHeadFillerShuffle"
     static let fillerGapKey         = "AntennaHeadFillerGapSeconds"
+
+    /// UDP control port for the filler's own `PCMDistanceGain` instance (level
+    /// ramps). Fixed and internal — AntennaHead owns both ends, so unlike
+    /// `controlBoothUDP` there's no cross-app coordination. Next after
+    /// `binauralControlPort` (6025).
+    let fillerControlPort: UInt16 = 6026
+
+    /// Distance handed to the filler's `PCMDistanceGain` for "effectively
+    /// silent" (gain ≈ 0.02, ~−34 dB with `--rolloff 1 --min-gain 0`), i.e.
+    /// `distance = 1 / gain`. The ramp interpolates *gain* linearly between
+    /// this and unity and sends `dist (1/gain)` each step.
+    private static let fillerSilentGain = 0.02
+    private static let fillerRampSteps = 24
 
     /// Whether the filler plays while nothing is tuned. **Default ON**: an
     /// absent key counts as enabled, so only an explicit "0" turns it off.
     var fillerEnabled: Bool {
         ((try? sqliteController.appSettingsValue(forKey: Self.fillerEnabledKey)) ?? nil) != "0"
     }
-    /// Whether a station selection fades the filler out (Phase 2). Default ON,
-    /// same convention. Unused in Phase 1 — the filler is stopped outright.
+    /// Whether starting/stopping fades the filler in and out (vs. a hard cut).
+    /// Default ON, same convention.
     var fillerFadeEnabled: Bool {
         ((try? sqliteController.appSettingsValue(forKey: Self.fillerFadeEnabledKey)) ?? nil) != "0"
+    }
+    /// Fade duration in milliseconds. Clamped to 100…1800 (kept under
+    /// `waitForProcessesToExit`'s 2.5 s timeout, which gates the incoming
+    /// pipeline on the fading filler's exit). Default 700.
+    var fillerFadeMs: Int {
+        let v = Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerFadeMsKey)) ?? nil) ?? "") ?? 700
+        return min(max(v, 100), 1800)
     }
     /// Play the user's own audio (files in `<Recordings>/Filler/`) instead of
     /// the Monitor Beacon (Phase 3). Default OFF.
@@ -314,8 +336,15 @@ final class SDRController {
     /// `radioTaskPipelineManager` so the two lifecycles never entangle.
     let fillerPipelineManager = TaskPipelineManager()
     /// Bumped every time the filler (re)starts or is torn down, so a stale
-    /// deferred task can tell it has been superseded.
+    /// deferred task (a fade ramp, a scheduled SIGTERM) can tell it has been
+    /// superseded and bail.
     private var fillerGeneration = 0
+    /// Filler helper processes detached by `stopFillerForNewSource()` during a
+    /// fade-out: still running, ramping down, scheduled for SIGTERM. Consumed
+    /// (once) by the next `launchCurrentPipeline` so the incoming pipeline
+    /// waits for them to exit before it starts — no two PCMUDPSenders ever
+    /// feed LiveAudioServer at once.
+    private var fadingFillerProcesses: [Process] = []
 
     let radioTaskPipelineManager = TaskPipelineManager()
     /// Pending async pipeline launch; cancelled and replaced whenever a new
@@ -1047,18 +1076,25 @@ final class SDRController {
         if enterIdle, fillerEnabled {
             startFillerPipeline()   // sets taskMode = .filler
         } else {
+            fillerGeneration &+= 1
+            for p in fadingFillerProcesses where p.isRunning { kill(p.processIdentifier, SIGTERM) }
+            fadingFillerProcesses = []
             fillerPipelineManager.terminate()
         }
     }
 
     // MARK: Filler pipeline
 
-    /// Loops the filler audio (built-in Monitor Beacon in Phase 1) through
-    /// `PCMFilePlayer → PCMUDPSender` on `fillerPipelineManager`. Safe to call
-    /// when a filler is already running — it is torn down first. No port-race
-    /// wait is needed: the filler uses no exclusive resource (no RTL-SDR USB,
-    /// no Core Audio device, no bound receive port), and `PCMUDPSender` only
-    /// sends. A no-op when the feature is disabled or the beacon is missing.
+    /// Loops the filler audio (built-in Monitor Beacon by default) through
+    /// `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` on
+    /// `fillerPipelineManager`. Safe to call when a filler is already running —
+    /// it is torn down first. No port-race wait is needed: the filler uses no
+    /// exclusive resource (no RTL-SDR USB, no Core Audio device, no bound
+    /// receive port), and `PCMUDPSender` only sends. A no-op when the feature
+    /// is disabled or the beacon is missing.
+    ///
+    /// With fade on, a `PCMDistanceGain` stage starts attenuated and this
+    /// method ramps it up to unity over `fillerFadeMs`.
     func startFillerPipeline() {
         fillerPipelineManager.terminate()
         fillerGeneration &+= 1
@@ -1074,19 +1110,24 @@ final class SDRController {
         taskMode = .filler
         publishFillerStatus(customTrackCount: fillerUsesCustomSource ? tracks.count : 0)
 
+        let fade = fillerFadeEnabled
         guard let player = makeFillerPlayerTaskItem(tracks: tracks),
               let sender = makeFillerUDPSenderTaskItem() else {
             taskMode = .stopped
             return
         }
+        let gain = fade ? makeFillerGainTaskItem(startAttenuated: true) : nil
         fillerPipelineManager.add(player)
+        if let gain { fillerPipelineManager.add(gain) }
         fillerPipelineManager.add(sender)
 
         do {
             try fillerPipelineManager.start()
             lastError = nil
             LogStore.shared.log(.info, source: "SDRController",
-                                "filler started — \(tracks.count) track(s) → udp:\(udpInputPort)")
+                                "filler started — \(tracks.count) track(s) → udp:\(udpInputPort)"
+                                + (fade ? ", fading in \(fillerFadeMs) ms" : ""))
+            if fade { rampFillerGain(fromGain: Self.fillerSilentGain, toGain: 1.0, ms: fillerFadeMs) }
         } catch {
             lastError = error
             taskMode = .stopped
@@ -1166,6 +1207,48 @@ final class SDRController {
         return item
     }
 
+    /// The filler's own `PCMDistanceGain` instance, used purely as a
+    /// controllable level fader (`--rolloff 1 --min-gain 0` ⇒ `gain = 1/dist`).
+    /// `startAttenuated` launches it near-silent for a fade-in; otherwise at
+    /// unity. Returns `nil` (fade silently disabled for this run) if the helper
+    /// binary is missing — audio is never affected.
+    private func makeFillerGainTaskItem(startAttenuated: Bool) -> TaskItem? {
+        let path = helperPath("PCMDistanceGain")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMDistanceGain helper missing at \(path) — filler fade disabled this run")
+            return nil
+        }
+        let startDistance = startAttenuated ? (1.0 / Self.fillerSilentGain) : 1.0
+        let item = fillerPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDistanceGain")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--rolloff"); item.addArgument("1.0")
+        item.addArgument("--min-gain"); item.addArgument("0.0")
+        item.addArgument("--distance"); item.addArgument("\(startDistance)")
+        item.addArgument("--control-port"); item.addArgument(Int(fillerControlPort))
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    /// Ramps the filler's `PCMDistanceGain` between two gain values over `ms`,
+    /// interpolating gain linearly and sending `dist (1/gain)` each step.
+    /// Fire-and-forget UDP; harmless if no gain stage is running. Bails as soon
+    /// as `fillerGeneration` moves on (a newer start/stop superseded this fade).
+    private func rampFillerGain(fromGain start: Double, toGain end: Double, ms: Int) {
+        let generation = fillerGeneration
+        let steps = Self.fillerRampSteps
+        let stepNanos = UInt64(max(1, ms / steps)) * 1_000_000
+        Task { [weak self] in
+            for i in 1...steps {
+                guard let self, self.fillerGeneration == generation else { return }
+                let g = max(start + (end - start) * Double(i) / Double(steps), Self.fillerSilentGain)
+                self.sendUDPMessage("dist \(1.0 / g)\n", toPort: self.fillerControlPort)
+                try? await Task.sleep(nanoseconds: stepNanos)
+            }
+        }
+    }
+
     private func publishFillerStatus(customTrackCount: Int) {
         statusFunction = "Filler"
         stationName = customTrackCount > 0 ? "Filler" : "Monitor Beacon"
@@ -1185,13 +1268,40 @@ final class SDRController {
         activeChannelCount = 0
     }
 
-    /// Stops a running filler before a real source is built. Phase 1: an
-    /// outright stop (no fade). Called from every pipeline builder's preamble;
-    /// a no-op when no filler is running.
+    /// Ends the filler before a real source is built. Called from every
+    /// pipeline builder's preamble; a no-op when no filler is running.
+    ///
+    /// With fade on and the filler live, the helper processes are detached
+    /// (still running), ramped down over `fillerFadeMs`, SIGTERM'd when the
+    /// ramp finishes, and stashed in `fadingFillerProcesses` — the next
+    /// `launchCurrentPipeline` waits for them to exit before starting, so the
+    /// incoming and outgoing PCMUDPSenders never both feed LiveAudioServer.
+    /// Otherwise (fade off, or stale leftovers) it's an outright stop.
     private func stopFillerForNewSource() {
-        guard taskMode == .filler || !fillerPipelineManager.taskItems.isEmpty else { return }
         fillerGeneration &+= 1
-        fillerPipelineManager.terminate()
+
+        // Whether a filler is running is read from the manager, not `taskMode`
+        // — some builders set their own mode before calling into this preamble.
+        let procs = fillerPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        guard fillerFadeEnabled, !procs.isEmpty else {
+            fillerPipelineManager.terminate()
+            return
+        }
+
+        fadingFillerProcesses = procs
+        fillerPipelineManager.detachAllTasks()   // keep them running; we own them now
+        rampFillerGain(fromGain: 1.0, toGain: Self.fillerSilentGain, ms: fillerFadeMs)
+        LogStore.shared.log(.info, source: "SDRController",
+                            "filler fading out over \(fillerFadeMs) ms")
+
+        let generation = fillerGeneration
+        let fadeMs = fillerFadeMs
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(fadeMs) * 1_000_000)
+            for p in procs where p.isRunning { kill(p.processIdentifier, SIGTERM) }
+            guard let self, self.fillerGeneration == generation else { return }
+            self.fadingFillerProcesses = []
+        }
     }
 
     /// Waits for all processes to exit (polling `isRunning`), then SIGKILLs any
@@ -1233,10 +1343,17 @@ final class SDRController {
                                        waitForDyingProcesses: Bool = true,
                                        announcement: PendingAnnouncement? = nil) {
         pipelineStartTask?.cancel()
+        // A filler faded out by `stopFillerForNewSource()` is still feeding
+        // LiveAudioServer for the length of its fade. Always wait it out —
+        // regardless of `waitForDyingProcesses` — so its PCMUDPSender has
+        // exited before this pipeline's starts.
+        let fadingFiller = fadingFillerProcesses
+        fadingFillerProcesses = []
+        let mustWait = fadingFiller + (waitForDyingProcesses ? dying : [])
         pipelineStartTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
-            if waitForDyingProcesses, !dying.isEmpty {
-                await Self.waitForProcessesToExit(dying)
+            if !mustWait.isEmpty {
+                await Self.waitForProcessesToExit(mustWait)
                 guard !Task.isCancelled else { return }
             }
             if let announcement {

@@ -27,6 +27,8 @@ struct ConfigurationView: View {
     @State private var transcriptionSavesTranscript = false
     @State private var spatialAudioEnabled = false
     @State private var fillerEnabled = true
+    @State private var fillerFadeEnabled = true
+    @State private var fillerFadeMs = 700
     @State private var fillerUsesCustomSource = false
     @State private var fillerShuffle = false
     @State private var fillerGapSeconds = 0
@@ -123,6 +125,15 @@ struct ConfigurationView: View {
             Section {
                 Toggle("Play filler audio when nothing is tuned", isOn: $fillerEnabled)
                     .onChange(of: fillerEnabled) { _, _ in saveFillerSettings() }
+                Toggle("Fade in and out (rather than cut)", isOn: $fillerFadeEnabled)
+                    .onChange(of: fillerFadeEnabled) { _, _ in saveFillerSettings() }
+                    .disabled(!fillerEnabled)
+                if fillerFadeEnabled {
+                    Stepper("Fade length: \(fillerFadeMs) ms",
+                            value: $fillerFadeMs, in: 100...1800, step: 100)
+                        .onChange(of: fillerFadeMs) { _, _ in saveFillerSettings() }
+                        .disabled(!fillerEnabled)
+                }
                 Toggle("Use my own audio instead of the Monitor Beacon", isOn: $fillerUsesCustomSource)
                     .onChange(of: fillerUsesCustomSource) { _, _ in saveFillerSettings() }
                     .disabled(!fillerEnabled)
@@ -289,6 +300,8 @@ struct ConfigurationView: View {
         spatialAudioEnabled = spatialEnabled == "1"
         // Filler defaults ON: an absent key counts as enabled.
         fillerEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerEnabledKey)) ?? nil) ?? "1") != "0"
+        fillerFadeEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeEnabledKey)) ?? nil) ?? "1") != "0"
+        fillerFadeMs = min(max(Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeMsKey)) ?? nil)) ?? "") ?? 700, 100), 1800)
         fillerUsesCustomSource = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerUseCustomKey)) ?? nil)) == "1"
         fillerShuffle = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerShuffleKey)) ?? nil)) == "1"
         fillerGapSeconds = Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerGapKey)) ?? nil)) ?? "") ?? 0
@@ -329,6 +342,8 @@ struct ConfigurationView: View {
     private func saveFillerSettings() {
         let s = SQLiteController.shared
         try? s.storeAppSettingsValue(fillerEnabled ? "1" : "0", forKey: SDRController.fillerEnabledKey)
+        try? s.storeAppSettingsValue(fillerFadeEnabled ? "1" : "0", forKey: SDRController.fillerFadeEnabledKey)
+        try? s.storeAppSettingsValue("\(fillerFadeMs)", forKey: SDRController.fillerFadeMsKey)
         try? s.storeAppSettingsValue(fillerUsesCustomSource ? "1" : "0", forKey: SDRController.fillerUseCustomKey)
         try? s.storeAppSettingsValue(fillerShuffle ? "1" : "0", forKey: SDRController.fillerShuffleKey)
         try? s.storeAppSettingsValue("\(fillerGapSeconds)", forKey: SDRController.fillerGapKey)

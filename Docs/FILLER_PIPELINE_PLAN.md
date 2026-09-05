@@ -1,8 +1,22 @@
 # Filler Pipeline — Implementation Plan (Option A)
 
-**Status:** Phase 1 implemented on branch `add-filler-pipeline` (2026-09-05). Phases 2–3 pending.
-**Scope:** AntennaHead only (sandboxed app). No ControlBooth, no LiveAudioServer changes.
+**Status:** Phases 1–2 implemented on branch `add-filler-pipeline` (+ `PipelineHelpers` branch `add-detach-all-tasks`), 2026-09-05. Phase 3 pending.
+**Scope:** AntennaHead + one additive `PipelineHelpers` method. No ControlBooth, no LiveAudioServer changes.
 **Date:** 2026-09-05
+
+## Phase 2 — done (branches `add-filler-pipeline`, `PipelineHelpers:add-detach-all-tasks`; not merged)
+
+- **`PipelineHelpers`** — new `TaskPipelineManager.detachAllTasks()`: clears `taskItems` and stops the liveness monitor **without** signalling the processes, so the caller can own the still-running helpers and terminate them on its own schedule. (Purely additive; ControlBooth unaffected.)
+- **`SDRController`** — fade in/out via a filler-owned `PCMDistanceGain` instance on the new fixed port **`fillerControlPort = 6026`** (`--rolloff 1 --min-gain 0` ⇒ `gain = 1/dist`; ramp interpolates *gain* linearly 1.0↔0.02 and sends `dist (1/gain)`):
+  - `fillerFadeEnabledKey` / `fillerFadeMsKey` (default ON / 700 ms, clamped 100–1800); `fadingFillerProcesses`.
+  - `startFillerPipeline()` inserts `PCMDistanceGain(--distance 50)` between player and sender when fade is on, then `rampFillerGain(fromGain: 0.02, toGain: 1.0)` — fade-in.
+  - `stopFillerForNewSource()` (fade path): snapshot the running filler procs, `rampFillerGain(1.0 → 0.02)`, `fillerPipelineManager.detachAllTasks()`, schedule `SIGTERM` after `fillerFadeMs`, stash procs in `fadingFillerProcesses`. **Reads the manager, not `taskMode`** — the frequency/scan builders set `taskMode` *before* the shared preamble runs, so a `taskMode == .filler` check there is unreliable.
+  - `launchCurrentPipeline()` consumes `fadingFillerProcesses`, folds them into the wait set unconditionally (even when `waitForDyingProcesses: false`), so the incoming pipeline's `PCMUDPSender` never overlaps the fading filler's into LAS.
+  - `terminateTasks(enterIdle: false)` also SIGTERMs any `fadingFillerProcesses` and bumps `fillerGeneration`.
+- **`ControlBoothEventReceiver`** — a `useToneFiller` recording now stops the filler outright first (LAS can't emit its test tone while the filler feeds it real PCM); `handleStopRecording` brings the filler back if nothing else took over. A normal silence-filler recording is left running under the beacon.
+- **`ConfigurationView`** — "Fade in and out" toggle + "Fade length" stepper (100–1800 ms, 100-ms steps).
+- **Docs** — `AntennaHead/README.md` port table + `NETWORK_PORTS.md` (also backfilled the previously-missing spatial ports 6024/6025).
+- Verified live: fade-in chain on launch/stop (`PCMDistanceGain --distance 50 --control-port 6026`, log `fading in 700 ms`); tuning logs `filler fading out over 700 ms`, waits ~2 s (700 ms fade + teardown + rtl_fm start), then exactly one `PCMUDPSender → :6020`, no orphaned `PCMFilePlayer`; `AntennaHeadFillerFadeOut=0` gives the Phase-1 hard cut (no 6026 stage); `xcodebuild` build + test green for AntennaHead, `swift build`/`test` green for PipelineHelpers.
 
 ## Phase 1 — done (branch `add-filler-pipeline`, not merged)
 
