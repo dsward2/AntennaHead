@@ -150,6 +150,16 @@ final class ControlBoothEventReceiver: NSObject {
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
                 "handleStartRecording — scheduling at \(fileURL.path), useToneFiller=\(useToneFiller)")
             let mgr = lasManager
+            // A tone-filler test recording wants LiveAudioServer's own test
+            // tone during dead air — but the auto filler feeds LAS real PCM,
+            // so it would never emit the tone. Stop the filler for real
+            // (handleStopRecording brings it back). A normal (silence-filler)
+            // recording is left alone: capturing the beacon beats capturing
+            // digital silence.
+            let controller = sdrController
+            if useToneFiller, controller.taskMode == .filler {
+                controller.terminateTasks(enterIdle: false)
+            }
             // Task { @MainActor } guarantees this runs after the handler
             // returns and the AE reply is dispatched, so terminate()'s Thread.sleep
             // elsewhere cannot block the reply. startRecording now calls LAS's
@@ -168,7 +178,15 @@ final class ControlBoothEventReceiver: NSObject {
         MainActor.assumeIsolated {
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver", "handleStopRecording called")
             let mgr = lasManager
-            Task { @MainActor in await mgr.stopRecording() }
+            let controller = sdrController
+            Task { @MainActor in
+                await mgr.stopRecording()
+                // Bring the filler back if a tone-filler recording had stopped
+                // it and nothing else took over in the meantime.
+                if controller.taskMode == .stopped, controller.fillerEnabled {
+                    controller.startFillerPipeline()
+                }
+            }
         }
     }
 

@@ -26,6 +26,13 @@ struct ConfigurationView: View {
     @State private var transcriptionLocale = "en-US"
     @State private var transcriptionSavesTranscript = false
     @State private var spatialAudioEnabled = false
+    @State private var fillerEnabled = true
+    @State private var fillerFadeEnabled = true
+    @State private var fillerFadeMs = 700
+    @State private var fillerUsesCustomSource = false
+    @State private var fillerShuffle = false
+    @State private var fillerGapSeconds = 0
+    @State private var fillerSyncMessage = ""
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -112,6 +119,74 @@ struct ConfigurationView: View {
                 Text("Spatial Audio")
             } footer: {
                 Text("Runs \u{201C}PCMDistanceGain\u{201D} and \u{201C}PCMBinauralPanner\u{201D} taps on the outgoing audio, so the Now Playing view's Distance, Azimuth, and Elevation sliders can move the source in real time. Control messages go to UDP ports \(Int(sdrController.spatialGainControlPort)) and \(Int(sdrController.binauralControlPort)) on this Mac. Direction uses interaural time/level differences, not a measured head-related transfer function \u{2014} it localizes left/right convincingly; elevation is a mild, approximate cue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Play filler audio when nothing is tuned", isOn: $fillerEnabled)
+                    .onChange(of: fillerEnabled) { _, _ in saveFillerSettings() }
+                Toggle("Fade in and out (rather than cut)", isOn: $fillerFadeEnabled)
+                    .onChange(of: fillerFadeEnabled) { _, _ in saveFillerSettings() }
+                    .disabled(!fillerEnabled)
+                if fillerFadeEnabled {
+                    Stepper("Fade length: \(fillerFadeMs) ms",
+                            value: $fillerFadeMs, in: 100...1800, step: 100)
+                        .onChange(of: fillerFadeMs) { _, _ in saveFillerSettings() }
+                        .disabled(!fillerEnabled)
+                }
+                Toggle("Use my own audio instead of the Monitor Beacon", isOn: $fillerUsesCustomSource)
+                    .onChange(of: fillerUsesCustomSource) { _, _ in saveFillerSettings() }
+                    .disabled(!fillerEnabled)
+                if fillerUsesCustomSource {
+                    Toggle("Shuffle", isOn: $fillerShuffle)
+                        .onChange(of: fillerShuffle) { _, _ in saveFillerSettings() }
+                        .disabled(!fillerEnabled)
+                    Stepper("Gap between tracks: \(fillerGapSeconds) s",
+                            value: $fillerGapSeconds, in: 0...30)
+                        .onChange(of: fillerGapSeconds) { _, _ in saveFillerSettings() }
+                        .disabled(!fillerEnabled)
+                    if sdrController.hasFillerSourceFolder {
+                        LabeledContent("Source folder") {
+                            HStack {
+                                Text(sdrController.fillerSourceFolderURL()?.path ?? "\u{2014}")
+                                    .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                                Button("Refresh") {
+                                    fillerSyncMessage = "Copied \(sdrController.syncFillerCache()) file(s)"
+                                    saveFillerSettings()
+                                }
+                                Button("Change\u{2026}") { chooseFillerSourceFolder() }
+                                Button("Use Drop Folder") {
+                                    sdrController.clearFillerSourceFolder()
+                                    fillerSyncMessage = ""
+                                    saveFillerSettings()
+                                }
+                            }
+                        }
+                        .disabled(!fillerEnabled)
+                    } else {
+                        LabeledContent("Drop folder") {
+                            HStack {
+                                Text(sdrController.fillerFolderURL?.path ?? "\u{2014}")
+                                    .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                                if let folder = sdrController.fillerFolderURL {
+                                    Button("Reveal in Finder") {
+                                        NSWorkspace.shared.activateFileViewerSelecting([folder])
+                                    }
+                                }
+                                Button("Choose Folder\u{2026}") { chooseFillerSourceFolder() }
+                            }
+                        }
+                        .disabled(!fillerEnabled)
+                    }
+                    if !fillerSyncMessage.isEmpty {
+                        Text(fillerSyncMessage).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Filler Audio")
+            } footer: {
+                Text("When no station, device, or other source is active, AntennaHead loops filler audio so the stream is never silent. The built-in Monitor Beacon plays by default. For custom audio, either drop AAC / MP3 / WAV files into the \u{201C}Filler\u{201D} folder in the shared Recordings folder, or choose any folder \u{2014} its audio files are copied in and re-copied when you press Refresh.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -249,6 +324,13 @@ struct ConfigurationView: View {
         transcriptionSavesTranscript = saveTranscript == "1"
         let spatialEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.spatialAudioEnabledKey)) ?? nil
         spatialAudioEnabled = spatialEnabled == "1"
+        // Filler defaults ON: an absent key counts as enabled.
+        fillerEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerEnabledKey)) ?? nil) ?? "1") != "0"
+        fillerFadeEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeEnabledKey)) ?? nil) ?? "1") != "0"
+        fillerFadeMs = min(max(Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeMsKey)) ?? nil)) ?? "") ?? 700, 100), 1800)
+        fillerUsesCustomSource = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerUseCustomKey)) ?? nil)) == "1"
+        fillerShuffle = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerShuffleKey)) ?? nil)) == "1"
+        fillerGapSeconds = Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerGapKey)) ?? nil)) ?? "") ?? 0
     }
 
     private func saveControlBoothSettings() {
@@ -281,6 +363,17 @@ struct ConfigurationView: View {
     private func saveSpatialAudioSettings() {
         try? SQLiteController.shared.storeAppSettingsValue(
             spatialAudioEnabled ? "1" : "0", forKey: SDRController.spatialAudioEnabledKey)
+    }
+
+    private func saveFillerSettings() {
+        let s = SQLiteController.shared
+        try? s.storeAppSettingsValue(fillerEnabled ? "1" : "0", forKey: SDRController.fillerEnabledKey)
+        try? s.storeAppSettingsValue(fillerFadeEnabled ? "1" : "0", forKey: SDRController.fillerFadeEnabledKey)
+        try? s.storeAppSettingsValue("\(fillerFadeMs)", forKey: SDRController.fillerFadeMsKey)
+        try? s.storeAppSettingsValue(fillerUsesCustomSource ? "1" : "0", forKey: SDRController.fillerUseCustomKey)
+        try? s.storeAppSettingsValue(fillerShuffle ? "1" : "0", forKey: SDRController.fillerShuffleKey)
+        try? s.storeAppSettingsValue("\(fillerGapSeconds)", forKey: SDRController.fillerGapKey)
+        sdrController.fillerSettingsDidChange()
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
@@ -319,6 +412,18 @@ struct ConfigurationView: View {
                 data.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
         }
         saveControlBoothSettings()
+    }
+
+    private func chooseFillerSourceFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder of audio files to use as filler"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let copied = sdrController.setFillerSourceFolder(url)
+        fillerSyncMessage = "Copied \(copied) file(s)"
+        saveFillerSettings()
     }
 
     /// Opens the Application Support folder holding the database and exported

@@ -28,7 +28,18 @@ final class SDRController {
         case device
         case customTask
         case recording
+        /// The auto "filler" pipeline (built-in Monitor Beacon, or the user's
+        /// own audio) that loops whenever no real source is running so the
+        /// stream is never digitally silent. See `startFillerPipeline()`.
+        case filler
     }
+
+    /// A real, user-selected source is playing — not idle, and not the auto
+    /// filler. UI that means "the user is listening to something" should test
+    /// this rather than `taskMode != .stopped`.
+    var isPlayingRealSource: Bool { taskMode != .stopped && taskMode != .filler }
+    /// The auto filler pipeline is what's currently feeding LiveAudioServer.
+    var isFillerPlaying: Bool { taskMode == .filler }
 
     enum SDRError: Error, CustomStringConvertible {
         case frequencyNotFound(Int64)
@@ -252,6 +263,99 @@ final class SDRController {
         let clipURL: URL
     }
 
+    // MARK: Filler pipeline
+    //
+    // When no real source is running, `startFillerPipeline()` loops the built-in
+    // Monitor Beacon (a top-level bundle resource) through
+    // `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` so LiveAudioServer
+    // always sees real PCM. Runs on its own `TaskPipelineManager` so its
+    // lifecycle is fully independent of the program pipeline. When fade is on
+    // (the default) an optional `PCMDistanceGain` stage on `fillerControlPort`
+    // ramps the level in on start and out again when a real source is selected.
+
+    /// App-settings keys for the filler feature. Read fresh whenever the filler
+    /// pipeline is (re)built, and edited in the Configuration view.
+    static let fillerEnabledKey     = "AntennaHeadFillerEnabled"
+    static let fillerFadeEnabledKey = "AntennaHeadFillerFadeOut"
+    static let fillerFadeMsKey      = "AntennaHeadFillerFadeMs"
+    static let fillerUseCustomKey   = "AntennaHeadFillerUseCustomSource"
+    static let fillerShuffleKey     = "AntennaHeadFillerShuffle"
+    static let fillerGapKey         = "AntennaHeadFillerGapSeconds"
+    /// Base64 security-scoped bookmark to a user-picked folder of audio files.
+    /// When set, `syncFillerCache()` copies that folder's audio into
+    /// `fillerCacheURL` (the sandboxed `PCMFilePlayer` child can't read an
+    /// arbitrary bookmarked folder, only the app group container). Empty/absent
+    /// ⇒ the drop-in `<Recordings>/Filler/` folder is used instead.
+    static let fillerSourceBookmarkKey = "AntennaHeadFillerSourceBookmark"
+
+    /// Audio file types accepted for custom filler.
+    private static let fillerAudioExtensions: Set<String> =
+        ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
+
+    /// UDP control port for the filler's own `PCMDistanceGain` instance (level
+    /// ramps). Fixed and internal — AntennaHead owns both ends, so unlike
+    /// `controlBoothUDP` there's no cross-app coordination. Next after
+    /// `binauralControlPort` (6025).
+    let fillerControlPort: UInt16 = 6026
+
+    /// Distance handed to the filler's `PCMDistanceGain` for "effectively
+    /// silent" (gain ≈ 0.02, ~−34 dB with `--rolloff 1 --min-gain 0`), i.e.
+    /// `distance = 1 / gain`. The ramp interpolates *gain* linearly between
+    /// this and unity and sends `dist (1/gain)` each step.
+    private static let fillerSilentGain = 0.02
+    private static let fillerRampSteps = 24
+
+    /// Whether the filler plays while nothing is tuned. **Default ON**: an
+    /// absent key counts as enabled, so only an explicit "0" turns it off.
+    var fillerEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerEnabledKey)) ?? nil) != "0"
+    }
+    /// Whether starting/stopping fades the filler in and out (vs. a hard cut).
+    /// Default ON, same convention.
+    var fillerFadeEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerFadeEnabledKey)) ?? nil) != "0"
+    }
+    /// Fade duration in milliseconds. Clamped to 100…1800 (kept under
+    /// `waitForProcessesToExit`'s 2.5 s timeout, which gates the incoming
+    /// pipeline on the fading filler's exit). Default 700.
+    var fillerFadeMs: Int {
+        let v = Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerFadeMsKey)) ?? nil) ?? "") ?? 700
+        return min(max(v, 100), 1800)
+    }
+    /// Play the user's own audio (files in `<Recordings>/Filler/`) instead of
+    /// the Monitor Beacon (Phase 3). Default OFF.
+    var fillerUsesCustomSource: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerUseCustomKey)) ?? nil) == "1"
+    }
+    var fillerShuffle: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerShuffleKey)) ?? nil) == "1"
+    }
+    var fillerGapSeconds: Int {
+        Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerGapKey)) ?? nil) ?? "") ?? 0
+    }
+
+    /// The built-in filler clip: a top-level bundle resource, already 48 kHz /
+    /// 2 ch / S16LE (the LiveAudioServer contract), so `PCMFilePlayer` loops it
+    /// with no resampling. Readable by the sandboxed app and by the helper
+    /// child — no App Group container or security-scoped bookmark needed.
+    private var beaconFillerURL: URL? {
+        Bundle.main.url(forResource: "Monitor_Beacon", withExtension: "wav")
+    }
+
+    /// Dedicated manager for the filler pipeline, kept separate from
+    /// `radioTaskPipelineManager` so the two lifecycles never entangle.
+    let fillerPipelineManager = TaskPipelineManager()
+    /// Bumped every time the filler (re)starts or is torn down, so a stale
+    /// deferred task (a fade ramp, a scheduled SIGTERM) can tell it has been
+    /// superseded and bail.
+    private var fillerGeneration = 0
+    /// Filler helper processes detached by `stopFillerForNewSource()` during a
+    /// fade-out: still running, ramping down, scheduled for SIGTERM. Consumed
+    /// (once) by the next `launchCurrentPipeline` so the incoming pipeline
+    /// waits for them to exit before it starts — no two PCMUDPSenders ever
+    /// feed LiveAudioServer at once.
+    private var fadingFillerProcesses: [Process] = []
+
     let radioTaskPipelineManager = TaskPipelineManager()
     /// Pending async pipeline launch; cancelled and replaced whenever a new
     /// pipeline is requested before the previous one has fully started.
@@ -336,6 +440,9 @@ final class SDRController {
                   let self, let pending = self.controlBoothReceiverReadyContinuation else { return }
             self.controlBoothReceiverReadyContinuation = nil
             pending.resume()
+        }
+        fillerPipelineManager.onLog = { source, message in
+            LogStore.shared.log(.info, source: source, message)
         }
         startStatusListener()
         startCaptionListener()
@@ -454,6 +561,7 @@ final class SDRController {
     func startTasksForDevice(deviceName: String, deviceAudioOutputFilter: String) {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
 
         taskMode = .device
@@ -513,6 +621,7 @@ final class SDRController {
 
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
 
         taskMode = .recording
@@ -592,6 +701,7 @@ final class SDRController {
     func startControlBoothListening(name: String) async {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
         taskMode = .customTask
         activeFrequencyID = nil
@@ -673,6 +783,7 @@ final class SDRController {
     func startGqrxListening(channels: Int = 2) {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
         taskMode = .customTask
         activeFrequencyID = nil
@@ -728,6 +839,7 @@ final class SDRController {
     func startTextToSpeech(files: [SpeechTextFile], randomOrder: Bool, repeatForever: Bool) {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
 
         let ordered = randomOrder ? files.shuffled() : files.sorted { $0.modified < $1.modified }
@@ -949,7 +1061,11 @@ final class SDRController {
         }
     }
 
-    func terminateTasks() {
+    /// Stops the active pipeline. When `enterIdle` is true (the default) and the
+    /// filler feature is enabled, the Monitor Beacon filler starts immediately
+    /// afterward so the stream is never silent; pass `enterIdle: false` for a
+    /// true stop (app shutdown, "Stop filler", a tone-filler test recording).
+    func terminateTasks(enterIdle: Bool = true) {
         pipelineStartTask?.cancel()
         pipelineStartTask = nil
         radioTaskPipelineManager.terminate()
@@ -966,6 +1082,328 @@ final class SDRController {
         activeDeviceSerial = ""
         activeDeviceIndex = -1
         activeChannelCount = 0
+
+        if enterIdle, fillerEnabled {
+            startFillerPipeline()   // sets taskMode = .filler
+        } else {
+            fillerGeneration &+= 1
+            for p in fadingFillerProcesses where p.isRunning { kill(p.processIdentifier, SIGTERM) }
+            fadingFillerProcesses = []
+            fillerPipelineManager.terminate()
+        }
+    }
+
+    // MARK: Filler pipeline
+
+    /// Loops the filler audio (built-in Monitor Beacon by default) through
+    /// `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` on
+    /// `fillerPipelineManager`. Safe to call when a filler is already running —
+    /// it is torn down first. No port-race wait is needed: the filler uses no
+    /// exclusive resource (no RTL-SDR USB, no Core Audio device, no bound
+    /// receive port), and `PCMUDPSender` only sends. A no-op when the feature
+    /// is disabled or the beacon is missing.
+    ///
+    /// With fade on, a `PCMDistanceGain` stage starts attenuated and this
+    /// method ramps it up to unity over `fillerFadeMs`.
+    func startFillerPipeline() {
+        fillerPipelineManager.terminate()
+        fillerGeneration &+= 1
+        guard fillerEnabled else { return }
+
+        let tracks = fillerTrackList()
+        guard !tracks.isEmpty else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "filler enabled but no playable audio (Monitor_Beacon.wav missing from the bundle?)")
+            return
+        }
+
+        taskMode = .filler
+        publishFillerStatus(customTrackCount: fillerUsesCustomSource ? tracks.count : 0)
+
+        let fade = fillerFadeEnabled
+        guard let player = makeFillerPlayerTaskItem(tracks: tracks),
+              let sender = makeFillerUDPSenderTaskItem() else {
+            taskMode = .stopped
+            return
+        }
+        let gain = fade ? makeFillerGainTaskItem(startAttenuated: true) : nil
+        fillerPipelineManager.add(player)
+        if let gain { fillerPipelineManager.add(gain) }
+        fillerPipelineManager.add(sender)
+
+        do {
+            try fillerPipelineManager.start()
+            lastError = nil
+            LogStore.shared.log(.info, source: "SDRController",
+                                "filler started — \(tracks.count) track(s) → udp:\(udpInputPort)"
+                                + (fade ? ", fading in \(fillerFadeMs) ms" : ""))
+            if fade { rampFillerGain(fromGain: Self.fillerSilentGain, toGain: 1.0, ms: fillerFadeMs) }
+        } catch {
+            lastError = error
+            taskMode = .stopped
+            LogStore.shared.log(.error, source: "SDRController", "filler start failed: \(error)")
+        }
+    }
+
+    /// Re-evaluates the filler after a Configuration change: (re)build it if it
+    /// should be running, or stop it if the feature was just switched off.
+    func fillerSettingsDidChange() {
+        if fillerEnabled {
+            if taskMode == .stopped || taskMode == .filler { startFillerPipeline() }
+        } else if taskMode == .filler {
+            terminateTasks(enterIdle: false)
+        }
+    }
+
+    /// Filler tracks in play order. The user's own audio (a picked folder,
+    /// synced into `fillerCacheURL`, or files dropped into `<Recordings>/Filler/`)
+    /// when custom source is on and non-empty; otherwise the built-in Monitor
+    /// Beacon.
+    private func fillerTrackList() -> [URL] {
+        if fillerUsesCustomSource {
+            let custom = customFillerTracks()
+            if !custom.isEmpty { return fillerShuffle ? custom.shuffled() : custom }
+            LogStore.shared.log(.info, source: "SDRController",
+                                "filler: no custom audio found — using the Monitor Beacon")
+        }
+        return beaconFillerURL.map { [$0] } ?? []
+    }
+
+    /// Decodable audio files for the custom filler: the synced cache when a
+    /// source folder is picked, else the drop-in `<Recordings>/Filler/`. Both
+    /// live in the app group container, which the `PCMFilePlayer` child can
+    /// read directly (same as `startTasksForRecording`).
+    private func customFillerTracks() -> [URL] {
+        guard let dir = hasFillerSourceFolder ? fillerCacheURL : fillerFolderURL else { return [] }
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        return items
+            .filter { Self.fillerAudioExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    /// `<Recordings>/Filler/`, created if absent. `nil` if the shared Recordings
+    /// folder can't be resolved. This is the "just drop files here" source.
+    var fillerFolderURL: URL? {
+        guard let root = SharedRecordingFolder.url else { return nil }
+        let dir = root.appendingPathComponent("Filler", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    // MARK: Custom filler source folder (picked, then synced into the container)
+
+    /// App-group container dir holding copies of the picked source folder's
+    /// audio. Separate from `<Recordings>/Filler/` so a synced folder and
+    /// hand-dropped files never fight over one directory.
+    private var fillerCacheURL: URL? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedRecordingFolder.appGroupIdentifier) else { return nil }
+        let dir = container.appendingPathComponent("FillerCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Whether the user has picked a source folder (vs. using the drop-in one).
+    var hasFillerSourceFolder: Bool {
+        !((((try? sqliteController.appSettingsValue(forKey: Self.fillerSourceBookmarkKey)) ?? nil)) ?? "").isEmpty
+    }
+
+    /// Resolves the stored source-folder bookmark, refreshing it if stale.
+    /// `nil` if none is set or it can no longer be resolved.
+    func fillerSourceFolderURL() -> URL? {
+        guard let b64 = ((try? sqliteController.appSettingsValue(forKey: Self.fillerSourceBookmarkKey)) ?? nil),
+              !b64.isEmpty, let data = Data(base64Encoded: b64) else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                 relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
+        if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                   includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? sqliteController.storeAppSettingsValue(fresh.base64EncodedString(),
+                                                       forKey: Self.fillerSourceBookmarkKey)
+        }
+        return url
+    }
+
+    /// Stores a security-scoped bookmark to `url` and copies its audio into the
+    /// cache. Returns the number of files copied (0 on any failure, logged).
+    @discardableResult
+    func setFillerSourceFolder(_ url: URL) -> Int {
+        guard let data = try? url.bookmarkData(options: .withSecurityScope,
+                                               includingResourceValuesForKeys: nil, relativeTo: nil) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "filler: could not bookmark \(url.path)")
+            return 0
+        }
+        try? sqliteController.storeAppSettingsValue(data.base64EncodedString(),
+                                                   forKey: Self.fillerSourceBookmarkKey)
+        return syncFillerCache()
+    }
+
+    /// Forgets the picked source folder and empties the cache; the drop-in
+    /// `<Recordings>/Filler/` folder takes over.
+    func clearFillerSourceFolder() {
+        try? sqliteController.storeAppSettingsValue("", forKey: Self.fillerSourceBookmarkKey)
+        if let cache = fillerCacheURL {
+            for f in (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
+        LogStore.shared.log(.info, source: "SDRController", "filler: source folder cleared")
+    }
+
+    /// Re-copies audio from the picked source folder into the cache (wipe +
+    /// copy — a filler folder is small and this only runs on user action, not
+    /// on filler start). Returns the number of files copied.
+    @discardableResult
+    func syncFillerCache() -> Int {
+        guard let source = fillerSourceFolderURL(), let cache = fillerCacheURL else { return 0 }
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+
+        for f in (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+            try? FileManager.default.removeItem(at: f)
+        }
+        let sourceFiles = ((try? FileManager.default.contentsOfDirectory(
+            at: source, includingPropertiesForKeys: nil)) ?? [])
+            .filter { Self.fillerAudioExtensions.contains($0.pathExtension.lowercased()) }
+        var copied = 0
+        for src in sourceFiles {
+            do {
+                try FileManager.default.copyItem(at: src, to: cache.appendingPathComponent(src.lastPathComponent))
+                copied += 1
+            } catch {
+                LogStore.shared.log(.error, source: "SDRController",
+                                    "filler: copy failed for \(src.lastPathComponent): \(error)")
+            }
+        }
+        LogStore.shared.log(.info, source: "SDRController",
+                            "filler cache synced — \(copied) file(s) from \(source.path)")
+        return copied
+    }
+
+    private func makeFillerPlayerTaskItem(tracks: [URL]) -> TaskItem? {
+        let path = helperPath("PCMFilePlayer")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("PCMFilePlayer helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "PCMFilePlayer helper missing at \(path)")
+            return nil
+        }
+        let item = fillerPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMFilePlayer")
+        for url in tracks { item.addArgument("--file"); item.addArgument(url.path) }
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--repeat")
+        item.addArgument("--gap"); item.addArgument(fillerUsesCustomSource ? fillerGapSeconds : 0)
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    private func makeFillerUDPSenderTaskItem() -> TaskItem? {
+        let item = fillerPipelineManager.makeTaskItem(pathToExecutable: helperPath("PCMUDPSender"),
+                                                      functionName: "PCMUDPSender")
+        item.addArgument("--port"); item.addArgument(Int(udpInputPort))
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    /// The filler's own `PCMDistanceGain` instance, used purely as a
+    /// controllable level fader (`--rolloff 1 --min-gain 0` ⇒ `gain = 1/dist`).
+    /// `startAttenuated` launches it near-silent for a fade-in; otherwise at
+    /// unity. Returns `nil` (fade silently disabled for this run) if the helper
+    /// binary is missing — audio is never affected.
+    private func makeFillerGainTaskItem(startAttenuated: Bool) -> TaskItem? {
+        let path = helperPath("PCMDistanceGain")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMDistanceGain helper missing at \(path) — filler fade disabled this run")
+            return nil
+        }
+        let startDistance = startAttenuated ? (1.0 / Self.fillerSilentGain) : 1.0
+        let item = fillerPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDistanceGain")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--rolloff"); item.addArgument("1.0")
+        item.addArgument("--min-gain"); item.addArgument("0.0")
+        item.addArgument("--distance"); item.addArgument("\(startDistance)")
+        item.addArgument("--control-port"); item.addArgument(Int(fillerControlPort))
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    /// Ramps the filler's `PCMDistanceGain` between two gain values over `ms`,
+    /// interpolating gain linearly and sending `dist (1/gain)` each step.
+    /// Fire-and-forget UDP; harmless if no gain stage is running. Bails as soon
+    /// as `fillerGeneration` moves on (a newer start/stop superseded this fade).
+    private func rampFillerGain(fromGain start: Double, toGain end: Double, ms: Int) {
+        let generation = fillerGeneration
+        let steps = Self.fillerRampSteps
+        let stepNanos = UInt64(max(1, ms / steps)) * 1_000_000
+        Task { [weak self] in
+            for i in 1...steps {
+                guard let self, self.fillerGeneration == generation else { return }
+                let g = max(start + (end - start) * Double(i) / Double(steps), Self.fillerSilentGain)
+                self.sendUDPMessage("dist \(1.0 / g)\n", toPort: self.fillerControlPort)
+                try? await Task.sleep(nanoseconds: stepNanos)
+            }
+        }
+    }
+
+    private func publishFillerStatus(customTrackCount: Int) {
+        statusFunction = "Filler"
+        stationName = customTrackCount > 0 ? "Filler" : "Monitor Beacon"
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        signalLevel = 0
+        activeFrequencyID = nil
+        activeDeviceSerial = ""
+        activeDeviceIndex = -1
+        activeChannelCount = 0
+    }
+
+    /// Ends the filler before a real source is built. Called from every
+    /// pipeline builder's preamble; a no-op when no filler is running.
+    ///
+    /// With fade on and the filler live, the helper processes are detached
+    /// (still running), ramped down over `fillerFadeMs`, SIGTERM'd when the
+    /// ramp finishes, and stashed in `fadingFillerProcesses` — the next
+    /// `launchCurrentPipeline` waits for them to exit before starting, so the
+    /// incoming and outgoing PCMUDPSenders never both feed LiveAudioServer.
+    /// Otherwise (fade off, or stale leftovers) it's an outright stop.
+    private func stopFillerForNewSource() {
+        fillerGeneration &+= 1
+
+        // Whether a filler is running is read from the manager, not `taskMode`
+        // — some builders set their own mode before calling into this preamble.
+        let procs = fillerPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        guard fillerFadeEnabled, !procs.isEmpty else {
+            fillerPipelineManager.terminate()
+            return
+        }
+
+        fadingFillerProcesses = procs
+        fillerPipelineManager.detachAllTasks()   // keep them running; we own them now
+        rampFillerGain(fromGain: 1.0, toGain: Self.fillerSilentGain, ms: fillerFadeMs)
+        LogStore.shared.log(.info, source: "SDRController",
+                            "filler fading out over \(fillerFadeMs) ms")
+
+        let generation = fillerGeneration
+        let fadeMs = fillerFadeMs
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(fadeMs) * 1_000_000)
+            for p in procs where p.isRunning { kill(p.processIdentifier, SIGTERM) }
+            guard let self, self.fillerGeneration == generation else { return }
+            self.fadingFillerProcesses = []
+        }
     }
 
     /// Waits for all processes to exit (polling `isRunning`), then SIGKILLs any
@@ -1007,10 +1445,17 @@ final class SDRController {
                                        waitForDyingProcesses: Bool = true,
                                        announcement: PendingAnnouncement? = nil) {
         pipelineStartTask?.cancel()
+        // A filler faded out by `stopFillerForNewSource()` is still feeding
+        // LiveAudioServer for the length of its fade. Always wait it out —
+        // regardless of `waitForDyingProcesses` — so its PCMUDPSender has
+        // exited before this pipeline's starts.
+        let fadingFiller = fadingFillerProcesses
+        fadingFillerProcesses = []
+        let mustWait = fadingFiller + (waitForDyingProcesses ? dying : [])
         pipelineStartTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
-            if waitForDyingProcesses, !dying.isEmpty {
-                await Self.waitForProcessesToExit(dying)
+            if !mustWait.isEmpty {
+                await Self.waitForProcessesToExit(mustWait)
                 guard !Task.isCancelled else { return }
             }
             if let announcement {
@@ -1220,6 +1665,7 @@ final class SDRController {
         // Capture dying processes before terminate() clears the references.
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
 
         // FM-stereo stations decode the multiplex into L/R via stereodemux,

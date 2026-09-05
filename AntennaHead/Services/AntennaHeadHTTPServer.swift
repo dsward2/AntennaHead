@@ -778,6 +778,12 @@ final class AntennaHeadHTTPServer {
             sdrController?.terminateTasks()
             return htmlFragmentResponse(controlBoothPageHTML())
 
+        case "/fillerstop.html":
+            // Stop the auto filler and stay silent (enterIdle: false), rather
+            // than the usual stop which returns straight to the filler.
+            sdrController?.terminateTasks(enterIdle: false)
+            return okResponse()
+
         case "/controlboothlaunched.html":
             launchControlBooth()
             return htmlFragmentResponse(controlBoothPageHTML())
@@ -2144,6 +2150,10 @@ final class AntennaHeadHTTPServer {
         } else {
             dict["station_name"] = sdrController?.statusFunction ?? "Not Playing"
             dict["short_frequency"] = ""
+        }
+        if sdrController?.isFillerPlaying == true {
+            dict["filler"] = true
+            dict["filler_source"] = sdrController?.stationName ?? "Monitor Beacon"
         }
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
     }
