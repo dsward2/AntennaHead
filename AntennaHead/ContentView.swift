@@ -193,10 +193,21 @@ struct ContentView: View {
 
         lasProcess.start(auth: auth, tls: tlsConfig, outputBitrate: outputBitrate,
                          httpPort: ports.streamingHTTP, udpInputPort: ports.audioUDP)
+
+        // Loop the Monitor Beacon filler while nothing is tuned, so the stream is
+        // never digitally silent. Deferred a moment so LAS has bound its UDP
+        // input first — otherwise the filler's PCMUDPSender's first datagram can
+        // hit a closed port and SIGPIPE the chain.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            if sdrController.taskMode == .stopped, sdrController.fillerEnabled {
+                sdrController.startFillerPipeline()
+            }
+        }
     }
 
     private func teardownServices() {
-        sdrController.terminateTasks()
+        sdrController.terminateTasks(enterIdle: false)
         httpServer.stop()
         audioServer.stopPolling()
         lasProcess.stop()
