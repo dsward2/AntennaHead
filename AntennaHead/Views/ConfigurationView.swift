@@ -106,12 +106,12 @@ struct ConfigurationView: View {
             }
 
             Section {
-                Toggle("Distance-based spatial audio", isOn: $spatialAudioEnabled)
+                Toggle("Spatial audio (distance + direction)", isOn: $spatialAudioEnabled)
                     .onChange(of: spatialAudioEnabled) { _, _ in saveSpatialAudioSettings() }
             } header: {
                 Text("Spatial Audio")
             } footer: {
-                Text("Runs a \u{201C}PCMDistanceGain\u{201D} tap on the outgoing audio, so the Now Playing view's Distance slider can attenuate the source in real time. Control messages go to UDP port \(Int(sdrController.spatialGainControlPort)) on this Mac; a future stage will add direction (azimuth/elevation) alongside it.")
+                Text("Runs \u{201C}PCMDistanceGain\u{201D} and \u{201C}PCMBinauralPanner\u{201D} taps on the outgoing audio, so the Now Playing view's Distance, Azimuth, and Elevation sliders can move the source in real time. Control messages go to UDP ports \(Int(sdrController.spatialGainControlPort)) and \(Int(sdrController.binauralControlPort)) on this Mac. Direction uses interaural time/level differences, not a measured head-related transfer function \u{2014} it localizes left/right convincingly; elevation is a mild, approximate cue.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

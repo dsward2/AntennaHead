@@ -112,28 +112,39 @@ struct PlaybackControlsView: View {
     }
 }
 
-/// Live distance control for the optional `PCMDistanceGain` pipeline stage
-/// (see Configuration → Spatial Audio). Dragging sends a `dist <value>`
-/// update straight to the running stage's control port — no pipeline
-/// restart, no round trip through ControlBooth.
+/// Live position controls for the optional `PCMDistanceGain` +
+/// `PCMBinauralPanner` pipeline stages (see Configuration → Spatial Audio).
+/// Dragging sends the matching control-port update straight to the running
+/// stage — no pipeline restart, no round trip through ControlBooth.
 ///
 /// `@Bindable` (not the plain `var` the sibling views use) because this is
-/// the one control here that needs a two-way `Slider` binding into the
-/// `@Observable` controller rather than a one-shot method call.
+/// the one view here that needs two-way `Slider` bindings into the
+/// `@Observable` controller rather than one-shot method calls.
 struct SpatialPositionView: View {
     @Bindable var sdrController: SDRController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Spatial Position").font(.headline)
-            HStack {
-                Text("Distance")
-                    .foregroundStyle(.secondary)
-                Slider(value: $sdrController.spatialDistance, in: 0.1...4.0)
-                Text(String(format: "%.2f", sdrController.spatialDistance))
-                    .monospacedDigit()
-                    .frame(width: 44, alignment: .trailing)
-            }
+            positionRow("Azimuth", value: $sdrController.azimuth, range: -180...180,
+                        format: "%.0f\u{00B0}")
+            positionRow("Elevation", value: $sdrController.elevation, range: -90...90,
+                        format: "%.0f\u{00B0}")
+            positionRow("Distance", value: $sdrController.spatialDistance, range: 0.1...4.0,
+                        format: "%.2f")
+        }
+    }
+
+    private func positionRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>,
+                             format: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Slider(value: value, in: range)
+            Text(String(format: format, value.wrappedValue))
+                .monospacedDigit()
+                .frame(width: 44, alignment: .trailing)
         }
     }
 }
