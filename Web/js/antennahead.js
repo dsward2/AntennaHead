@@ -1413,6 +1413,46 @@ function stopNowPlayingUpdates()
 }
 
 
+// Spatial-audio sliders (see spatialAudioControlsHTML() in
+// AntennaHeadHTTPServer.swift, which renders these — this page has no
+// <script> of its own since fragments are injected via innerHTML, so the
+// sliders' oninput points here instead).
+//
+// Sends the *current* value of all three sliders on every input event,
+// not just the one that moved — simpler than tracking which changed, and
+// the server applies whichever of azimuth/elevation/distance parse, so a
+// slider that isn't on the page (spatial audio just doesn't render it)
+// is silently skipped rather than sent as some placeholder value.
+function spatialAudioSliderChanged(id)
+{
+    var slider = document.getElementById(id);
+    if (slider == null) { return; }
+
+    var valueSpan = document.getElementById(id + "-value");
+    if (valueSpan != null)
+    {
+        var value = parseFloat(slider.value);
+        // Matches the server's own formatting (spatialAudioControlsHTML):
+        // degrees with no decimal and a degree sign, distance to 2 places.
+        valueSpan.innerText = (id === "spatial-distance") ? value.toFixed(2) : (value.toFixed(0) + "°");
+    }
+
+    var payload = {};
+    var azimuthEl = document.getElementById("spatial-azimuth");
+    var elevationEl = document.getElementById("spatial-elevation");
+    var distanceEl = document.getElementById("spatial-distance");
+    if (azimuthEl != null) { payload.azimuth = parseFloat(azimuthEl.value); }
+    if (elevationEl != null) { payload.elevation = parseFloat(elevationEl.value); }
+    if (distanceEl != null) { payload.distance = parseFloat(distanceEl.value); }
+
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var xhttp = new XMLHttpRequest();
+    xhttp.open("POST", baseUrl + "api/spatial-audio/update", true);
+    xhttp.send(JSON.stringify(payload));
+}
+
+
 function applyAACSettings(form)
 {
   //console.log("frequencyListenButtonClicked");
