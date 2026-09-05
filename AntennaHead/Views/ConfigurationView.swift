@@ -32,6 +32,7 @@ struct ConfigurationView: View {
     @State private var fillerUsesCustomSource = false
     @State private var fillerShuffle = false
     @State private var fillerGapSeconds = 0
+    @State private var fillerSyncMessage = ""
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -145,22 +146,47 @@ struct ConfigurationView: View {
                             value: $fillerGapSeconds, in: 0...30)
                         .onChange(of: fillerGapSeconds) { _, _ in saveFillerSettings() }
                         .disabled(!fillerEnabled)
-                    if let folder = sdrController.fillerFolderURL {
-                        HStack {
-                            Text(folder.path)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                                .foregroundStyle(.secondary)
-                            Button("Reveal in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    if sdrController.hasFillerSourceFolder {
+                        LabeledContent("Source folder") {
+                            HStack {
+                                Text(sdrController.fillerSourceFolderURL()?.path ?? "\u{2014}")
+                                    .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                                Button("Refresh") {
+                                    fillerSyncMessage = "Copied \(sdrController.syncFillerCache()) file(s)"
+                                    saveFillerSettings()
+                                }
+                                Button("Change\u{2026}") { chooseFillerSourceFolder() }
+                                Button("Use Drop Folder") {
+                                    sdrController.clearFillerSourceFolder()
+                                    fillerSyncMessage = ""
+                                    saveFillerSettings()
+                                }
                             }
                         }
+                        .disabled(!fillerEnabled)
+                    } else {
+                        LabeledContent("Drop folder") {
+                            HStack {
+                                Text(sdrController.fillerFolderURL?.path ?? "\u{2014}")
+                                    .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                                if let folder = sdrController.fillerFolderURL {
+                                    Button("Reveal in Finder") {
+                                        NSWorkspace.shared.activateFileViewerSelecting([folder])
+                                    }
+                                }
+                                Button("Choose Folder\u{2026}") { chooseFillerSourceFolder() }
+                            }
+                        }
+                        .disabled(!fillerEnabled)
+                    }
+                    if !fillerSyncMessage.isEmpty {
+                        Text(fillerSyncMessage).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             } header: {
                 Text("Filler Audio")
             } footer: {
-                Text("When no station, device, or other source is active, AntennaHead loops filler audio so the stream is never silent. The built-in Monitor Beacon plays by default. For custom audio, put AAC / MP3 / WAV files in the \u{201C}Filler\u{201D} folder inside the shared Recordings folder.")
+                Text("When no station, device, or other source is active, AntennaHead loops filler audio so the stream is never silent. The built-in Monitor Beacon plays by default. For custom audio, either drop AAC / MP3 / WAV files into the \u{201C}Filler\u{201D} folder in the shared Recordings folder, or choose any folder \u{2014} its audio files are copied in and re-copied when you press Refresh.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -386,6 +412,18 @@ struct ConfigurationView: View {
                 data.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
         }
         saveControlBoothSettings()
+    }
+
+    private func chooseFillerSourceFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder of audio files to use as filler"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let copied = sdrController.setFillerSourceFolder(url)
+        fillerSyncMessage = "Copied \(copied) file(s)"
+        saveFillerSettings()
     }
 
     /// Opens the Application Support folder holding the database and exported

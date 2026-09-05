@@ -1,8 +1,17 @@
 # Filler Pipeline — Implementation Plan (Option A)
 
-**Status:** Phases 1–2 implemented on branch `add-filler-pipeline` (+ `PipelineHelpers` branch `add-detach-all-tasks`), 2026-09-05. Phase 3 pending.
+**Status:** Phases 1–3 implemented on branch `add-filler-pipeline` (+ `PipelineHelpers` branch `add-detach-all-tasks`), 2026-09-05. Feature complete.
 **Scope:** AntennaHead + one additive `PipelineHelpers` method. No ControlBooth, no LiveAudioServer changes.
 **Date:** 2026-09-05
+
+## Phase 3 — done (branch `add-filler-pipeline`; not committed at time of writing)
+
+Custom filler source. The `<Recordings>/Filler/` drop-in folder + shuffle + gap + reveal were already shipped in Phase 1; Phase 3 adds the **"choose any folder" picker** with copy-into-container (the sandboxed `PCMFilePlayer` child can't read an arbitrary security-scoped folder, only the app group container).
+
+- **`SDRController`:** `fillerSourceBookmarkKey` (`AntennaHeadFillerSourceBookmark`, base64 security-scoped bookmark); `fillerCacheURL` = `<AppGroup>/FillerCache/` (separate from `<Recordings>/Filler/` so a synced folder and hand-dropped files never collide); `hasFillerSourceFolder`; `fillerSourceFolderURL()` (resolves + refreshes a stale bookmark); `setFillerSourceFolder(_:) -> Int` (stores the bookmark, runs an initial sync); `clearFillerSourceFolder()` (drops the bookmark, empties the cache); `syncFillerCache() -> Int` (`startAccessingSecurityScopedResource`, wipe cache, copy audio files, stop accessing — wipe-and-recopy is fine: only ever runs on user action, never on filler start). `customFillerTracks()` now reads `fillerCacheURL` when `hasFillerSourceFolder`, else `fillerFolderURL`.
+- **`ConfigurationView`:** in the custom-source block — "Source folder" row (path + Refresh / Change… / Use Drop Folder) when a folder is picked, else "Drop folder" row (path + Reveal in Finder + Choose Folder…); a `fillerSyncMessage` line ("Copied N file(s)"); `chooseFillerSourceFolder()` runs an `NSOpenPanel` (`canChooseDirectories`), hands the URL to `setFillerSourceFolder`. Footer updated.
+- **Verified:** drop-in `<Recordings>/Filler/` path plays the dropped WAVs (2-track loop, fade-in) — Phase 1 regression clean after the `customFillerTracks()` branch change. Cache branch: with the bookmark key set, `PCMFilePlayer` loops `<AppGroup>/FillerCache/*.wav` (incl. a 44.1 kHz mono file, resampled) — confirms the child reads `FillerCache/` and the `hasFillerSourceFolder` gate. `xcodebuild` build + test green.
+- **Not runtime-tested:** the `NSOpenPanel` → `bookmarkData(.withSecurityScope)` → `syncFillerCache()` copy leg. The panel runs in a separate process (`openAndSavePanelService`) that computer-use can't drive under an AntennaHead-only grant. It's the same bookmark pattern already proven by this app's `chooseControlBoothApp` / TLS-cert pickers, and it compiles clean.
 
 ## Phase 2 — done (branches `add-filler-pipeline`, `PipelineHelpers:add-detach-all-tasks`; not merged)
 

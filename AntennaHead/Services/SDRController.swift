@@ -281,6 +281,16 @@ final class SDRController {
     static let fillerUseCustomKey   = "AntennaHeadFillerUseCustomSource"
     static let fillerShuffleKey     = "AntennaHeadFillerShuffle"
     static let fillerGapKey         = "AntennaHeadFillerGapSeconds"
+    /// Base64 security-scoped bookmark to a user-picked folder of audio files.
+    /// When set, `syncFillerCache()` copies that folder's audio into
+    /// `fillerCacheURL` (the sandboxed `PCMFilePlayer` child can't read an
+    /// arbitrary bookmarked folder, only the app group container). Empty/absent
+    /// ⇒ the drop-in `<Recordings>/Filler/` folder is used instead.
+    static let fillerSourceBookmarkKey = "AntennaHeadFillerSourceBookmark"
+
+    /// Audio file types accepted for custom filler.
+    private static let fillerAudioExtensions: Set<String> =
+        ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
 
     /// UDP control port for the filler's own `PCMDistanceGain` instance (level
     /// ramps). Fixed and internal — AntennaHead owns both ends, so unlike
@@ -1145,34 +1155,35 @@ final class SDRController {
         }
     }
 
-    /// Filler tracks in play order. The user's own files (dropped into
-    /// `<Recordings>/Filler/`) when that option is on and the folder is
-    /// non-empty; otherwise the built-in Monitor Beacon.
+    /// Filler tracks in play order. The user's own audio (a picked folder,
+    /// synced into `fillerCacheURL`, or files dropped into `<Recordings>/Filler/`)
+    /// when custom source is on and non-empty; otherwise the built-in Monitor
+    /// Beacon.
     private func fillerTrackList() -> [URL] {
         if fillerUsesCustomSource {
             let custom = customFillerTracks()
             if !custom.isEmpty { return fillerShuffle ? custom.shuffled() : custom }
             LogStore.shared.log(.info, source: "SDRController",
-                                "filler: custom folder empty — using the Monitor Beacon")
+                                "filler: no custom audio found — using the Monitor Beacon")
         }
         return beaconFillerURL.map { [$0] } ?? []
     }
 
-    /// Decodable audio files in `<Recordings>/Filler/` (the folder is created on
-    /// demand by `fillerFolderURL`). The `PCMFilePlayer` child can read the
-    /// shared Recordings container directly (same as `startTasksForRecording`).
+    /// Decodable audio files for the custom filler: the synced cache when a
+    /// source folder is picked, else the drop-in `<Recordings>/Filler/`. Both
+    /// live in the app group container, which the `PCMFilePlayer` child can
+    /// read directly (same as `startTasksForRecording`).
     private func customFillerTracks() -> [URL] {
-        guard let dir = fillerFolderURL else { return [] }
-        let exts: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
+        guard let dir = hasFillerSourceFolder ? fillerCacheURL : fillerFolderURL else { return [] }
         let items = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil)) ?? []
         return items
-            .filter { exts.contains($0.pathExtension.lowercased()) }
+            .filter { Self.fillerAudioExtensions.contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
     /// `<Recordings>/Filler/`, created if absent. `nil` if the shared Recordings
-    /// folder can't be resolved.
+    /// folder can't be resolved. This is the "just drop files here" source.
     var fillerFolderURL: URL? {
         guard let root = SharedRecordingFolder.url else { return nil }
         let dir = root.appendingPathComponent("Filler", isDirectory: true)
@@ -1180,6 +1191,97 @@ final class SDRController {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         return dir
+    }
+
+    // MARK: Custom filler source folder (picked, then synced into the container)
+
+    /// App-group container dir holding copies of the picked source folder's
+    /// audio. Separate from `<Recordings>/Filler/` so a synced folder and
+    /// hand-dropped files never fight over one directory.
+    private var fillerCacheURL: URL? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedRecordingFolder.appGroupIdentifier) else { return nil }
+        let dir = container.appendingPathComponent("FillerCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Whether the user has picked a source folder (vs. using the drop-in one).
+    var hasFillerSourceFolder: Bool {
+        !((((try? sqliteController.appSettingsValue(forKey: Self.fillerSourceBookmarkKey)) ?? nil)) ?? "").isEmpty
+    }
+
+    /// Resolves the stored source-folder bookmark, refreshing it if stale.
+    /// `nil` if none is set or it can no longer be resolved.
+    func fillerSourceFolderURL() -> URL? {
+        guard let b64 = ((try? sqliteController.appSettingsValue(forKey: Self.fillerSourceBookmarkKey)) ?? nil),
+              !b64.isEmpty, let data = Data(base64Encoded: b64) else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                 relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
+        if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                   includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? sqliteController.storeAppSettingsValue(fresh.base64EncodedString(),
+                                                       forKey: Self.fillerSourceBookmarkKey)
+        }
+        return url
+    }
+
+    /// Stores a security-scoped bookmark to `url` and copies its audio into the
+    /// cache. Returns the number of files copied (0 on any failure, logged).
+    @discardableResult
+    func setFillerSourceFolder(_ url: URL) -> Int {
+        guard let data = try? url.bookmarkData(options: .withSecurityScope,
+                                               includingResourceValuesForKeys: nil, relativeTo: nil) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "filler: could not bookmark \(url.path)")
+            return 0
+        }
+        try? sqliteController.storeAppSettingsValue(data.base64EncodedString(),
+                                                   forKey: Self.fillerSourceBookmarkKey)
+        return syncFillerCache()
+    }
+
+    /// Forgets the picked source folder and empties the cache; the drop-in
+    /// `<Recordings>/Filler/` folder takes over.
+    func clearFillerSourceFolder() {
+        try? sqliteController.storeAppSettingsValue("", forKey: Self.fillerSourceBookmarkKey)
+        if let cache = fillerCacheURL {
+            for f in (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
+        LogStore.shared.log(.info, source: "SDRController", "filler: source folder cleared")
+    }
+
+    /// Re-copies audio from the picked source folder into the cache (wipe +
+    /// copy — a filler folder is small and this only runs on user action, not
+    /// on filler start). Returns the number of files copied.
+    @discardableResult
+    func syncFillerCache() -> Int {
+        guard let source = fillerSourceFolderURL(), let cache = fillerCacheURL else { return 0 }
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+
+        for f in (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
+            try? FileManager.default.removeItem(at: f)
+        }
+        let sourceFiles = ((try? FileManager.default.contentsOfDirectory(
+            at: source, includingPropertiesForKeys: nil)) ?? [])
+            .filter { Self.fillerAudioExtensions.contains($0.pathExtension.lowercased()) }
+        var copied = 0
+        for src in sourceFiles {
+            do {
+                try FileManager.default.copyItem(at: src, to: cache.appendingPathComponent(src.lastPathComponent))
+                copied += 1
+            } catch {
+                LogStore.shared.log(.error, source: "SDRController",
+                                    "filler: copy failed for \(src.lastPathComponent): \(error)")
+            }
+        }
+        LogStore.shared.log(.info, source: "SDRController",
+                            "filler cache synced — \(copied) file(s) from \(source.path)")
+        return copied
     }
 
     private func makeFillerPlayerTaskItem(tracks: [URL]) -> TaskItem? {
