@@ -17,6 +17,11 @@ struct NowPlayingView: View {
                                      audioServer: audioServer,
                                      sdrController: sdrController)
                     .padding()
+                if sdrController.spatialAudioEnabled {
+                    Divider()
+                    SpatialPositionView(sdrController: sdrController)
+                        .padding()
+                }
                 Divider()
                 StreamStatusView(audioServer: audioServer)
                     .padding()
@@ -102,6 +107,32 @@ struct PlaybackControlsView: View {
                 try sdrController.startTasksForFrequency(id: id)
             } catch {
                 actionError = "\(error)"
+            }
+        }
+    }
+}
+
+/// Live distance control for the optional `PCMDistanceGain` pipeline stage
+/// (see Configuration → Spatial Audio). Dragging sends a `dist <value>`
+/// update straight to the running stage's control port — no pipeline
+/// restart, no round trip through ControlBooth.
+///
+/// `@Bindable` (not the plain `var` the sibling views use) because this is
+/// the one control here that needs a two-way `Slider` binding into the
+/// `@Observable` controller rather than a one-shot method call.
+struct SpatialPositionView: View {
+    @Bindable var sdrController: SDRController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Spatial Position").font(.headline)
+            HStack {
+                Text("Distance")
+                    .foregroundStyle(.secondary)
+                Slider(value: $sdrController.spatialDistance, in: 0.1...4.0)
+                Text(String(format: "%.2f", sdrController.spatialDistance))
+                    .monospacedDigit()
+                    .frame(width: 44, alignment: .trailing)
             }
         }
     }
