@@ -25,6 +25,7 @@ struct ConfigurationView: View {
     @State private var transcriptionEnabled = false
     @State private var transcriptionLocale = "en-US"
     @State private var transcriptionSavesTranscript = false
+    @State private var spatialAudioEnabled = false
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -100,6 +101,17 @@ struct ConfigurationView: View {
                 Text("Speech-to-Text")
             } footer: {
                 Text("Runs a \u{201C}PCMTranscriber\u{201D} tap on the outgoing audio using Apple\u{2019}s on-device SpeechAnalyzer (requires macOS 26). Recognition results stream as JSON on UDP port \(Int(sdrController.transcriptionUDPPort)) for a caption client; the optional SRT file lands in the shared Recordings folder. Broadcast audio \u{2014} music, weak FM, overlapping speech \u{2014} transcribes unevenly. Language is a BCP-47 code such as \u{201C}en-US\u{201D}; the model downloads once on first use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Spatial audio (distance + direction)", isOn: $spatialAudioEnabled)
+                    .onChange(of: spatialAudioEnabled) { _, _ in saveSpatialAudioSettings() }
+            } header: {
+                Text("Spatial Audio")
+            } footer: {
+                Text("Runs \u{201C}PCMDistanceGain\u{201D} and \u{201C}PCMBinauralPanner\u{201D} taps on the outgoing audio, so the Now Playing view's Distance, Azimuth, and Elevation sliders can move the source in real time. Control messages go to UDP ports \(Int(sdrController.spatialGainControlPort)) and \(Int(sdrController.binauralControlPort)) on this Mac. Direction uses interaural time/level differences, not a measured head-related transfer function \u{2014} it localizes left/right convincingly; elevation is a mild, approximate cue.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -235,6 +247,8 @@ struct ConfigurationView: View {
         transcriptionLocale = storedLocale.isEmpty ? "en-US" : storedLocale
         let saveTranscript = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionSaveFileKey)) ?? nil
         transcriptionSavesTranscript = saveTranscript == "1"
+        let spatialEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.spatialAudioEnabledKey)) ?? nil
+        spatialAudioEnabled = spatialEnabled == "1"
     }
 
     private func saveControlBoothSettings() {
@@ -262,6 +276,11 @@ struct ConfigurationView: View {
             locale.isEmpty ? "en-US" : locale, forKey: SDRController.transcriptionLocaleKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             transcriptionSavesTranscript ? "1" : "0", forKey: SDRController.transcriptionSaveFileKey)
+    }
+
+    private func saveSpatialAudioSettings() {
+        try? SQLiteController.shared.storeAppSettingsValue(
+            spatialAudioEnabled ? "1" : "0", forKey: SDRController.spatialAudioEnabledKey)
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {

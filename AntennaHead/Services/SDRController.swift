@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Network
 import Observation
 import PipelineRunner
 import SharedLogging
@@ -74,6 +75,17 @@ final class SDRController {
     /// "start":…,"end":…}`), for an in-app listener to surface as live captions.
     /// Fixed like `gqrxReceivePort`; not exposed in the Configuration sheet.
     let transcriptionUDPPort: UInt16 = 6023
+    /// UDP port the optional distance-attenuation stage (`PCMDistanceGain`)
+    /// listens on for live position updates from the Now Playing view. Fixed
+    /// like `transcriptionUDPPort`; not exposed in the Configuration sheet.
+    /// AntennaHead owns both ends of this port (it launches the stage and
+    /// sends the updates), so — unlike `controlBoothUDP` — no cross-app port
+    /// coordination is needed.
+    let spatialGainControlPort: UInt16 = 6024
+    /// UDP port the optional direction stage (`PCMBinauralPanner`) listens on
+    /// for live azimuth/elevation updates. Same rationale as
+    /// `spatialGainControlPort`: fixed, internal, no cross-app coordination.
+    let binauralControlPort: UInt16 = 6025
     private var statusListener: RTLSDRStatusListener?
     private var captionListener: TranscriptionCaptionListener?
 
@@ -126,6 +138,78 @@ final class SDRController {
     /// the speech-synth temp file this is a user artifact — left in the
     /// Recordings folder when the pipeline stops, only the reference is cleared.
     private var transcriptFileURL: URL?
+
+    // MARK: Spatial audio (distance + direction)
+
+    /// App-settings key for the optional `PCMDistanceGain` + `PCMBinauralPanner`
+    /// stages — one toggle for the whole spatial-audio feature, same as
+    /// transcription's single enabled flag governs its whole tap. Read fresh
+    /// each time a pipeline is built, edited in Configuration.
+    static let spatialAudioEnabledKey = "AntennaHeadSpatialAudioEnabled"
+
+    /// Whether the distance + direction taps are switched on in Configuration.
+    var spatialAudioEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.spatialAudioEnabledKey)) ?? nil) == "1"
+    }
+
+    /// Current listener-set distance (pad units; 1.0 = reference/full level),
+    /// live-adjustable from the Now Playing view while a pipeline is running.
+    /// Not persisted — like `signalLevel`, this is in-session state, not a
+    /// saved configuration value — so it resets to the reference distance on
+    /// each launch.
+    var spatialDistance: Double = 1.0 {
+        didSet {
+            guard spatialDistance != oldValue else { return }
+            sendSpatialDistanceUpdate(spatialDistance)
+        }
+    }
+
+    /// Current listener-set azimuth (degrees; 0 = front, clockwise-positive —
+    /// same convention as the pad and `PCMBinauralPanner` itself). In-session
+    /// only, like `spatialDistance`.
+    var azimuth: Double = 0 {
+        didSet {
+            guard azimuth != oldValue else { return }
+            sendDirectionUpdate()
+        }
+    }
+
+    /// Current listener-set elevation (degrees; -90...90). In-session only,
+    /// like `spatialDistance`.
+    var elevation: Double = 0 {
+        didSet {
+            guard elevation != oldValue else { return }
+            sendDirectionUpdate()
+        }
+    }
+
+    /// Sends `dist <value>` to the running `PCMDistanceGain` stage's control
+    /// port. Fire-and-forget UDP, same wire format the stage's own doc
+    /// comment describes (`nc -u` can send the identical command by hand):
+    /// harmless if the stage isn't part of the current pipeline, or no
+    /// pipeline is running at all — there's simply no one listening.
+    private func sendSpatialDistanceUpdate(_ distance: Double) {
+        guard let port = NWEndpoint.Port(rawValue: spatialGainControlPort) else { return }
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .udp)
+        connection.start(queue: .main)
+        let message = "dist \(distance)\n"
+        connection.send(content: Data(message.utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    /// Sends `pos <az> <el>` to the running `PCMBinauralPanner` stage's
+    /// control port. Same fire-and-forget UDP pattern as
+    /// `sendSpatialDistanceUpdate` — harmless if nothing is listening.
+    private func sendDirectionUpdate() {
+        guard let port = NWEndpoint.Port(rawValue: binauralControlPort) else { return }
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .udp)
+        connection.start(queue: .main)
+        let message = "pos \(azimuth) \(elevation)\n"
+        connection.send(content: Data(message.utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
 
     /// Timestamp fragment for transcript filenames (sortable, filename-safe).
     private static let transcriptTimestampFormatter: DateFormatter = {
@@ -397,6 +481,8 @@ final class SDRController {
         radioTaskPipelineManager.add(resample)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -446,6 +532,8 @@ final class SDRController {
         radioTaskPipelineManager.add(player)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -530,6 +618,8 @@ final class SDRController {
         radioTaskPipelineManager.add(receiver)
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
@@ -605,6 +695,8 @@ final class SDRController {
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
     }
@@ -689,6 +781,8 @@ final class SDRController {
         radioTaskPipelineManager.add(synth)
         radioTaskPipelineManager.add(resample)
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying)
     }
@@ -1172,6 +1266,8 @@ final class SDRController {
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -1392,6 +1488,74 @@ final class SDRController {
         LogStore.shared.log(.info, source: "SDRController",
                             "speech-to-text tap on (\(locale)) — captions → udp:\(transcriptionUDPPort)"
                             + (transcriptFileURL.map { ", transcript → \($0.lastPathComponent)" } ?? ""))
+    }
+
+    /// Adds the optional `PCMDistanceGain` stage immediately before the
+    /// terminal `PCMUDPSender` (same placement rule as
+    /// `addTranscriberStageIfEnabled`, and typically called right alongside
+    /// it). No-op unless spatial audio is enabled in Configuration and the
+    /// helper binary is present — a missing helper never affects the audio
+    /// the listener hears. Launched with the listener's current
+    /// `spatialDistance` and this controller's fixed `spatialGainControlPort`,
+    /// so a later drag on the Now Playing view reaches this exact running
+    /// instance without restarting the pipeline.
+    private func addSpatialGainStageIfEnabled() {
+        guard spatialAudioEnabled else { return }
+
+        let path = helperPath("PCMDistanceGain")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMDistanceGain helper missing at \(path) — spatial audio disabled for this tuning")
+            return
+        }
+
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDistanceGain")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--distance"); item.addArgument("\(spatialDistance)")
+        item.addArgument("--control-port"); item.addArgument(Int(spatialGainControlPort))
+        item.addArgument("--exit-with-parent")
+        radioTaskPipelineManager.add(item)
+
+        LogStore.shared.log(.info, source: "SDRController",
+                            "spatial distance gain on (distance \(spatialDistance)) — control udp:\(spatialGainControlPort)")
+    }
+
+    /// Adds the optional `PCMBinauralPanner` stage immediately after
+    /// `PCMDistanceGain` (distance, then direction — independent cues, same
+    /// reasoning as their ordering everywhere else) and before the terminal
+    /// `PCMUDPSender`. Gated on the same `spatialAudioEnabled` setting as the
+    /// distance stage — one toggle for the whole spatial-audio feature.
+    /// No-op unless enabled and the helper binary is present. Launched with
+    /// the listener's current `azimuth`/`elevation` and this controller's
+    /// fixed `binauralControlPort`, so a later drag on the Now Playing view
+    /// reaches this exact running instance without restarting the pipeline.
+    ///
+    /// `PCMBinauralPanner` downmixes whatever channel count it's given to
+    /// mono internally and always emits true 2-channel binaural output, so
+    /// it can sit on the normalized 2 ch stream like every other late-stage
+    /// tap regardless of whether the source was mono-upmixed or true stereo.
+    private func addBinauralPannerStageIfEnabled() {
+        guard spatialAudioEnabled else { return }
+
+        let path = helperPath("PCMBinauralPanner")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMBinauralPanner helper missing at \(path) — spatial audio disabled for this tuning")
+            return
+        }
+
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMBinauralPanner")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--azimuth"); item.addArgument("\(azimuth)")
+        item.addArgument("--elevation"); item.addArgument("\(elevation)")
+        item.addArgument("--control-port"); item.addArgument(Int(binauralControlPort))
+        item.addArgument("--exit-with-parent")
+        radioTaskPipelineManager.add(item)
+
+        LogStore.shared.log(.info, source: "SDRController",
+                            "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°) — control udp:\(binauralControlPort)")
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`
