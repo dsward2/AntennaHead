@@ -839,6 +839,12 @@ final class AntennaHeadHTTPServer {
         case APIEndpoint.controlBoothStop:
             return apiControlBoothStopResponse()
 
+        case APIEndpoint.spatialAudio:
+            return apiSpatialAudioResponse()
+
+        case APIEndpoint.setSpatialAudio:
+            return apiSetSpatialAudioResponse(body: request.body)
+
         default:
             return nil
         }
@@ -2061,11 +2067,44 @@ final class AntennaHeadHTTPServer {
     /// whichever of `PCMDistanceGain`/`PCMBinauralPanner` are actually
     /// running, exactly as the native sliders would.
     @MainActor private func updateSpatialAudio(fromBody body: Data) {
-        guard let sdr = sdrController else { return }
         let o = jsonObject(fromBody: body)
-        if let azimuth = Double(o.string("azimuth")) { sdr.azimuth = azimuth }
-        if let elevation = Double(o.string("elevation")) { sdr.elevation = elevation }
-        if let distance = Double(o.string("distance")) { sdr.spatialDistance = distance }
+        applySpatialAudio(azimuth: Double(o.string("azimuth")),
+                          elevation: Double(o.string("elevation")),
+                          distance: Double(o.string("distance")))
+    }
+
+    /// Shared by the web UI's ad hoc JSON route above and the typed
+    /// `AntennaHeadAPI` route below — both just need "set whichever of
+    /// these three are present", they differ only in how the request body
+    /// gets parsed into that shape. `nil` means "leave this alone", not
+    /// "set it to zero" (see `SetSpatialAudioRequest`'s doc comment).
+    @MainActor private func applySpatialAudio(azimuth: Double?, elevation: Double?, distance: Double?) {
+        guard let sdr = sdrController else { return }
+        if let azimuth { sdr.azimuth = azimuth }
+        if let elevation { sdr.elevation = elevation }
+        if let distance { sdr.spatialDistance = distance }
+    }
+
+    /// The JSON-API equivalent of the web UI's spatial-audio sliders'
+    /// initial-render values — see `spatialAudioControlsHTML()`.
+    @MainActor private func apiSpatialAudioResponse() -> HTTPResponse {
+        guard let sdr = sdrController else {
+            return apiEncode(SpatialAudioStatus(enabled: false, azimuth: 0, elevation: 0, distance: 1.0))
+        }
+        return apiEncode(SpatialAudioStatus(enabled: sdr.spatialAudioEnabled, azimuth: sdr.azimuth,
+                                            elevation: sdr.elevation, distance: sdr.spatialDistance))
+    }
+
+    /// The JSON-API equivalent of the web UI's `/api/spatial-audio/update`.
+    /// Responds with the resulting `SpatialAudioStatus` (rather than an
+    /// empty 200) so a client can update its UI from one round trip,
+    /// matching `apiTuneResponse`'s same reasoning.
+    @MainActor private func apiSetSpatialAudioResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(SetSpatialAudioRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        applySpatialAudio(azimuth: req.azimuth, elevation: req.elevation, distance: req.distance)
+        return apiSpatialAudioResponse()
     }
 
     /// JSON consumed by `nowplaying.html`'s `updateStatusDisplay()` for live
