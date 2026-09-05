@@ -183,29 +183,31 @@ final class SDRController {
         }
     }
 
-    /// Sends `dist <value>` to the running `PCMDistanceGain` stage's control
-    /// port. Fire-and-forget UDP, same wire format the stage's own doc
-    /// comment describes (`nc -u` can send the identical command by hand):
-    /// harmless if the stage isn't part of the current pipeline, or no
-    /// pipeline is running at all — there's simply no one listening.
+    /// Sends `dist <value>` to *both* `PCMDistanceGain` and
+    /// `PCMBinauralPanner`'s control ports — as of PipelineHelpers'
+    /// air-absorption move, both stages need the current distance for their
+    /// own distinct purposes (loudness falloff vs. air absorption), so a
+    /// single logical "distance" now has two listeners instead of one.
+    /// Fire-and-forget UDP, same wire format both stages' own doc comments
+    /// describe: harmless if either stage isn't part of the current
+    /// pipeline, or no pipeline is running at all.
     private func sendSpatialDistanceUpdate(_ distance: Double) {
-        guard let port = NWEndpoint.Port(rawValue: spatialGainControlPort) else { return }
-        let connection = NWConnection(host: "127.0.0.1", port: port, using: .udp)
-        connection.start(queue: .main)
         let message = "dist \(distance)\n"
-        connection.send(content: Data(message.utf8), completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        sendUDPMessage(message, toPort: spatialGainControlPort)
+        sendUDPMessage(message, toPort: binauralControlPort)
     }
 
     /// Sends `pos <az> <el>` to the running `PCMBinauralPanner` stage's
     /// control port. Same fire-and-forget UDP pattern as
     /// `sendSpatialDistanceUpdate` — harmless if nothing is listening.
     private func sendDirectionUpdate() {
-        guard let port = NWEndpoint.Port(rawValue: binauralControlPort) else { return }
-        let connection = NWConnection(host: "127.0.0.1", port: port, using: .udp)
+        sendUDPMessage("pos \(azimuth) \(elevation)\n", toPort: binauralControlPort)
+    }
+
+    private func sendUDPMessage(_ message: String, toPort port: UInt16) {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return }
+        let connection = NWConnection(host: "127.0.0.1", port: endpointPort, using: .udp)
         connection.start(queue: .main)
-        let message = "pos \(azimuth) \(elevation)\n"
         connection.send(content: Data(message.utf8), completion: .contentProcessed { _ in
             connection.cancel()
         })
@@ -1550,12 +1552,16 @@ final class SDRController {
         item.addArgument("--channels"); item.addArgument(Self.outputChannels)
         item.addArgument("--azimuth"); item.addArgument("\(azimuth)")
         item.addArgument("--elevation"); item.addArgument("\(elevation)")
+        // Air absorption lives here now, not in PCMDistanceGain (see that
+        // stage's header comment) — this stage needs the current distance
+        // too, alongside PCMDistanceGain's own copy of the same value.
+        item.addArgument("--distance"); item.addArgument("\(spatialDistance)")
         item.addArgument("--control-port"); item.addArgument(Int(binauralControlPort))
         item.addArgument("--exit-with-parent")
         radioTaskPipelineManager.add(item)
 
         LogStore.shared.log(.info, source: "SDRController",
-                            "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°) — control udp:\(binauralControlPort)")
+                            "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°, distance \(spatialDistance)) — control udp:\(binauralControlPort)")
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`
