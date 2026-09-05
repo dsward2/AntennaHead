@@ -12,6 +12,11 @@
             <div id="now-playing-details">
             %%NOW_PLAYING_DETAILS%%
             </div>
+            <!-- Outside #now-playing-details on purpose: that div's innerHTML is
+                 fully replaced by updateStatusDisplay() on every status poll
+                 (see antennahead.js), which would wipe these sliders every couple
+                 of seconds if they lived inside it. -->
+            %%SPATIAL_AUDIO_CONTROLS%%
             <br>
             %%OPEN_AUDIO_PLAYER_PAGE_BUTTON%%
         </section>

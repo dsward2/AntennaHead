@@ -717,7 +717,12 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "nowplaying.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["NOW_PLAYING_NAME": htmlText(page.name),
                                       "NOW_PLAYING_DETAILS": page.details,
+                                      "SPATIAL_AUDIO_CONTROLS": spatialAudioControlsHTML(),
                                       "OPEN_AUDIO_PLAYER_PAGE_BUTTON": Self.openAudioPlayerButtonHTML])
+
+        case "/api/spatial-audio/update":
+            updateSpatialAudio(fromBody: request.body)
+            return okResponse()
 
         case "/nowplayingstatus.html":
             return HTTPResponse(status: 200, reason: "OK",
@@ -2001,6 +2006,66 @@ final class AntennaHeadHTTPServer {
         d += row("bias-t", "\(f.biasTFlag)")
         d += row("device", activeDeviceLabel(stored: f.usbDeviceString))
         return (f.stationName, d)
+    }
+
+    /// `%%SPATIAL_AUDIO_CONTROLS%%` for nowplaying.html — sliders for the
+    /// `PCMDistanceGain`/`PCMBinauralPanner` taps' live azimuth, elevation,
+    /// and distance, mirroring `SpatialPositionView` (in NowPlayingView.swift)
+    /// exactly, since that SwiftUI view is never actually presented anywhere
+    /// in this app — `ContentView`'s real Now Playing surface is this web
+    /// page, so this fragment is the one a listener can actually reach.
+    ///
+    /// Deliberately outside `#now-playing-details` in the template (see the
+    /// comment there): that div is fully replaced by JS on every status
+    /// poll, which would otherwise wipe these sliders every couple of
+    /// seconds. Rendered once per page load — initial values reflect
+    /// whatever `sdrController`'s in-memory state is at that moment, and are
+    /// never resynced afterward, matching the SwiftUI sliders' own
+    /// optimistic-UI behavior (a slider's own last drag wins; nothing yanks
+    /// it back mid-interaction).
+    ///
+    /// `oninput`, not a `<script>` tag: this fragment is injected via
+    /// `innerHTML` (see `frequencyListenButtonClicked`'s comment on the same
+    /// constraint), so an inline `<script>` block would never actually run —
+    /// the handler function itself lives in antennahead.js instead.
+    @MainActor private func spatialAudioControlsHTML() -> String {
+        guard let sdr = sdrController, sdr.spatialAudioEnabled, sdr.taskMode != .stopped else {
+            return ""
+        }
+        func slider(_ id: String, _ label: String, _ value: Double, _ min: Double, _ max: Double,
+                    _ step: Double, _ displayValue: String) -> String {
+            """
+            <div style="margin-top: 12px;">
+              <label for="\(id)">\(label): <span id="\(id)-value">\(displayValue)</span></label><br>
+              <input type="range" id="\(id)" min="\(min)" max="\(max)" step="\(step)" value="\(value)"
+                     style="width: 100%;" oninput="spatialAudioSliderChanged('\(id)')">
+            </div>
+            """
+        }
+        var html = "<div id=\"spatial-audio-controls\">"
+        html += "<h4>Spatial Position</h4>"
+        html += slider("spatial-azimuth", "Azimuth", sdr.azimuth, -180, 180, 1,
+                       String(format: "%.0f\u{00B0}", sdr.azimuth))
+        html += slider("spatial-elevation", "Elevation", sdr.elevation, -90, 90, 1,
+                       String(format: "%.0f\u{00B0}", sdr.elevation))
+        html += slider("spatial-distance", "Distance", sdr.spatialDistance, 0.1, 4, 0.1,
+                       String(format: "%.2f", sdr.spatialDistance))
+        html += "</div>"
+        return html
+    }
+
+    /// Handles `/api/spatial-audio/update`'s JSON body (`{"azimuth":…,
+    /// "elevation":…, "distance":…}`, any subset). Setting these properties
+    /// on `sdrController` is the whole job — their own `didSet` (see
+    /// SDRController.swift) sends the matching UDP control message(s) to
+    /// whichever of `PCMDistanceGain`/`PCMBinauralPanner` are actually
+    /// running, exactly as the native sliders would.
+    @MainActor private func updateSpatialAudio(fromBody body: Data) {
+        guard let sdr = sdrController else { return }
+        let o = jsonObject(fromBody: body)
+        if let azimuth = Double(o.string("azimuth")) { sdr.azimuth = azimuth }
+        if let elevation = Double(o.string("elevation")) { sdr.elevation = elevation }
+        if let distance = Double(o.string("distance")) { sdr.spatialDistance = distance }
     }
 
     /// JSON consumed by `nowplaying.html`'s `updateStatusDisplay()` for live
