@@ -2442,10 +2442,15 @@ final class AntennaHeadHTTPServer {
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         case "devices.html":
             // Tile icons, in the same inlined-SVG style as the top-level menu.
-            // "Select Audio Input" and "ControlBooth" reuse the icons those
-            // items carried when they lived on the top-level hub; Gqrx and
-            // Text-to-Speech get their own matching line-art icons.
-            dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "devices")
+            // "ControlBooth" reuses the icon it carried on the old top-level hub
+            // (its onclick target is the same in both places); Gqrx and
+            // Text-to-Speech get their own matching line-art icons. "Select
+            // Audio Input" uses its own copy of the hub's phono-jack glyph
+            // (`audioinput.svg`) rather than sharing `devices.svg`, because that
+            // file bakes in `onclick=loadContent('devices.html')` — correct on
+            // the hub, but a same-page no-op here where the tile must open
+            // `deviceaudioinput.html`.
+            dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "audioinput")
             dict["GQRX_ICON"]            = loadSVG(named: "gqrx")
             dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
             // The ControlBooth remote-control page is reached from a tile on the
