@@ -33,6 +33,10 @@ struct ConfigurationView: View {
     @State private var fillerShuffle = false
     @State private var fillerGapSeconds = 0
     @State private var fillerSyncMessage = ""
+    @State private var fillerAnnounceEnabled = false
+    @State private var fillerAnnounceText = SDRController.defaultFillerAnnounceText
+    @State private var fillerAnnounceVoiceID = ""
+    @State private var fillerAnnouncePeriodSeconds = 60
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -191,6 +195,38 @@ struct ConfigurationView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle("Speak a periodic announcement over the filler", isOn: $fillerAnnounceEnabled)
+                    .onChange(of: fillerAnnounceEnabled) { _, _ in saveFillerAnnounceSettings() }
+                TextField("Announcement", text: $fillerAnnounceText,
+                          prompt: Text(SDRController.defaultFillerAnnounceText))
+                    .onSubmit { saveFillerAnnounceSettings() }
+                    .disabled(!fillerAnnounceEnabled)
+                Picker("Voice", selection: $fillerAnnounceVoiceID) {
+                    Text("System Default").tag("")
+                    ForEach(installedVoices, id: \.identifier) { voice in
+                        Text(voiceLabel(voice)).tag(voice.identifier)
+                    }
+                }
+                .onChange(of: fillerAnnounceVoiceID) { _, _ in saveFillerAnnounceSettings() }
+                .disabled(!fillerAnnounceEnabled)
+                Stepper("Repeat every \(fillerAnnouncePeriodSeconds) s",
+                        value: $fillerAnnouncePeriodSeconds, in: 15...600, step: 5)
+                    .onChange(of: fillerAnnouncePeriodSeconds) { _, _ in saveFillerAnnounceSettings() }
+                    .disabled(!fillerAnnounceEnabled)
+                HStack {
+                    Button("Preview Voice") { previewFillerAnnounceVoice() }
+                        .disabled(!fillerAnnounceEnabled)
+                    Spacer()
+                }
+            } header: {
+                Text("Filler Announcements")
+            } footer: {
+                Text("While the filler is playing, a synthesized voice repeats this text, mixed over the filler with the bed ducked underneath it (\u{201C}PCMMixer\u{201D} on UDP port \(Int(sdrController.fillerMixerControlPort)); the spoken audio arrives on port \(Int(sdrController.fillerAnnouncePCMPort))). The interval is measured from the end of each spoken pass, so it drifts a second or two. No effect while a station, device, or other source is playing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("ControlBooth") {
                 Toggle("Enable remote control with ControlBooth app", isOn: $controlBoothEnabled)
                     .onChange(of: controlBoothEnabled) { _, _ in
@@ -331,6 +367,18 @@ struct ConfigurationView: View {
         fillerUsesCustomSource = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerUseCustomKey)) ?? nil)) == "1"
         fillerShuffle = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerShuffleKey)) ?? nil)) == "1"
         fillerGapSeconds = Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerGapKey)) ?? nil)) ?? "") ?? 0
+        // Filler announcement defaults OFF.
+        fillerAnnounceEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnounceEnabledKey)) ?? nil)) == "1"
+        let storedAnnounceText = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnounceTextKey)) ?? nil)) ?? ""
+        fillerAnnounceText = storedAnnounceText.isEmpty ? SDRController.defaultFillerAnnounceText : storedAnnounceText
+        let storedAnnounceVoice = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnounceVoiceKey)) ?? nil
+        if let storedAnnounceVoice, !storedAnnounceVoice.isEmpty,
+           AVSpeechSynthesisVoice(identifier: storedAnnounceVoice) != nil {
+            fillerAnnounceVoiceID = storedAnnounceVoice
+        } else {
+            fillerAnnounceVoiceID = ""
+        }
+        fillerAnnouncePeriodSeconds = min(max(Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnouncePeriodKey)) ?? nil)) ?? "") ?? 60, 15), 600)
     }
 
     private func saveControlBoothSettings() {
@@ -374,6 +422,27 @@ struct ConfigurationView: View {
         try? s.storeAppSettingsValue(fillerShuffle ? "1" : "0", forKey: SDRController.fillerShuffleKey)
         try? s.storeAppSettingsValue("\(fillerGapSeconds)", forKey: SDRController.fillerGapKey)
         sdrController.fillerSettingsDidChange()
+    }
+
+    private func saveFillerAnnounceSettings() {
+        let s = SQLiteController.shared
+        let text = fillerAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { fillerAnnounceText = SDRController.defaultFillerAnnounceText }
+        try? s.storeAppSettingsValue(fillerAnnounceEnabled ? "1" : "0", forKey: SDRController.fillerAnnounceEnabledKey)
+        try? s.storeAppSettingsValue(text, forKey: SDRController.fillerAnnounceTextKey)
+        try? s.storeAppSettingsValue(fillerAnnounceVoiceID, forKey: SDRController.fillerAnnounceVoiceKey)
+        try? s.storeAppSettingsValue("\(fillerAnnouncePeriodSeconds)", forKey: SDRController.fillerAnnouncePeriodKey)
+        sdrController.fillerSettingsDidChange()
+    }
+
+    private func previewFillerAnnounceVoice() {
+        previewSynth.stopSpeaking(at: .immediate)
+        let trimmed = fillerAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let utterance = AVSpeechUtterance(string: trimmed.isEmpty ? SDRController.defaultFillerAnnounceText : trimmed)
+        if !fillerAnnounceVoiceID.isEmpty {
+            utterance.voice = AVSpeechSynthesisVoice(identifier: fillerAnnounceVoiceID)
+        }
+        previewSynth.speak(utterance)
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
