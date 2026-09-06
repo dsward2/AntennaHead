@@ -288,6 +288,17 @@ final class SDRController {
     /// ⇒ the drop-in `<Recordings>/Filler/` folder is used instead.
     static let fillerSourceBookmarkKey = "AntennaHeadFillerSourceBookmark"
 
+    /// Periodic spoken announcement mixed over the filler. **Default OFF.**
+    /// `startFillerAnnouncementFeeder()` loops `PCMSpeechSynth → sox → PCMUDPSender`
+    /// into the filler `PCMMixer`'s sidechain input, which ducks the bed under it.
+    static let fillerAnnounceEnabledKey = "AntennaHeadFillerAnnounceEnabled"
+    static let fillerAnnounceTextKey    = "AntennaHeadFillerAnnounceText"
+    static let fillerAnnounceVoiceKey   = "AntennaHeadFillerAnnounceVoiceIdentifier"
+    static let fillerAnnouncePeriodKey  = "AntennaHeadFillerAnnouncePeriodSeconds"
+
+    /// Spoken while the filler plays when no announcement text has been set.
+    static let defaultFillerAnnounceText = "Welcome to AntennaHead software defined radio"
+
     /// Audio file types accepted for custom filler.
     private static let fillerAudioExtensions: Set<String> =
         ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
@@ -297,6 +308,27 @@ final class SDRController {
     /// `controlBoothUDP` there's no cross-app coordination. Next after
     /// `binauralControlPort` (6025).
     let fillerControlPort: UInt16 = 6026
+    /// UDP port the filler-announcement feeder's `PCMUDPSender` targets; the
+    /// filler `PCMMixer` reads it as input 1 (the ducking sidechain). Fixed,
+    /// internal, loopback.
+    let fillerAnnouncePCMPort: UInt16 = 6027
+    /// UDP control port for the filler `PCMMixer` (duck parameters / `gain`).
+    /// Fixed, internal, loopback.
+    let fillerMixerControlPort: UInt16 = 6028
+
+    /// Filler-mixer ducking: the bed falls to `fillerDuckAttenuation` while the
+    /// announcement's peak is above `fillerDuckThreshold` (fraction of full
+    /// scale), with a one-pole attack/release and a hold so gaps between words
+    /// don't pump. Passed straight to `PCMMixer --duck-*`.
+    private static let fillerDuckThreshold = 0.02
+    private static let fillerDuckAttenuation = 0.25
+    private static let fillerDuckAttackMs = 40
+    private static let fillerDuckReleaseMs = 400
+    private static let fillerDuckHoldMs = 250
+    /// The announcement clip is ~3 s; `PCMSpeechSynth --gap` is measured from
+    /// end-of-clip, so the feeder uses `period − this` to land near the asked
+    /// interval.
+    private static let fillerAnnounceClipEstimateSeconds = 3
 
     /// Distance handed to the filler's `PCMDistanceGain` for "effectively
     /// silent" (gain ≈ 0.02, ~−34 dB with `--rolloff 1 --min-gain 0`), i.e.
@@ -334,6 +366,30 @@ final class SDRController {
         Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerGapKey)) ?? nil) ?? "") ?? 0
     }
 
+    /// Whether a periodic spoken announcement is mixed over the filler.
+    /// **Default OFF** — only an explicit "1" enables it.
+    var fillerAnnounceEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceEnabledKey)) ?? nil) == "1"
+    }
+    /// Text spoken over the filler; falls back to `defaultFillerAnnounceText`.
+    var fillerAnnounceText: String {
+        let stored = (((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceTextKey)) ?? nil) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stored.isEmpty ? Self.defaultFillerAnnounceText : stored
+    }
+    /// The configured announcement voice, but only if still installed —
+    /// `PCMSpeechSynth` aborts on an unknown identifier. `nil` ⇒ system default.
+    var fillerAnnounceVoiceIdentifier: String? {
+        guard let id = ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceVoiceKey)) ?? nil),
+              !id.isEmpty else { return nil }
+        return AVSpeechSynthesisVoice(identifier: id) != nil ? id : nil
+    }
+    /// Announcement interval in seconds. Clamped 15…600, default 60.
+    var fillerAnnouncePeriodSeconds: Int {
+        let v = Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnouncePeriodKey)) ?? nil) ?? "") ?? 60
+        return min(max(v, 15), 600)
+    }
+
     /// The built-in filler clip: a top-level bundle resource, already 48 kHz /
     /// 2 ch / S16LE (the LiveAudioServer contract), so `PCMFilePlayer` loops it
     /// with no resampling. Readable by the sandboxed app and by the helper
@@ -345,6 +401,11 @@ final class SDRController {
     /// Dedicated manager for the filler pipeline, kept separate from
     /// `radioTaskPipelineManager` so the two lifecycles never entangle.
     let fillerPipelineManager = TaskPipelineManager()
+    /// Feeds the periodic spoken announcement into the filler mixer's sidechain.
+    /// Its own manager so it can be (re)built or stopped without touching the
+    /// filler chain — and it never feeds LiveAudioServer directly, so it can't
+    /// race the program pipeline's `PCMUDPSender`.
+    let fillerAnnouncementManager = TaskPipelineManager()
     /// Bumped every time the filler (re)starts or is torn down, so a stale
     /// deferred task (a fade ramp, a scheduled SIGTERM) can tell it has been
     /// superseded and bail.
@@ -442,6 +503,9 @@ final class SDRController {
             pending.resume()
         }
         fillerPipelineManager.onLog = { source, message in
+            LogStore.shared.log(.info, source: source, message)
+        }
+        fillerAnnouncementManager.onLog = { source, message in
             LogStore.shared.log(.info, source: source, message)
         }
         startStatusListener()
@@ -1084,11 +1148,12 @@ final class SDRController {
         activeChannelCount = 0
 
         if enterIdle, fillerEnabled {
-            startFillerPipeline()   // sets taskMode = .filler
+            startFillerPipeline()   // sets taskMode = .filler (rebuilds the announcement feeder too)
         } else {
             fillerGeneration &+= 1
             for p in fadingFillerProcesses where p.isRunning { kill(p.processIdentifier, SIGTERM) }
             fadingFillerProcesses = []
+            fillerAnnouncementManager.terminate()
             fillerPipelineManager.terminate()
         }
     }
@@ -1107,6 +1172,7 @@ final class SDRController {
     /// method ramps it up to unity over `fillerFadeMs`.
     func startFillerPipeline() {
         fillerPipelineManager.terminate()
+        fillerAnnouncementManager.terminate()
         fillerGeneration &+= 1
         guard fillerEnabled else { return }
 
@@ -1126,8 +1192,14 @@ final class SDRController {
             taskMode = .stopped
             return
         }
+        // When the announcement is on, a PCMMixer stage (announcement on its
+        // sidechain input, ducking the bed) sits between the player and the
+        // fade/sender stages. If its helper is missing we drop the mixer and
+        // the feeder rather than fail the whole filler.
+        let mixer = fillerAnnounceEnabled ? makeFillerMixerTaskItem() : nil
         let gain = fade ? makeFillerGainTaskItem(startAttenuated: true) : nil
         fillerPipelineManager.add(player)
+        if let mixer { fillerPipelineManager.add(mixer) }
         if let gain { fillerPipelineManager.add(gain) }
         fillerPipelineManager.add(sender)
 
@@ -1136,8 +1208,10 @@ final class SDRController {
             lastError = nil
             LogStore.shared.log(.info, source: "SDRController",
                                 "filler started — \(tracks.count) track(s) → udp:\(udpInputPort)"
-                                + (fade ? ", fading in \(fillerFadeMs) ms" : ""))
+                                + (fade ? ", fading in \(fillerFadeMs) ms" : "")
+                                + (mixer != nil ? ", announcement every ~\(fillerAnnouncePeriodSeconds)s" : ""))
             if fade { rampFillerGain(fromGain: Self.fillerSilentGain, toGain: 1.0, ms: fillerFadeMs) }
+            if mixer != nil { startFillerAnnouncementFeeder(generation: fillerGeneration) }
         } catch {
             lastError = error
             taskMode = .stopped
@@ -1333,6 +1407,98 @@ final class SDRController {
         return item
     }
 
+    /// The filler `PCMMixer` stage: input 0 (stdin) is the filler bed from
+    /// `PCMFilePlayer`; input 1 is the periodic announcement arriving on
+    /// `fillerAnnouncePCMPort`, which drives sidechain ducking of the bed.
+    /// Returns `nil` (announcement disabled for this run) if the helper binary
+    /// is missing — the bed is never affected.
+    private func makeFillerMixerTaskItem() -> TaskItem? {
+        let path = helperPath("PCMMixer")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMMixer helper missing at \(path) — filler announcement disabled this run")
+            return nil
+        }
+        let item = fillerPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMMixer")
+        item.addArgument("--input"); item.addArgument("stdin")
+        item.addArgument("--input"); item.addArgument("udp:\(fillerAnnouncePCMPort)")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--control-port"); item.addArgument(Int(fillerMixerControlPort))
+        item.addArgument("--duck-input"); item.addArgument(1)
+        item.addArgument("--duck-threshold"); item.addArgument(Self.fillerDuckThreshold)
+        item.addArgument("--duck-attenuation"); item.addArgument(Self.fillerDuckAttenuation)
+        item.addArgument("--duck-attack-ms"); item.addArgument(Self.fillerDuckAttackMs)
+        item.addArgument("--duck-release-ms"); item.addArgument(Self.fillerDuckReleaseMs)
+        item.addArgument("--duck-hold-ms"); item.addArgument(Self.fillerDuckHoldMs)
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    /// Starts the `PCMSpeechSynth → sox → PCMUDPSender` feeder that loops the
+    /// announcement into the filler mixer's sidechain. Deferred briefly so the
+    /// mixer has bound `fillerAnnouncePCMPort` before the feeder's
+    /// `PCMUDPSender` sends its first datagram (a send to an unbound port makes
+    /// `PCMUDPSender` exit). Bails if the filler was superseded meanwhile.
+    private func startFillerAnnouncementFeeder(generation: Int) {
+        fillerAnnouncementManager.terminate()
+
+        let synthPath = helperPath("PCMSpeechSynth")
+        guard FileManager.default.isExecutableFile(atPath: synthPath) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMSpeechSynth helper missing at \(synthPath) — filler announcement skipped")
+            return
+        }
+        let text = fillerAnnounceText
+        let voice = fillerAnnounceVoiceIdentifier
+        let period = fillerAnnouncePeriodSeconds
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, self.fillerGeneration == generation, self.taskMode == .filler else { return }
+            self.launchFillerAnnouncementFeeder(text: text, voiceIdentifier: voice,
+                                                periodSeconds: period, synthPath: synthPath)
+        }
+    }
+
+    private func launchFillerAnnouncementFeeder(text: String, voiceIdentifier: String?,
+                                               periodSeconds: Int, synthPath: String) {
+        let synth = fillerAnnouncementManager.makeTaskItem(pathToExecutable: synthPath,
+                                                          functionName: "PCMSpeechSynth")
+        synth.addArgument("--text"); synth.addArgument(text)
+        synth.addArgument("--rate"); synth.addArgument(Self.speechSynthSampleRate)
+        if let voiceIdentifier {
+            synth.addArgument("--voice"); synth.addArgument(voiceIdentifier)
+        }
+        synth.addArgument("--repeat")
+        synth.addArgument("--gap")
+        synth.addArgument(max(1, periodSeconds - Self.fillerAnnounceClipEstimateSeconds))
+        synth.addArgument("--exit-with-parent")
+
+        guard let resample = makeResampleTaskItem(inputRate: Self.speechSynthSampleRate,
+                                                  inputChannels: 1,
+                                                  audioOutputFilter: "vol 1",
+                                                  manager: fillerAnnouncementManager) else { return }
+
+        let sender = fillerAnnouncementManager.makeTaskItem(pathToExecutable: helperPath("PCMUDPSender"),
+                                                           functionName: "PCMUDPSender")
+        sender.addArgument("--port"); sender.addArgument(Int(fillerAnnouncePCMPort))
+        sender.addArgument("--exit-with-parent")
+
+        fillerAnnouncementManager.add(synth)
+        fillerAnnouncementManager.add(resample)
+        fillerAnnouncementManager.add(sender)
+        do {
+            try fillerAnnouncementManager.start()
+            LogStore.shared.log(.info, source: "SDRController",
+                                "filler announcement feeder started — \u{201C}\(text)\u{201D} "
+                                + "every ~\(periodSeconds)s → udp:\(fillerAnnouncePCMPort)")
+        } catch {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "filler announcement feeder failed: \(error)")
+        }
+    }
+
     /// Ramps the filler's `PCMDistanceGain` between two gain values over `ms`,
     /// interpolating gain linearly and sending `dist (1/gain)` each step.
     /// Fire-and-forget UDP; harmless if no gain stage is running. Bails as soon
@@ -1381,6 +1547,11 @@ final class SDRController {
     /// Otherwise (fade off, or stale leftovers) it's an outright stop.
     private func stopFillerForNewSource() {
         fillerGeneration &+= 1
+
+        // Stop the announcement feeder outright — it only feeds the filler
+        // mixer, which is about to be torn down or faded; its sidechain simply
+        // goes quiet.
+        fillerAnnouncementManager.terminate()
 
         // Whether a filler is running is read from the manager, not `taskMode`
         // — some builders set their own mode before calling into this preamble.
@@ -1833,10 +2004,13 @@ final class SDRController {
     /// LiveAudioServer UDP-input contract) and apply the station's audio filter.
     /// `inputChannels` is 2 when fed by stereodemux, else 1 (mono is upmixed to
     /// dual-mono on output). Replaces LocalRadio's AudioMonitor2 resampling step.
-    private func makeResampleTaskItem(inputRate: Int, inputChannels: Int, audioOutputFilter: String) -> TaskItem? {
+    /// `manager` defaults to `radioTaskPipelineManager`; the filler-announcement
+    /// feeder passes its own so the stage is torn down with that pipeline.
+    private func makeResampleTaskItem(inputRate: Int, inputChannels: Int, audioOutputFilter: String,
+                                     manager: TaskPipelineManager? = nil) -> TaskItem? {
         let item: TaskItem
         do {
-            item = try radioTaskPipelineManager.makeSoxTaskItem()
+            item = try (manager ?? radioTaskPipelineManager).makeSoxTaskItem()
         } catch {
             lastError = error
             LogStore.shared.log(.error, source: "SDRController", "\(error)")

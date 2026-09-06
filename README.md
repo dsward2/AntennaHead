@@ -60,8 +60,10 @@ SPM dependencies are fetched automatically on first build. No `brew` or manual t
 | ControlBooth audio input | UDP | 6019 |
 | Speech-to-text caption feed | UDP | 6023 |
 | Filler fade control | UDP | 6026 |
+| Filler announcement audio | UDP | 6027 |
+| Filler mixer control | UDP | 6028 |
 
-Most ports are configurable from the **Configuration** tab → **Change Configuration…** sheet. The speech-to-text caption feed (6023) and the filler fade control (6026) are fixed internal constants — loopback only, both ends owned by AntennaHead — and are not exposed in that sheet. Changes restart the streaming servers.
+Most ports are configurable from the **Configuration** tab → **Change Configuration…** sheet. The speech-to-text caption feed (6023), the filler fade control (6026), and the filler announcement audio/mixer-control pair (6027 / 6028) are fixed internal constants — loopback only, both ends owned by AntennaHead — and are not exposed in that sheet. Changes restart the streaming servers.
 
 ## Features
 
