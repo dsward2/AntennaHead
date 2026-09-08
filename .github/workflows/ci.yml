@@ -95,6 +95,9 @@ jobs:
         working-directory: AntennaHead
         run: xcodebuild -resolvePackageDependencies -project AntennaHead.xcodeproj -scheme AntennaHead
 
+      # The rtl_fm_localradio target links arm64-only vendored libraries
+      # (libusb, librtlsdr.xcframework/macos-arm64), so pin the build to arm64 —
+      # a universal (arm64 + x86_64) build fails to link the x86_64 slice.
       - name: Build
         working-directory: AntennaHead
         run: |
@@ -103,4 +106,5 @@ jobs:
             -scheme AntennaHead \
             -configuration Debug \
             -destination 'generic/platform=macOS' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
