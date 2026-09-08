@@ -295,9 +295,13 @@ final class SDRController {
     static let fillerAnnounceTextKey    = "AntennaHeadFillerAnnounceText"
     static let fillerAnnounceVoiceKey   = "AntennaHeadFillerAnnounceVoiceIdentifier"
     static let fillerAnnouncePeriodKey  = "AntennaHeadFillerAnnouncePeriodSeconds"
+    /// Treat the announcement text as SSML (`<speak>…</speak>`) — `PCMSpeechSynth --ssml`.
+    static let fillerAnnounceSSMLKey    = "AntennaHeadFillerAnnounceSSML"
+    /// Speaking rate 0…1 — `PCMSpeechSynth --speech-rate`. Absent ⇒ system default.
+    static let fillerAnnounceSpeechRateKey = "AntennaHeadFillerAnnounceSpeechRate"
 
     /// Spoken while the filler plays when no announcement text has been set.
-    static let defaultFillerAnnounceText = "Welcome to AntennaHead software defined radio"
+    static let defaultFillerAnnounceText = "Welcome to AntennaHead. Software defined radio"
 
     /// Audio file types accepted for custom filler.
     private static let fillerAudioExtensions: Set<String> =
@@ -388,6 +392,21 @@ final class SDRController {
     var fillerAnnouncePeriodSeconds: Int {
         let v = Int(((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnouncePeriodKey)) ?? nil) ?? "") ?? 60
         return min(max(v, 15), 600)
+    }
+    /// Whether the announcement text is SSML markup (`<speak>…</speak>`), passed
+    /// to `PCMSpeechSynth` as `--ssml`. **Default OFF.** Only the modern voices
+    /// honor the markup — a classic `com.apple.speech.synthesis.voice.*` voice
+    /// reads the tags aloud, and unparseable SSML renders no audio.
+    var fillerAnnounceSSML: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceSSMLKey)) ?? nil) == "1"
+    }
+    /// Speaking rate for the announcement, 0…1, passed as `--speech-rate`.
+    /// `nil` (key absent or unparseable) ⇒ omit the flag so `PCMSpeechSynth`
+    /// uses the system default rate.
+    var fillerAnnounceSpeechRate: Double? {
+        guard let raw = ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceSpeechRateKey)) ?? nil),
+              let value = Double(raw) else { return nil }
+        return min(max(value, 0), 1)
     }
 
     /// The built-in filler clip: a top-level bundle resource, already 48 kHz /
@@ -1452,23 +1471,32 @@ final class SDRController {
         let text = fillerAnnounceText
         let voice = fillerAnnounceVoiceIdentifier
         let period = fillerAnnouncePeriodSeconds
+        let ssml = fillerAnnounceSSML
+        let speechRate = fillerAnnounceSpeechRate
 
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard let self, self.fillerGeneration == generation, self.taskMode == .filler else { return }
             self.launchFillerAnnouncementFeeder(text: text, voiceIdentifier: voice,
-                                                periodSeconds: period, synthPath: synthPath)
+                                                periodSeconds: period, ssml: ssml,
+                                                speechRate: speechRate, synthPath: synthPath)
         }
     }
 
     private func launchFillerAnnouncementFeeder(text: String, voiceIdentifier: String?,
-                                               periodSeconds: Int, synthPath: String) {
+                                               periodSeconds: Int, ssml: Bool,
+                                               speechRate: Double?, synthPath: String) {
         let synth = fillerAnnouncementManager.makeTaskItem(pathToExecutable: synthPath,
                                                           functionName: "PCMSpeechSynth")
         synth.addArgument("--text"); synth.addArgument(text)
         synth.addArgument("--rate"); synth.addArgument(Self.speechSynthSampleRate)
         if let voiceIdentifier {
             synth.addArgument("--voice"); synth.addArgument(voiceIdentifier)
+        }
+        if ssml { synth.addArgument("--ssml") }
+        if let speechRate {
+            synth.addArgument("--speech-rate")
+            synth.addArgument(String(format: "%.3f", speechRate))
         }
         synth.addArgument("--repeat")
         synth.addArgument("--gap")
@@ -1492,6 +1520,8 @@ final class SDRController {
             try fillerAnnouncementManager.start()
             LogStore.shared.log(.info, source: "SDRController",
                                 "filler announcement feeder started — \u{201C}\(text)\u{201D} "
+                                + (ssml ? "(SSML) " : "")
+                                + (speechRate.map { "rate \(String(format: "%.2f", $0)) " } ?? "")
                                 + "every ~\(periodSeconds)s → udp:\(fillerAnnouncePCMPort)")
         } catch {
             LogStore.shared.log(.error, source: "SDRController",

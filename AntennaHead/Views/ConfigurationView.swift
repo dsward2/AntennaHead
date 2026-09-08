@@ -37,6 +37,8 @@ struct ConfigurationView: View {
     @State private var fillerAnnounceText = SDRController.defaultFillerAnnounceText
     @State private var fillerAnnounceVoiceID = ""
     @State private var fillerAnnouncePeriodSeconds = 60
+    @State private var fillerAnnounceSSML = false
+    @State private var fillerAnnounceSpeechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -202,6 +204,9 @@ struct ConfigurationView: View {
                           prompt: Text(SDRController.defaultFillerAnnounceText))
                     .onSubmit { saveFillerAnnounceSettings() }
                     .disabled(!fillerAnnounceEnabled)
+                Toggle("Text is SSML markup (\u{201C}<speak>\u{2026}</speak>\u{201D})", isOn: $fillerAnnounceSSML)
+                    .onChange(of: fillerAnnounceSSML) { _, _ in saveFillerAnnounceSettings() }
+                    .disabled(!fillerAnnounceEnabled)
                 Picker("Voice", selection: $fillerAnnounceVoiceID) {
                     Text("System Default").tag("")
                     ForEach(installedVoices, id: \.identifier) { voice in
@@ -209,6 +214,16 @@ struct ConfigurationView: View {
                     }
                 }
                 .onChange(of: fillerAnnounceVoiceID) { _, _ in saveFillerAnnounceSettings() }
+                .disabled(!fillerAnnounceEnabled)
+                HStack {
+                    Text("Speaking rate")
+                    Slider(value: $fillerAnnounceSpeechRate, in: 0...1) { editing in
+                        if !editing { saveFillerAnnounceSettings() }
+                    }
+                    Text(String(format: "%.2f", fillerAnnounceSpeechRate))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
                 .disabled(!fillerAnnounceEnabled)
                 Stepper("Repeat every \(fillerAnnouncePeriodSeconds) s",
                         value: $fillerAnnouncePeriodSeconds, in: 15...600, step: 5)
@@ -222,7 +237,7 @@ struct ConfigurationView: View {
             } header: {
                 Text("Filler Announcements")
             } footer: {
-                Text("While the filler is playing, a synthesized voice repeats this text, mixed over the filler with the bed ducked underneath it (\u{201C}PCMMixer\u{201D} on UDP port \(Int(sdrController.fillerMixerControlPort)); the spoken audio arrives on port \(Int(sdrController.fillerAnnouncePCMPort))). The interval is measured from the end of each spoken pass, so it drifts a second or two. No effect while a station, device, or other source is playing.")
+                Text("While the filler is playing, a synthesized voice repeats this text, mixed over the filler with the bed ducked underneath it (\u{201C}PCMMixer\u{201D} on UDP port \(Int(sdrController.fillerMixerControlPort)); the spoken audio arrives on port \(Int(sdrController.fillerAnnouncePCMPort))). The interval is measured from the end of each spoken pass, so it drifts a second or two. No effect while a station, device, or other source is playing. Enable SSML to write \u{201C}<speak>\u{2026}</speak>\u{201D} prosody tags \u{2014} only the modern voices honor them; a classic voice reads the tags aloud.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -379,6 +394,13 @@ struct ConfigurationView: View {
             fillerAnnounceVoiceID = ""
         }
         fillerAnnouncePeriodSeconds = min(max(Int((((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnouncePeriodKey)) ?? nil)) ?? "") ?? 60, 15), 600)
+        fillerAnnounceSSML = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnounceSSMLKey)) ?? nil)) == "1"
+        if let storedRate = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerAnnounceSpeechRateKey)) ?? nil)),
+           let rate = Double(storedRate) {
+            fillerAnnounceSpeechRate = min(max(rate, 0), 1)
+        } else {
+            fillerAnnounceSpeechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
+        }
     }
 
     private func saveControlBoothSettings() {
@@ -432,16 +454,25 @@ struct ConfigurationView: View {
         try? s.storeAppSettingsValue(text, forKey: SDRController.fillerAnnounceTextKey)
         try? s.storeAppSettingsValue(fillerAnnounceVoiceID, forKey: SDRController.fillerAnnounceVoiceKey)
         try? s.storeAppSettingsValue("\(fillerAnnouncePeriodSeconds)", forKey: SDRController.fillerAnnouncePeriodKey)
+        try? s.storeAppSettingsValue(fillerAnnounceSSML ? "1" : "0", forKey: SDRController.fillerAnnounceSSMLKey)
+        try? s.storeAppSettingsValue(String(format: "%.3f", fillerAnnounceSpeechRate), forKey: SDRController.fillerAnnounceSpeechRateKey)
         sdrController.fillerSettingsDidChange()
     }
 
     private func previewFillerAnnounceVoice() {
         previewSynth.stopSpeaking(at: .immediate)
         let trimmed = fillerAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let utterance = AVSpeechUtterance(string: trimmed.isEmpty ? SDRController.defaultFillerAnnounceText : trimmed)
+        let text = trimmed.isEmpty ? SDRController.defaultFillerAnnounceText : trimmed
+        let utterance: AVSpeechUtterance
+        if fillerAnnounceSSML, let ssml = AVSpeechUtterance(ssmlRepresentation: text) {
+            utterance = ssml
+        } else {
+            utterance = AVSpeechUtterance(string: text)
+        }
         if !fillerAnnounceVoiceID.isEmpty {
             utterance.voice = AVSpeechSynthesisVoice(identifier: fillerAnnounceVoiceID)
         }
+        utterance.rate = Float(fillerAnnounceSpeechRate)
         previewSynth.speak(utterance)
     }
 
