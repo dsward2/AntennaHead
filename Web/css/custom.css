@@ -827,6 +827,62 @@ input[type="button"].button-primary:focus {
     background-color: var(--ah-primary-bg-hover);
     border-color: var(--ah-primary-bg-hover); }
 
+
+/* ============================================================
+   Tap / click acknowledgement.
+
+   index.html's loadContent() replaces #content_frame's innerHTML
+   on the same tick that most buttons are pressed, so the pressed
+   control is gone before a plain :active / transition highlight
+   can paint — which is why a tap can feel like nothing happened
+   until audio starts a couple of seconds later. The delegated
+   pointerdown handler in js/antennahead.js (initTapFeedback)
+   drives the two classes below:
+     .ah-tap-flash  — added to the pressed control; only visible
+                      when it outlives the tap (toggles, tuner
+                      digits, form pages that don't navigate).
+     .ah-tap-ripple — a <span> dropped on <body> at the pointer
+                      point; <body> is never re-rendered, so this
+                      always shows. pointer-events:none so it can
+                      never intercept the real click; it self-
+                      removes on animationend.
+   Opt out via the Settings › Feedback toggle
+   (localStorage["ahTapFeedback"] === "0").
+   ============================================================ */
+@keyframes ah-tap-flash-kf {
+    0%   { filter: brightness(1.4); }
+    100% { filter: brightness(1); }
+}
+.ah-tap-flash {
+    animation: ah-tap-flash-kf 240ms ease-out;
+}
+
+.ah-tap-ripple {
+    position: fixed;
+    z-index: 2147483647;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;   /* centre on the (left,top) point set in JS */
+    border-radius: 50%;
+    pointer-events: none;
+    background: var(--ah-node-stroke, #0a84ff);
+    opacity: 0.45;
+    animation: ah-tap-ripple-kf 340ms ease-out forwards;
+}
+@keyframes ah-tap-ripple-kf {
+    0%   { transform: scale(0.35); opacity: 0.45; }
+    100% { transform: scale(4);    opacity: 0;    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ah-tap-flash  { animation-duration: 120ms; }
+    .ah-tap-ripple { animation: ah-tap-ripple-fade 200ms ease-out forwards; }
+    @keyframes ah-tap-ripple-fade {
+        0%   { transform: scale(1); opacity: 0.4; }
+        100% { transform: scale(1); opacity: 0;   }
+    }
+}
+
 th, td { border-bottom-color: var(--ah-border); }
 code { background: var(--ah-panel-bg); border-color: var(--ah-border); }
 .docs-section { border-top-color: var(--ah-border); }

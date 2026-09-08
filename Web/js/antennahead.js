@@ -1826,3 +1826,147 @@ function textToSpeechListenButtonClicked(form)
   window.top.postMessage("startaudio", "*");
 }
 
+
+/* ==================================================================
+   Tap / click acknowledgement.
+
+   Pressing a button here often does nothing visible for a second or
+   two — until the audio player spins up or a new program is
+   announced — because index.html's loadContent() swaps
+   #content_frame's innerHTML on the same tick, destroying the
+   pressed control before a CSS :active highlight can paint.
+
+   initTapFeedback() installs ONE delegated pointerdown listener on
+   document (capture phase, so it runs before the element's own
+   onclick and before any content swap). On a press over a button-ish
+   control it:
+     - adds .ah-tap-flash to that control (see css/custom.css) — only
+       seen when the control outlives the tap (toggles, tuner digits,
+       settings forms), which is fine;
+     - drops a .ah-tap-ripple <span> on <body> at the pointer point.
+       <body> is never re-rendered, so the ripple always shows; it is
+       pointer-events:none and self-removes on animationend.
+
+   Purely visual (no sound / no haptics, per request). Honours
+   prefers-reduced-motion via CSS, and a Settings toggle stored in
+   localStorage["ahTapFeedback"] (=== "0" disables; default on).
+   Never calls preventDefault/stopPropagation, so it cannot alter
+   how any existing handler behaves.
+   ================================================================== */
+
+// Controls that should acknowledge a press. [onclick] catches the
+// inline-handler <a>/<input>/<button> elements the fragments use, plus
+// any future ones, without having to enumerate them here.
+var AH_TAP_SELECTOR = '.button, button, input[type="submit"], input[type="button"], input[type="reset"], .tuner-digit, [onclick]';
+
+function ahTapFeedbackEnabled()
+{
+    try { return window.localStorage.getItem("ahTapFeedback") !== "0"; }
+    catch (e) { return true; }   // private mode / storage disabled → default on
+}
+
+function ahSpawnTapRipple(x, y)
+{
+    var host = document.body || document.documentElement;
+    if (!host) { return; }
+
+    var ripple = document.createElement("span");
+    ripple.className = "ah-tap-ripple";
+    ripple.style.left = x + "px";
+    ripple.style.top = y + "px";
+    host.appendChild(ripple);
+
+    var remove = function ()
+    {
+        if (ripple && ripple.parentNode) { ripple.parentNode.removeChild(ripple); }
+    };
+    ripple.addEventListener("animationend", remove);
+    setTimeout(remove, 700);   // belt-and-braces if animationend is missed
+}
+
+function ahFlashTapControl(el)
+{
+    if (!el || !el.classList) { return; }
+    el.classList.remove("ah-tap-flash");
+    void el.offsetWidth;            // reflow so the animation restarts on a fast repeat tap
+    el.classList.add("ah-tap-flash");
+    setTimeout(function () {
+        if (el && el.classList) { el.classList.remove("ah-tap-flash"); }
+    }, 400);
+}
+
+function ahHandleTapFeedback(targetEl, x, y)
+{
+    if (!ahTapFeedbackEnabled()) { return; }
+
+    var control = (targetEl && targetEl.closest) ? targetEl.closest(AH_TAP_SELECTOR) : null;
+    if (!control) { return; }
+
+    // Coordinates come from the pointer/touch/mouse event; fall back to
+    // the control's centre for keyboard-activated presses.
+    if (typeof x !== "number" || isNaN(x) || (x === 0 && y === 0))
+    {
+        var rect = control.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+    }
+
+    ahSpawnTapRipple(x, y);
+    ahFlashTapControl(control);
+}
+
+function initTapFeedback()
+{
+    if (window.ahTapFeedbackInstalled) { return; }
+    window.ahTapFeedbackInstalled = true;
+
+    if ("PointerEvent" in window)
+    {
+        document.addEventListener("pointerdown", function (event) {
+            ahHandleTapFeedback(event.target, event.clientX, event.clientY);
+        }, true);
+    }
+    else
+    {
+        document.addEventListener("touchstart", function (event) {
+            var t = event.changedTouches && event.changedTouches[0];
+            ahHandleTapFeedback(event.target, t ? t.clientX : 0, t ? t.clientY : 0);
+        }, true);
+        document.addEventListener("mousedown", function (event) {
+            ahHandleTapFeedback(event.target, event.clientX, event.clientY);
+        }, true);
+    }
+}
+
+// Called from index.html's bodyElementLoaded() once the shell is up.
+if (document.readyState === "loading")
+{
+    document.addEventListener("DOMContentLoaded", initTapFeedback);
+}
+else
+{
+    initTapFeedback();
+}
+
+
+/* ---- Settings › Feedback toggle -------------------------------------
+   settings.html carries <input type="checkbox" id="tap_feedback_toggle">.
+   Fragments are injected via innerHTML so their inline <script> never
+   runs; loadContent() calls initFeedbackSettings() after each injection
+   (mirrors initTunerDigitKeyboard()), and it no-ops when the checkbox
+   isn't on the current fragment. The checkbox's onchange calls
+   setTapFeedbackEnabled(). */
+
+function setTapFeedbackEnabled(enabled)
+{
+    try { window.localStorage.setItem("ahTapFeedback", enabled ? "1" : "0"); }
+    catch (e) { /* storage unavailable — setting just won't persist */ }
+}
+
+function initFeedbackSettings()
+{
+    var toggle = document.getElementById("tap_feedback_toggle");
+    if (!toggle) { return; }
+    toggle.checked = ahTapFeedbackEnabled();
+}
+
