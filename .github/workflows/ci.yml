@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: xcodebuild build
+    runs-on: macos-26
+
+    steps:
+      - name: Check out AntennaHead
+        uses: actions/checkout@v4
+        with:
+          path: AntennaHead
+
+      # AntennaHead.xcodeproj references ../PipelineHelpers, ../LiveAudioServer,
+      # ../AntennaHeadAPI and ../SharedLogging as local Swift packages, and the
+      # "Copy RTL Files" phase copies prebuilt binaries from
+      # ../antennahead-librtlsdr/rtl-tools, so those sibling repos have to sit
+      # next to this one on disk. PipelineHelpers, AntennaHeadAPI and
+      # SharedLogging are private: add a fine-grained PAT with "Contents: read"
+      # on dsward2/PipelineHelpers, dsward2/AntennaHeadAPI and
+      # dsward2/SharedLogging as the repo secret CI_SIBLING_TOKEN.
+      - name: Check out PipelineHelpers (local package)
+        uses: actions/checkout@v4
+        with:
+          repository: dsward2/PipelineHelpers
+          ref: main
+          path: PipelineHelpers
+          token: ${{ secrets.CI_SIBLING_TOKEN || github.token }}
+
+      - name: Check out LiveAudioServer (local package)
+        uses: actions/checkout@v4
+        with:
+          repository: dsward2/LiveAudioServer
+          ref: main
+          path: LiveAudioServer
+          token: ${{ secrets.CI_SIBLING_TOKEN || github.token }}
+
+      - name: Check out AntennaHeadAPI (local package)
+        uses: actions/checkout@v4
+        with:
+          repository: dsward2/AntennaHeadAPI
+          ref: main
+          path: AntennaHeadAPI
+          token: ${{ secrets.CI_SIBLING_TOKEN || github.token }}
+
+      - name: Check out SharedLogging (local package)
+        uses: actions/checkout@v4
+        with:
+          repository: dsward2/SharedLogging
+          ref: main
+          path: SharedLogging
+          token: ${{ secrets.CI_SIBLING_TOKEN || github.token }}
+
+      - name: Check out antennahead-librtlsdr (prebuilt rtl-tools)
+        uses: actions/checkout@v4
+        with:
+          repository: dsward2/antennahead-librtlsdr
+          ref: main
+          path: antennahead-librtlsdr
+          token: ${{ secrets.CI_SIBLING_TOKEN || github.token }}
+
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      # The rtl_fm_localradio helper target compiles against libusb with
+      # HEADER_SEARCH_PATHS / library paths hard-coded to MacPorts' /opt/local
+      # locations. The runner has Homebrew, not MacPorts, so install libusb and
+      # bridge it into the paths the project expects.
+      - name: Set up libusb for rtl_fm_localradio
+        run: |
+          brew list libusb >/dev/null 2>&1 || brew install libusb
+          prefix="$(brew --prefix libusb)"
+          sudo mkdir -p /opt/local/include/libusb-1.0 /opt/local/lib
+          sudo ln -sf "$prefix/include/libusb-1.0/libusb.h" /opt/local/include/libusb-1.0/libusb.h
+          sudo ln -sf "$prefix/lib/libusb-1.0.0.dylib" /opt/local/lib/libusb-1.0.0.dylib
+          sudo ln -sf /opt/local/lib/libusb-1.0.0.dylib /opt/local/lib/libusb-1.0.dylib
+          ls -l /opt/local/include/libusb-1.0/libusb.h /opt/local/lib/libusb-1.0*.dylib
+
+      - name: Resolve package dependencies
+        working-directory: AntennaHead
+        run: xcodebuild -resolvePackageDependencies -project AntennaHead.xcodeproj -scheme AntennaHead
+
+      # The rtl_fm_localradio target links arm64-only vendored libraries
+      # (libusb, librtlsdr.xcframework/macos-arm64), so pin the build to arm64 —
+      # a universal (arm64 + x86_64) build fails to link the x86_64 slice.
+      - name: Build
+        working-directory: AntennaHead
+        run: |
+          xcodebuild build \
+            -project AntennaHead.xcodeproj \
+            -scheme AntennaHead \
+            -configuration Debug \
+            -destination 'generic/platform=macOS' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO
