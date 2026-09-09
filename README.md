@@ -2,6 +2,8 @@
 
 A macOS app for software-defined radio (SDR) streaming. It tunes an RTL-SDR USB device, demodulates FM/AM/HD Radio signals, and streams audio to a web browser via a built-in HTTP/HTTPS server powered by [LiveAudioServer](https://github.com/dsward2/LiveAudioServer). The web UI (based on LocalRadio) runs on any device on the local network.
 
+**Project site & interactive web-UI demo:** <https://antennahead-app.github.io>
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
