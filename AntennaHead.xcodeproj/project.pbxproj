@@ -26,7 +26,6 @@
 		0EA033B430204B1800F3BE37 /* LiveAudioServerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B330204B1800F3BE37 /* LiveAudioServerCore */; };
 		0EA033B630204B1800F3BE37 /* LiveAudioServer in Frameworks */ = {isa = PBXBuildFile; productRef = 0EA033B530204B1800F3BE37 /* LiveAudioServer */; };
 		0EA8DC4B2FD666B300D79877 /* Web in Resources */ = {isa = PBXBuildFile; fileRef = 0EA8DC4A2FD666B300D79877 /* Web */; };
-		D1F111E0BEACDA7A00000002 /* Monitor_Beacon.wav in Resources */ = {isa = PBXBuildFile; fileRef = D1F111E0BEACDA7A00000001 /* Monitor_Beacon.wav */; };
 		0EAEB6782FED566300BA711A /* sox in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEB6772FED562F00BA711A /* sox */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8B82FF3BA2800BA711A /* stereodemux in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEB8B72FF3BA2700BA711A /* stereodemux */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8BA2FF3BAFE00BA711A /* libliquid.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -72,6 +71,7 @@
 		D1AF7E5D000000000000000C /* PCMDistanceGain in Copy Helper Files */ = {isa = PBXBuildFile; productRef = D1AF7E5D000000000000000A /* PCMDistanceGain */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D1AF7E5E000000000000000B /* PCMBinauralPanner in Frameworks */ = {isa = PBXBuildFile; productRef = D1AF7E5E000000000000000A /* PCMBinauralPanner */; };
 		D1AF7E5E000000000000000C /* PCMBinauralPanner in Copy Helper Files */ = {isa = PBXBuildFile; productRef = D1AF7E5E000000000000000A /* PCMBinauralPanner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D1F111E0BEACDA7A00000002 /* Monitor_Beacon.wav in Resources */ = {isa = PBXBuildFile; fileRef = D1F111E0BEACDA7A00000001 /* Monitor_Beacon.wav */; };
 		E86EBCDD413546D7853FB8EB /* PCMFilePlayer in Copy Helper Files */ = {isa = PBXBuildFile; productRef = DDA4BB40418C4C01B2B770DB /* PCMFilePlayer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -176,7 +176,6 @@
 		0E966DF7303C1BE6004CF465 /* rtl_eeprom */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = rtl_eeprom; path = "../antennahead-librtlsdr/rtl-tools/rtl_eeprom"; sourceTree = "<group>"; };
 		0EA488A3300DD6D70030FD73 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		0EA8DC4A2FD666B300D79877 /* Web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
-		D1F111E0BEACDA7A00000001 /* Monitor_Beacon.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = Monitor_Beacon.wav; sourceTree = "<group>"; };
 		0EAEB6772FED562F00BA711A /* sox */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = sox; sourceTree = "<group>"; };
 		0EAEB8B72FF3BA2700BA711A /* stereodemux */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = stereodemux; sourceTree = "<group>"; };
 		0EAEB8B92FF3BAFE00BA711A /* libliquid.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libliquid.dylib; sourceTree = "<group>"; };
@@ -199,6 +198,7 @@
 		AA00000CAA00000CAA00000C /* rtl_fm_localradio.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = rtl_fm_localradio.m; sourceTree = "<group>"; };
 		AA00000DAA00000DAA00000D /* convenience.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = convenience.c; sourceTree = "<group>"; };
 		AA000017AA000017AA000017 /* rtl_convenience.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = rtl_convenience.c; sourceTree = "<group>"; };
+		D1F111E0BEACDA7A00000001 /* Monitor_Beacon.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = Monitor_Beacon.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -987,7 +987,7 @@
 					"$(SRCROOT)/rtl_fm_localradio_src",
 					"/opt/local/include/libusb-1.0",
 				);
-				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -1000,8 +1000,6 @@
 					"-F$(SRCROOT)/librtlsdr.xcframework/macos-arm64",
 					"-framework",
 					librtlsdr,
-					"-rpath",
-					"@executable_path/../Frameworks",
 				);
 				PRODUCT_NAME = rtl_fm_localradio;
 				SDKROOT = macosx;
@@ -1028,7 +1026,7 @@
 					"$(SRCROOT)/rtl_fm_localradio_src",
 					"/opt/local/include/libusb-1.0",
 				);
-				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -1041,8 +1039,6 @@
 					"-F$(SRCROOT)/librtlsdr.xcframework/macos-arm64",
 					"-framework",
 					librtlsdr,
-					"-rpath",
-					"@executable_path/../Frameworks",
 				);
 				PRODUCT_NAME = rtl_fm_localradio;
 				SDKROOT = macosx;
