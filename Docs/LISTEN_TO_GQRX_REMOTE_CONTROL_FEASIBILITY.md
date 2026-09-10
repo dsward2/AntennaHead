@@ -275,7 +275,7 @@ gap — AntennaHead could show a Gqrx input/output picker. As of 2026‑09‑09:
 no maintainer review, author‑targeted at the next release. Not guaranteed to
 land.
 
-### 8b. Bookmarks — drafted (branch `gqrx-rc-bookmarks`), not yet submitted
+### 8b. Bookmarks — submitted as [gqrx-sdr/gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)
 
 **Goal:** AntennaHead downloads the Gqrx bookmark list once, displays it, and can
 ask Gqrx to jump to any entry with one tap.
@@ -313,7 +313,7 @@ PR design notes:
   `remote_control.cpp` + `remote-control.txt` + one test — roughly **0.5–1 day**,
   since the model and the "apply" path already exist.
 
-### 8c. Filter shape — drafted (branch `gqrx-rc-filter-shape`), not yet submitted
+### 8c. Filter shape — submitted as [gqrx-sdr/gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)
 
 **Yes — a filter‑shape command is feasible and small.** The DSP support is
 already there: `receiver::set_filter(low, high, filter_shape)` takes the shape,
@@ -415,10 +415,12 @@ reviewable on its own, touching only the remote‑control layer (`remote_control
 Qt signal wiring in `mainwindow.cpp`. None touches the DSP/GNU Radio flowgraph.
 Order below is by ascending size / review risk.
 
-> **Status (2026‑09‑09):** PR 1 and PR 2 are **drafted and building** in the
-> local checkout — one commit each, branched off fresh `upstream/master`, Qt5
-> Debug build green, not yet pushed. Branch names and commit hashes are in §11.
-> PR 3 is the already‑open #1446.
+> **Status (2026‑09‑09):** all three are open upstream —
+> **PR 1 = [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)**,
+> **PR 2 = [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (both just
+> filed, `MERGEABLE`, no review yet; one commit each off `upstream/master`
+> `08f84f5`, Qt5 build green), **PR 3 = the older [gqrx#1446](https://github.com/gqrx-sdr/gqrx/pull/1446)**.
+> Branch names and commit hashes are in §11.
 
 ### PR 1 — `L/l FILTER_SHAPE` remote level  *(new, ~0.5 day)*
 
@@ -430,7 +432,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `receiver::set_filter(low, high, filter_shape)` already takes the shape; `receiver::filter_shape` enum already defined; `DockRxOpt::setCurrentFilterShape` / `currentFilterShape`. |
 | **Tests / docs** | Gqrx has no RC unit‑test harness (no `test/`, no `add_test`) — manual `nc` steps in the PR body, same as #1446. One block added to `remote-control.txt`. |
 | **Review‑risk notes** | Shape is a single app‑wide setting in Gqrx (not per‑mode) and persists across demod switches — stated in the doc block. Accepts ints and `SOFT`/`NORMAL`/`SHARP`. |
-| **Status** | **Drafted** — branch `gqrx-rc-filter-shape`, commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`; Qt5 Debug build green. Not pushed. |
+| **Status** | **Open — [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-filter-shape` = commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`; Qt5 Debug build green. Filed 2026‑09‑09; not yet runtime‑tested beyond compilation. |
 
 ### PR 2 — bookmark download & recall  *(new, ~0.5–1 day)*
 
@@ -442,7 +444,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `Bookmarks` singleton, `BookmarkInfo` (`frequency·name·modulation·bandwidth·tags[]`), `MainWindow::onBookmarkActivated`. |
 | **Tests / docs** | No RC unit‑test harness in Gqrx — manual `nc` steps in the PR body. New `remote-control.txt` block incl. the delimiter/sanitisation contract. |
 | **Review‑risk notes** | Index staleness if the list changes between calls — that's why `\set_bookmark_freq` ships alongside. Read + apply only; `\add_bookmark`/`\remove_bookmark` explicitly out of scope. `bandwidth` is narrowed `qint64`→`int` to match the existing dock signal. |
-| **Status** | **Drafted** — branch `gqrx-rc-bookmarks`, commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`; Qt5 Debug build green. Not pushed. |
+| **Status** | **Open — [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-bookmarks` = commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`; Qt5 Debug build green. Filed 2026‑09‑09; not yet runtime‑tested beyond compilation. |
 
 ### PR 3 — input/output device control — **#1446**  *(open, by Douglas Ward)*
 
@@ -485,7 +487,7 @@ temporary build AntennaHead is developed against.
 | | |
 |---|---|
 | Remotes | `origin` → `github.com/dsward2/gqrx`, `upstream` → `github.com/gqrx-sdr/gqrx` — correct topology for PRs. |
-| Branches | `gqrx-remote-control-device-managment` = **#1446** (`57f5ae4`, off `d657e66`) · **`gqrx-rc-filter-shape`** = §8c (`4c4be36`, +70/−2) · **`gqrx-rc-bookmarks`** = §8b (`889e801`, +182) — the last two each one commit off `upstream/master` `08f84f5`, not pushed. `master` still tracks the stale Feb `upstream/master`. |
+| Branches | `gqrx-remote-control-device-managment` = **#1446** (`57f5ae4`, off `d657e66`) · **`gqrx-rc-filter-shape`** = **#1463** (`4c4be36`, +70/−2) · **`gqrx-rc-bookmarks`** = **#1464** (`889e801`, +182) — the last two each one commit off `upstream/master` `08f84f5`, pushed to `origin` and open upstream. `master` still tracks the stale Feb `upstream/master`. |
 | Currency | `git fetch upstream` done — `upstream/master` now at `08f84f5` (`v2.6.1`+…; the local `master` ref is still the Feb `v2.17.7-17-g57f5ae4` and is behind, but the two new branches are off the fresh `upstream/master`, so it doesn't matter). Re‑`fetch` again before pushing, in case upstream moved. |
 | Toolchain | MacPorts at `/opt/local`: `cmake` 3.31, **Qt 5.15.18**, GNU Radio **3.8.5**, boost 1.76. Older SDR stack, fine for RC‑protocol work. |
 | Build dir | The original `gqrx/build/` was configured for the pre‑move path and is gone (trashed). Current working build dir is **`gqrx/build-fs/`** (`cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=/opt/local ..`); `build-fs/src/gqrx` compiles and **runs** (arm64, linker ad‑hoc signed). Not branch‑specific — `make` there rebuilds whatever is checked out. |
@@ -555,12 +557,11 @@ Proceed, in phases:
    new mechanism; everything else is a known pattern here. Ship **Option B**
    (frequency, mode + width, RF/AF gain, squelch, signal meter). Fast‑follow
    with mute / Gqrx‑record / RDS text.
-2. **Submit the three Gqrx PRs** as broken out in §10. Filter shape and
-   bookmarks are **already drafted and building locally** (branches
-   `gqrx-rc-filter-shape` / `gqrx-rc-bookmarks`) — remaining work is a manual
-   `nc` pass against a running Gqrx, then `git push` + `gh pr create`. Push
-   filter shape first (smallest, most obviously in‑scope). Rebase #1446 onto
-   current `upstream/master` and shepherd it.
+2. **Shepherd the three Gqrx PRs** (§10). Filter shape ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463))
+   and bookmarks ([#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)) are
+   **filed** and `MERGEABLE`; do the manual `nc` pass against a running Gqrx and
+   respond to review. Rebase [#1446](https://github.com/gqrx-sdr/gqrx/pull/1446)
+   onto current `upstream/master` and shepherd it too.
 3. **Wire the matching AntennaHead panels**, each gated on its runtime probe
    (§9): the shape selector on `FILTER_SHAPE` appearing in `l ?`; the device
    picker on `\get_input_device_list`; the bookmarks panel on `\get_bookmarks`.
