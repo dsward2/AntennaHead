@@ -432,7 +432,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `receiver::set_filter(low, high, filter_shape)` already takes the shape; `receiver::filter_shape` enum already defined; `DockRxOpt::setCurrentFilterShape` / `currentFilterShape`. |
 | **Tests / docs** | Gqrx has no RC unit‑test harness (no `test/`, no `add_test`) — manual `nc` steps in the PR body, same as #1446. One block added to `remote-control.txt`. |
 | **Review‑risk notes** | Shape is a single app‑wide setting in Gqrx (not per‑mode) and persists across demod switches — stated in the doc block. Accepts ints and `SOFT`/`NORMAL`/`SHARP`. |
-| **Status** | **Open — [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-filter-shape` = commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build (Qt5 offscreen, no SDR): `l ?`/`L ?` list `FILTER_SHAPE`; `l FILTER_SHAPE`=`1` default; `L FILTER_SHAPE 2`/`soft`/`normal` → `RPRT 0` with correct readback; `L FILTER_SHAPE 5` → `RPRT 1`; `m` still two lines. |
+| **Status** | **Open — [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-filter-shape` = commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build (Qt5 offscreen, no SDR): `l ?`/`L ?` list `FILTER_SHAPE`; `l FILTER_SHAPE`=`1` default; `L FILTER_SHAPE 2`/`soft`/`normal` → `RPRT 0` with correct readback; `L FILTER_SHAPE 5` → `RPRT 1`; `m` still two lines. Full transcript posted as a [PR comment](https://github.com/gqrx-sdr/gqrx/pull/1463#issuecomment-5611595188). |
 
 ### PR 2 — bookmark download & recall  *(new, ~0.5–1 day)*
 
@@ -444,7 +444,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `Bookmarks` singleton, `BookmarkInfo` (`frequency·name·modulation·bandwidth·tags[]`), `MainWindow::onBookmarkActivated`. |
 | **Tests / docs** | No RC unit‑test harness in Gqrx — manual `nc` steps in the PR body. New `remote-control.txt` block incl. the delimiter/sanitisation contract. |
 | **Review‑risk notes** | Index staleness if the list changes between calls — that's why `\set_bookmark_freq` ships alongside. Read + apply only; `\add_bookmark`/`\remove_bookmark` explicitly out of scope. `bandwidth` is narrowed `qint64`→`int` to match the existing dock signal. |
-| **Status** | **Open — [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-bookmarks` = commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build with a seeded `bookmarks.csv`: `\get_bookmarks` returns the count + `\|`‑rows (a `\|` in a name came back space‑sanitised); `\get_bookmark_tags` and `\get_bookmarks_in_range` correct; `\get_bookmarks_in_range 100 50` → `RPRT 1`; `\set_bookmark 0` / `\set_bookmark_freq <Hz>` retuned (`f` confirmed) and switched mode; out‑of‑range / no‑match → `RPRT 1`; `\reload_bookmarks` → `RPRT 0`. |
+| **Status** | **Open — [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-bookmarks` = commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build with a seeded `bookmarks.csv`: `\get_bookmarks` returns the count + `\|`‑rows (a `\|` in a name came back space‑sanitised); `\get_bookmark_tags` and `\get_bookmarks_in_range` correct; `\get_bookmarks_in_range 100 50` → `RPRT 1`; `\set_bookmark 0` / `\set_bookmark_freq <Hz>` retuned (`f` confirmed) and switched mode; out‑of‑range / no‑match → `RPRT 1`; `\reload_bookmarks` → `RPRT 0`. Full transcript posted as a [PR comment](https://github.com/gqrx-sdr/gqrx/pull/1464#issuecomment-5611596577). |
 
 ### PR 3 — input/output device control — **#1446**  *(open, by Douglas Ward)*
 
@@ -561,8 +561,10 @@ Proceed, in phases:
    with mute / Gqrx‑record / RDS text.
 2. **Shepherd the three Gqrx PRs** (§10). Filter shape ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463))
    and bookmarks ([#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)) are
-   **filed, `MERGEABLE`, and smoke‑tested** (headless build, `nc` against the RC
-   port — see §10 status rows) — remaining work is responding to review. Rebase
+   **filed, `MERGEABLE`, and smoke‑tested** — transcripts posted as PR comments
+   ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463#issuecomment-5611595188),
+   [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464#issuecomment-5611596577)) —
+   so remaining work is responding to review. Rebase
    [#1446](https://github.com/gqrx-sdr/gqrx/pull/1446) onto current
    `upstream/master` and shepherd it too.
 3. **Wire the matching AntennaHead panels**, each gated on its runtime probe
