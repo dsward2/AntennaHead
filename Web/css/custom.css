@@ -698,17 +698,37 @@ html {
     vertical-align: middle;
     flex: 0 0 auto;
 }
+/* The record dot is drawn with CSS rather than rendering the literal ⏺
+   (U+23FA) glyph: symbol-glyph metrics differ between WebKit and Blink and
+   left the character optically high against the native <audio> controls
+   next to it. A flex-centred pseudo-element sits on the true geometric
+   centre of the button box on every engine. 28px box == the old 20px
+   font + 2*4px padding, so the bottom-bar layout is unchanged. */
 .rec-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: 0;               /* Skeleton gives <button> a 10px bottom margin */
+    padding: 0;
     border: none;
     background: transparent;
-    color: #8e8e93;
-    font-size: 20px;
+    font-size: 0;            /* suppress the literal ⏺ text node */
     line-height: 1;
     cursor: pointer;
-    padding: 4px;
+}
+.rec-btn::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #8e8e93;
+}
+.rec-btn.recording::before {
+    background: #ff3b30;
 }
 .rec-btn.recording {
-    color: #ff3b30;
     animation: aac-rec-pulse 1.2s ease-in-out infinite;
 }
 .rec-time {
