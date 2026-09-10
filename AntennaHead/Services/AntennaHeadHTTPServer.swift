@@ -556,6 +556,61 @@ final class AntennaHeadHTTPServer {
             sdrController?.startGqrxListening(channels: gqrxChannels)
             return okResponse()
 
+        // "Listen to Gqrx" control panel → Gqrx remote control (port 7356).
+        // Each forwards one write to `SDRController`, which talks to the running
+        // Gqrx and optimistically updates the state the status poll serves back.
+        case "/gqrxsetfrequency.html":
+            if let hz = Int64(formFields(fromBody: request.body)["freq"] ?? "") {
+                sdrController?.gqrxSetFrequency(hz)
+            }
+            return okResponse()
+
+        case "/gqrxsetmode.html":
+            let f = formFields(fromBody: request.body)
+            if let mode = f["mode"], !mode.isEmpty {
+                sdrController?.gqrxSetMode(mode, passbandHz: Int(f["passband"] ?? "") ?? 0)
+            }
+            return okResponse()
+
+        case "/gqrxsetshape.html":
+            if let shape = Int(formFields(fromBody: request.body)["shape"] ?? "") {
+                sdrController?.gqrxSetFilterShape(shape)
+            }
+            return okResponse()
+
+        case "/gqrxsetlevel.html":
+            let f = formFields(fromBody: request.body)
+            if let name = f["name"], !name.isEmpty, let value = Double(f["value"] ?? "") {
+                sdrController?.gqrxSetLevel(name, value)
+            }
+            return okResponse()
+
+        case "/gqrxmute.html":
+            sdrController?.gqrxSetMuted(formFields(fromBody: request.body)["on"] == "1")
+            return okResponse()
+
+        case "/gqrxsetdsp.html":
+            sdrController?.gqrxSetDSP(formFields(fromBody: request.body)["on"] == "1")
+            return okResponse()
+
+        case "/gqrxbookmark.html":
+            if let hz = Int64(formFields(fromBody: request.body)["freq"] ?? "") {
+                sdrController?.gqrxApplyBookmark(hz)
+            }
+            return okResponse()
+
+        case "/gqrxsetinputdevice.html":
+            if let d = formFields(fromBody: request.body)["device"], !d.isEmpty {
+                sdrController?.gqrxSetInputDevice(d)
+            }
+            return okResponse()
+
+        case "/gqrxsetoutputdevice.html":
+            if let d = formFields(fromBody: request.body)["device"], !d.isEmpty {
+                sdrController?.gqrxSetOutputDevice(d)
+            }
+            return okResponse()
+
         case "/texttospeechchoosefolder.html":
             // Runs a native folder chooser on the host Mac and persists the
             // selection (security-scoped bookmark + path). Responds with the
@@ -1394,7 +1449,85 @@ final class AntennaHeadHTTPServer {
         s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
         s += "onclick=\"gqrxListenButtonClicked(this.form);\" "
         s += "title='Receive Gqrx&#39;s UDP audio output (port \(gqrxPort)), normalize via sox, forward to LiveAudioServer.'>"
-        s += "</form><br>&nbsp;<br>"
+        s += "</form>"
+        s += gqrxControlPanelHTML()
+        s += "<br>&nbsp;<br>"
+        return s
+    }
+
+    /// Remote-control panel for the "Listen to Gqrx" page. Rendered hidden;
+    /// `gqrxUpdatePanel()` in `antennahead.js` reveals and fills it from the
+    /// `gqrx` object in `nowplayingstatus.html` once a client is talking to a
+    /// live Gqrx on port 7356. All writes go to the `/gqrx*` endpoints.
+    @MainActor private func gqrxControlPanelHTML() -> String {
+        guard SDRController.gqrxRemoteControlEnabled else { return "" }
+        var s = "<div id='gqrxPanel' class='gqrx-panel' hidden>"
+        s += "<hr><label>Gqrx Remote Control</label>"
+        s += "<p id='gqrxStatus' class='gqrx-status'>Connecting…</p>"
+
+        // Receiver run state (Gqrx's Play/Pause = DSP on/off). The Tune actions
+        // also nudge this on, but a visible control matches Gqrx's own button.
+        s += "<div class='gqrx-row'><input type='button' id='gqrxDsp' class='twelve columns button' "
+        s += "value='Receiver' onclick='gqrxToggleDsp();'></div>"
+
+        // Input / output device (only when Gqrx carries PR #1446)
+        s += "<div class='gqrx-row' id='gqrxDevRow' hidden>"
+        s += "<label for='gqrxInDev'>SDR device</label>"
+        s += "<select id='gqrxInDev' class='u-full-width' onchange='gqrxSendInDev();'></select>"
+        s += "<p id='gqrxInDevCur' class='gqrx-status'></p>"
+        s += "<label for='gqrxOutDev'>Audio output</label>"
+        s += "<select id='gqrxOutDev' class='u-full-width' onchange='gqrxSendOutDev();'></select>"
+        s += "</div>"
+
+        // Frequency
+        s += "<div class='gqrx-row'><label for='gqrxFreq'>Frequency (MHz)</label>"
+        s += "<div class='gqrx-inline'>"
+        s += "<input type='number' id='gqrxFreq' step='0.001' class='gqrx-freq'>"
+        s += "<input type='button' class='button' value='Tune' onclick='gqrxSetFreq();'>"
+        s += "</div></div>"
+
+        // Mode + filter width
+        s += "<div class='gqrx-row'><label for='gqrxMode'>Mode</label>"
+        s += "<select id='gqrxMode' class='u-full-width' onchange='gqrxSendMode();'></select></div>"
+        s += "<div class='gqrx-row'><label for='gqrxWidth'>Filter width <span id='gqrxWidthVal' class='gqrx-val'></span></label>"
+        s += "<input type='range' id='gqrxWidth' min='500' max='250000' step='100' class='u-full-width' "
+        s += "oninput='gqrxWidthInput();' onchange='gqrxSendMode();'></div>"
+
+        // Filter shape (only shown when Gqrx advertises FILTER_SHAPE)
+        s += "<div class='gqrx-row' id='gqrxShapeRow' hidden><label for='gqrxShape'>Filter shape</label>"
+        s += "<select id='gqrxShape' class='u-full-width' onchange='gqrxSendShape();'>"
+        s += "<option value='0'>Soft</option><option value='1'>Normal</option><option value='2'>Sharp</option>"
+        s += "</select></div>"
+
+        // RF gain (only when a *_GAIN stage exists)
+        s += "<div class='gqrx-row' id='gqrxRFRow' hidden>"
+        s += "<label for='gqrxRF'><span id='gqrxRFName'>RF</span> gain <span id='gqrxRFVal' class='gqrx-val'></span></label>"
+        s += "<input type='range' id='gqrxRF' min='0' max='50' step='0.1' class='u-full-width' "
+        s += "oninput='gqrxRFInput();' onchange='gqrxSendRF();'></div>"
+
+        // AF gain
+        s += "<div class='gqrx-row'><label for='gqrxAF'>Audio gain <span id='gqrxAFVal' class='gqrx-val'></span> dB</label>"
+        s += "<input type='range' id='gqrxAF' min='-40' max='40' step='1' class='u-full-width' "
+        s += "oninput='gqrxAFInput();' onchange='gqrxSendAF();'></div>"
+
+        // Squelch
+        s += "<div class='gqrx-row'><label for='gqrxSql'>Squelch <span id='gqrxSqlVal' class='gqrx-val'></span> dBFS</label>"
+        s += "<input type='range' id='gqrxSql' min='-150' max='0' step='1' class='u-full-width' "
+        s += "oninput='gqrxSqlInput();' onchange='gqrxSendSql();'></div>"
+
+        // Signal meter + mute
+        s += "<div class='gqrx-row'><label>Signal <span id='gqrxSig' class='gqrx-val'>–</span> dBFS</label>"
+        s += "<div class='gqrx-meter'><div id='gqrxSigBar' class='gqrx-meter-fill'></div></div></div>"
+        s += "<div class='gqrx-row'><label class='gqrx-check'>"
+        s += "<input type='checkbox' id='gqrxMute' onchange='gqrxToggleMute();'> Mute Gqrx audio</label></div>"
+
+        // Bookmarks
+        s += "<div class='gqrx-row' id='gqrxBookmarksRow' hidden>"
+        s += "<label>Bookmarks</label>"
+        s += "<input type='text' id='gqrxBmFilter' class='u-full-width' placeholder='filter by name or tag…' oninput='gqrxRenderBookmarks();'>"
+        s += "<div id='gqrxBookmarks' class='gqrx-bookmarks'></div></div>"
+
+        s += "</div>"
         return s
     }
 
@@ -2154,6 +2287,37 @@ final class AntennaHeadHTTPServer {
         if sdrController?.isFillerPlaying == true {
             dict["filler"] = true
             dict["filler_source"] = sdrController?.stationName ?? "Monitor Beacon"
+        }
+        if let sdr = sdrController, sdr.statusFunction == "Gqrx",
+           SDRController.gqrxRemoteControlEnabled {
+            // A non-finite Double reaching JSONSerialization raises an
+            // uncatchable ObjC exception, so every dB value is finitized here.
+            func finite(_ d: Double) -> Double { d.isFinite ? d : 0 }
+            dict["gqrx"] = [
+                "available": sdr.gqrxAvailable,
+                "frequency": sdr.gqrxFrequencyHz,
+                "mode": sdr.gqrxMode,
+                "passband": sdr.gqrxPassbandHz,
+                "has_filter_shape": sdr.gqrxHasFilterShape,
+                "filter_shape": sdr.gqrxFilterShape,
+                "squelch": finite(sdr.gqrxSquelchDBFS),
+                "af_gain": finite(sdr.gqrxAFGainDB),
+                "rf_gain_name": sdr.gqrxRFGainName,
+                "rf_gain": finite(sdr.gqrxRFGainValue),
+                "signal": finite(sdr.gqrxSignalDBFS),
+                "muted": sdr.gqrxMuted,
+                "dsp_running": sdr.gqrxDSPRunning,
+                "modes": sdr.gqrxModeList,
+                "bookmarks": sdr.gqrxBookmarks.map { [
+                    "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,
+                    "bandwidth": $0.bandwidthHz, "tags": $0.tags,
+                ] },
+                "has_device_control": sdr.gqrxHasDeviceControl,
+                "input_devices": sdr.gqrxInputDevices,
+                "input_device": sdr.gqrxInputDevice,
+                "output_devices": sdr.gqrxOutputDevices,
+                "output_device": sdr.gqrxOutputDevice,
+            ]
         }
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
     }

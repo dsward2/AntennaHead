@@ -506,6 +506,46 @@ final class SDRController {
 
     private(set) var lastError: Error?
 
+    // MARK: Gqrx remote control
+    //
+    // Populated only while `statusFunction == "Gqrx"`. `startGqrxRemote()` opens
+    // a `GqrxRemoteControlClient` to `127.0.0.1:7356` and runs a ~1 Hz poll that
+    // mirrors Gqrx's state into these `@Observable` properties; the "Listen to
+    // Gqrx" web panel reads them via `nowplayingstatus.html` and writes back
+    // through the `gqrxSet*` methods. Everything tears down in
+    // `teardownGqrxRemote()` the moment any other source starts or Stop is hit.
+
+    @ObservationIgnored private var gqrxRemote: GqrxRemoteControlClient?
+
+    /// True while a `GqrxRemoteControlClient` is talking to a live Gqrx.
+    private(set) var gqrxAvailable = false
+    private(set) var gqrxFrequencyHz: Int64 = 0
+    private(set) var gqrxMode = ""
+    private(set) var gqrxPassbandHz = 0
+    private(set) var gqrxFilterShape = 1
+    /// True when this Gqrx build carries the `FILTER_SHAPE` level (PR #1463).
+    private(set) var gqrxHasFilterShape = false
+    private(set) var gqrxSquelchDBFS: Double = -150
+    private(set) var gqrxAFGainDB: Double = 0
+    /// The first `<stage>_GAIN` name `l ?` advertised (usually `RF` for RTL-SDR),
+    /// or "" when the running device exposes no remote-settable gain.
+    private(set) var gqrxRFGainName = ""
+    private(set) var gqrxRFGainValue: Double = 0
+    private(set) var gqrxSignalDBFS: Double = -120
+    private(set) var gqrxMuted = false
+    /// Gqrx's DSP/receiver run state (`u DSP`). A paused Gqrx makes no sound no
+    /// matter how it's tuned, so the Tune actions nudge this back on.
+    private(set) var gqrxDSPRunning = false
+    private(set) var gqrxModeList: [String] = []
+    /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
+    private(set) var gqrxBookmarks: [GqrxBookmark] = []
+    /// True when this Gqrx carries the device-control commands (PR #1446).
+    private(set) var gqrxHasDeviceControl = false
+    private(set) var gqrxInputDevices: [String] = []   // labels
+    private(set) var gqrxInputDevice = ""              // current gr-osmosdr string
+    private(set) var gqrxOutputDevices: [String] = []
+    private(set) var gqrxOutputDevice = ""
+
     init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
@@ -864,6 +904,26 @@ final class SDRController {
     /// Uses `waitForDyingProcesses: true` so the dying pipeline releases port
     /// 7355 before the new PCMUDPReceiver tries to bind it.
     func startGqrxListening(channels: Int = 2) {
+        startGqrxRelay(channels: channels,
+                       announceText: announcementEnabled ? Self.announcementText(forGqrx: nil) : nil)
+        if Self.gqrxRemoteControlEnabled { startGqrxRemote() }
+    }
+
+    /// Channels the last `startGqrxRelay` used, so `relaunchGqrxRelay` (e.g. to
+    /// speak a bookmark name) can rebuild the audio path with the same format.
+    @ObservationIgnored private var gqrxRelayChannels = 2
+    /// While true, `teardownGqrxRemote()` leaves the remote-control client
+    /// alone — set around a relay-only rebuild that keeps the same Gqrx.
+    @ObservationIgnored private var preserveGqrxRemote = false
+    /// True while the Gqrx page has paused Gqrx's receiver and handed the LAS
+    /// input over to the filler loop; resuming rebuilds the relay.
+    @ObservationIgnored private var gqrxPausedToFiller = false
+
+    /// Build (or rebuild) just the `PCMUDPReceiver(7355) → sox → … →
+    /// PCMUDPSender(6020)` audio relay, optionally with a spoken "Now playing …"
+    /// prefix. Does **not** touch the remote-control client.
+    private func startGqrxRelay(channels: Int, announceText: String?) {
+        gqrxRelayChannels = channels
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
         stopFillerForNewSource()
@@ -888,13 +948,197 @@ final class SDRController {
                                                  inputChannels: max(1, channels),
                                                  audioOutputFilter: "vol 1"),
               let sender = makeUDPSenderTaskItem() else { return }
+        // `drop` mode: the live UDP relay keeps running while the clip plays.
+        let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
-        launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
+                              announcement: announcement?.pending)
+    }
+
+    /// Rebuild the Gqrx audio relay to speak `text` over it, keeping the current
+    /// remote-control client and connection. No-op unless a Gqrx relay is live.
+    private func relaunchGqrxRelay(announceText: String) {
+        guard taskMode == .customTask, statusFunction == "Gqrx" else { return }
+        preserveGqrxRemote = true
+        defer { preserveGqrxRemote = false }
+        startGqrxRelay(channels: gqrxRelayChannels, announceText: announceText)
+    }
+
+    /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
+    /// filter / gain / bookmarks driving a running Gqrx over TCP 7356, on top of
+    /// the Gqrx PRs [#1463](https://github.com/gqrx-sdr/gqrx/pull/1463) /
+    /// [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)). With it `false` the
+    /// "Listen to Gqrx" page is the unchanged one‑way audio relay.
+    static let gqrxRemoteControlEnabled = true
+
+    // MARK: Gqrx remote-control channel
+
+    /// Open a fresh `GqrxRemoteControlClient` and start its poll. Called at the
+    /// end of `startGqrxListening`; independent of the audio relay, so the page
+    /// still streams audio if Gqrx's remote control is off.
+    ///
+    /// The client is a plain class over a blocking BSD socket on its own serial
+    /// queue (like `RTLSDRStatusListener`) — nothing here touches the Swift
+    /// concurrency pool or the main actor except the `onSnapshot` hop below, so
+    /// a slow or dead Gqrx can never stall the web server.
+    private func startGqrxRemote() {
+        teardownGqrxRemote()
+        let client = GqrxRemoteControlClient()
+        client.onSnapshot = { [weak self] snap in
+            Task { @MainActor [weak self] in self?.applyGqrxSnapshot(snap) }
+        }
+        gqrxRemote = client
+        client.start()
+    }
+
+    @MainActor private func applyGqrxSnapshot(_ s: GqrxSnapshot) {
+        gqrxAvailable = s.reachable
+        if let v = s.frequencyHz { gqrxFrequencyHz = v }
+        if let v = s.mode { gqrxMode = v }
+        if let v = s.passbandHz { gqrxPassbandHz = v }
+        if let v = s.filterShape { gqrxFilterShape = v }
+        if let v = s.squelchDBFS, v.isFinite { gqrxSquelchDBFS = v }
+        if let v = s.afGainDB, v.isFinite { gqrxAFGainDB = v }
+        if let v = s.rfGainValue, v.isFinite { gqrxRFGainValue = v }
+        if let v = s.signalDBFS, v.isFinite { gqrxSignalDBFS = v }
+        if let v = s.muted { gqrxMuted = v }
+        if let v = s.dspRunning { gqrxDSPRunning = v }
+        gqrxHasFilterShape = s.hasFilterShape
+        gqrxRFGainName = s.rfGainName
+        if !s.modeList.isEmpty { gqrxModeList = s.modeList }
+        if !s.bookmarks.isEmpty { gqrxBookmarks = s.bookmarks }
+        gqrxHasDeviceControl = s.hasDeviceControl
+        if !s.inputDeviceList.isEmpty { gqrxInputDevices = s.inputDeviceList }
+        if !s.outputDeviceList.isEmpty { gqrxOutputDevices = s.outputDeviceList }
+        if !s.inputDevice.isEmpty { gqrxInputDevice = s.inputDevice }
+        if !s.outputDevice.isEmpty { gqrxOutputDevice = s.outputDevice }
+    }
+
+    private func teardownGqrxRemote() {
+        if preserveGqrxRemote { return }   // relay-only rebuild; same Gqrx
+        gqrxRemote?.stop()
+        gqrxRemote = nil
+        gqrxAvailable = false
+        gqrxBookmarks = []
+        gqrxModeList = []
+        gqrxHasFilterShape = false
+        gqrxRFGainName = ""
+        gqrxHasDeviceControl = false
+        gqrxInputDevices = []
+        gqrxOutputDevices = []
+        gqrxDSPRunning = false
+        gqrxPausedToFiller = false
+    }
+
+    /// Live writes from the "Listen to Gqrx" control panel. Each updates the
+    /// mirrored property immediately (optimistic) and hands the command to the
+    /// client's queue (fire-and-forget); the ~1 Hz poll corrects the mirror if
+    /// the write was rejected or Gqrx's own GUI also moved.
+
+    func gqrxSetFrequency(_ hz: Int64) {
+        gqrxFrequencyHz = hz
+        gqrxRemote?.setFrequency(hz)
+        gqrxEnsureDSPRunning()
+    }
+
+    func gqrxSetDSP(_ on: Bool) {
+        if on { gqrxResumeReceiver() } else { gqrxPauseReceiver() }
+    }
+
+    /// Nudge Gqrx's receiver back on if a Tune/bookmark action arrives while the
+    /// user has it paused (Gqrx's Play/Pause button = DSP toggle).
+    private func gqrxEnsureDSPRunning() {
+        guard !gqrxDSPRunning || gqrxPausedToFiller else { return }
+        gqrxResumeReceiver()
+    }
+
+    /// Paused via the panel's ⏸ button. Speak "Gqrx paused" into the stream,
+    /// and — if the Filler option is on — hand the LAS input over to the filler
+    /// loop (with that clip prefixed) since Gqrx's audio has stopped. Otherwise
+    /// the relay just plays the clip and then goes quiet, as Gqrx does.
+    private func gqrxPauseReceiver() {
+        gqrxDSPRunning = false
+        gqrxRemote?.setDSP(false)
+        guard statusFunction == "Gqrx", !gqrxPausedToFiller else { return }
+
+        if fillerEnabled {
+            gqrxPausedToFiller = true
+            radioTaskPipelineManager.terminate()   // stop the now-silent relay, free the LAS input port
+            startFillerPipeline(announcePrefix: "Gqrx paused.", keepGqrxStatus: true)
+        } else if announcementEnabled {
+            relaunchGqrxRelay(announceText: "Gqrx paused.")
+        }
+    }
+
+    /// Resumed via the ⏸/▶ button, or implied by a Tune/bookmark action.
+    /// Restart Gqrx's DSP and, if we'd handed off to the filler, rebuild the
+    /// Gqrx audio relay.
+    private func gqrxResumeReceiver() {
+        if !gqrxDSPRunning {
+            gqrxDSPRunning = true
+            gqrxRemote?.setDSP(true)
+        }
+        guard gqrxPausedToFiller else { return }
+        gqrxPausedToFiller = false
+        preserveGqrxRemote = true
+        defer { preserveGqrxRemote = false }
+        fillerPipelineManager.terminate()
+        fillerAnnouncementManager.terminate()
+        startGqrxRelay(channels: gqrxRelayChannels, announceText: nil)
+    }
+
+    func gqrxSetMode(_ mode: String, passbandHz: Int) {
+        gqrxMode = mode
+        if passbandHz > 0 { gqrxPassbandHz = passbandHz }
+        gqrxRemote?.setMode(mode, passbandHz: passbandHz)
+    }
+
+    func gqrxSetFilterShape(_ shape: Int) {
+        gqrxFilterShape = shape
+        gqrxRemote?.setFilterShape(shape)
+    }
+
+    func gqrxSetLevel(_ name: String, _ value: Double) {
+        switch name.uppercased() {
+        case "SQL": gqrxSquelchDBFS = value
+        case "AF":  gqrxAFGainDB = value
+        default:    if name.uppercased().hasSuffix("_GAIN") { gqrxRFGainValue = value }
+        }
+        gqrxRemote?.setLevel(name, value)
+    }
+
+    func gqrxSetMuted(_ on: Bool) {
+        gqrxMuted = on
+        gqrxRemote?.setMuted(on)
+    }
+
+    func gqrxSetInputDevice(_ device: String) {
+        gqrxInputDevice = device
+        gqrxRemote?.setInputDevice(device)
+    }
+
+    func gqrxSetOutputDevice(_ device: String) {
+        gqrxOutputDevice = device
+        gqrxRemote?.setOutputDevice(device)
+    }
+
+    func gqrxApplyBookmark(_ frequencyHz: Int64) {
+        gqrxRemote?.applyBookmarkFrequency(frequencyHz)
+        gqrxEnsureDSPRunning()
+        // Speak the bookmark's program name over the relay, same as tuning a
+        // saved favourite does. Only when announcements are on and we can name it.
+        guard announcementEnabled,
+              let name = gqrxBookmarks.first(where: { $0.frequencyHz == frequencyHz })?.name
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty
+        else { return }
+        relaunchGqrxRelay(announceText: "Now playing \(name).")
     }
 
     private func makeUDPReceiverTaskItem(port: UInt16, bind: String = "127.0.0.1") -> TaskItem? {
@@ -1021,7 +1265,8 @@ final class SDRController {
     /// the helper is missing. `holdInput` picks PCMPrefix's `--during-prefix`
     /// mode: `false` (drop) for a live source that must not block, `true`
     /// (hold) for a self-pacing file player that should resume from its start.
-    private func prepareAnnouncement(text: String, holdInput: Bool) -> PreparedAnnouncement? {
+    private func prepareAnnouncement(text: String, holdInput: Bool,
+                                    manager: TaskPipelineManager? = nil) -> PreparedAnnouncement? {
         cleanUpAnnouncementClip()   // drop any clip staged for a previous tuning
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard announcementEnabled, !trimmed.isEmpty else { return nil }
@@ -1029,7 +1274,8 @@ final class SDRController {
         let clipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("AntennaHead-announce-\(UUID().uuidString).raw")
 
-        guard let stage = makeAnnouncementPrefixTaskItem(clipURL: clipURL, holdInput: holdInput) else {
+        guard let stage = makeAnnouncementPrefixTaskItem(clipURL: clipURL, holdInput: holdInput,
+                                                         manager: manager) else {
             return nil
         }
         announcementClipURL = clipURL
@@ -1043,14 +1289,15 @@ final class SDRController {
     /// PCMPrefix stage: plays the announcement clip, then passes the live audio
     /// through. Sits immediately before PCMUDPSender. A missing/empty clip file
     /// makes PCMPrefix a plain passthrough, so a failed render is harmless.
-    private func makeAnnouncementPrefixTaskItem(clipURL: URL, holdInput: Bool) -> TaskItem? {
+    private func makeAnnouncementPrefixTaskItem(clipURL: URL, holdInput: Bool,
+                                               manager: TaskPipelineManager? = nil) -> TaskItem? {
         let path = helperPath("PCMPrefix")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             LogStore.shared.log(.error, source: "SDRController",
                                 "PCMPrefix helper missing at \(path) — announcement skipped")
             return nil
         }
-        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMPrefix")
+        let item = (manager ?? radioTaskPipelineManager).makeTaskItem(pathToExecutable: path, functionName: "PCMPrefix")
         item.addArgument("--prefix-file"); item.addArgument(clipURL.path)
         item.addArgument("--prefix-channels"); item.addArgument(1)   // PCMSpeechSynth emits mono
         item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
@@ -1151,6 +1398,7 @@ final class SDRController {
     func terminateTasks(enterIdle: Bool = true) {
         pipelineStartTask?.cancel()
         pipelineStartTask = nil
+        teardownGqrxRemote()
         radioTaskPipelineManager.terminate()
         cleanUpSpeechSynthTextFile()
         cleanUpAnnouncementClip()
@@ -1189,7 +1437,14 @@ final class SDRController {
     ///
     /// With fade on, a `PCMDistanceGain` stage starts attenuated and this
     /// method ramps it up to unity over `fillerFadeMs`.
-    func startFillerPipeline() {
+    /// Start the Monitor Beacon / user filler loop into LiveAudioServer.
+    ///
+    /// - `announcePrefix`: a one-shot spoken clip prepended before the loop
+    ///   (e.g. "Gqrx paused."); rendered async, so the pipeline starts a beat later.
+    /// - `keepGqrxStatus`: leave `taskMode` / `statusFunction` alone (the Gqrx
+    ///   page pauses to filler but keeps showing its control panel) instead of
+    ///   switching to the normal Filler status.
+    func startFillerPipeline(announcePrefix: String? = nil, keepGqrxStatus: Bool = false) {
         fillerPipelineManager.terminate()
         fillerAnnouncementManager.terminate()
         fillerGeneration &+= 1
@@ -1202,13 +1457,15 @@ final class SDRController {
             return
         }
 
-        taskMode = .filler
-        publishFillerStatus(customTrackCount: fillerUsesCustomSource ? tracks.count : 0)
+        if !keepGqrxStatus {
+            taskMode = .filler
+            publishFillerStatus(customTrackCount: fillerUsesCustomSource ? tracks.count : 0)
+        }
 
         let fade = fillerFadeEnabled
         guard let player = makeFillerPlayerTaskItem(tracks: tracks),
               let sender = makeFillerUDPSenderTaskItem() else {
-            taskMode = .stopped
+            if !keepGqrxStatus { taskMode = .stopped }
             return
         }
         // When the announcement is on, a PCMMixer stage (announcement on its
@@ -1217,24 +1474,42 @@ final class SDRController {
         // the feeder rather than fail the whole filler.
         let mixer = fillerAnnounceEnabled ? makeFillerMixerTaskItem() : nil
         let gain = fade ? makeFillerGainTaskItem(startAttenuated: true) : nil
+        let prefix = announcePrefix.flatMap {
+            prepareAnnouncement(text: $0, holdInput: true, manager: fillerPipelineManager)
+        }
         fillerPipelineManager.add(player)
         if let mixer { fillerPipelineManager.add(mixer) }
         if let gain { fillerPipelineManager.add(gain) }
+        if let prefix { fillerPipelineManager.add(prefix.stage) }   // just before the sender
         fillerPipelineManager.add(sender)
 
-        do {
-            try fillerPipelineManager.start()
-            lastError = nil
-            LogStore.shared.log(.info, source: "SDRController",
-                                "filler started — \(tracks.count) track(s) → udp:\(udpInputPort)"
-                                + (fade ? ", fading in \(fillerFadeMs) ms" : "")
-                                + (mixer != nil ? ", announcement every ~\(fillerAnnouncePeriodSeconds)s" : ""))
-            if fade { rampFillerGain(fromGain: Self.fillerSilentGain, toGain: 1.0, ms: fillerFadeMs) }
-            if mixer != nil { startFillerAnnouncementFeeder(generation: fillerGeneration) }
-        } catch {
-            lastError = error
-            taskMode = .stopped
-            LogStore.shared.log(.error, source: "SDRController", "filler start failed: \(error)")
+        let generation = fillerGeneration
+        let launch: () -> Void = { [weak self] in
+            guard let self, self.fillerGeneration == generation else { return }
+            do {
+                try self.fillerPipelineManager.start()
+                self.lastError = nil
+                LogStore.shared.log(.info, source: "SDRController",
+                                    "filler started — \(tracks.count) track(s) → udp:\(self.udpInputPort)"
+                                    + (fade ? ", fading in \(self.fillerFadeMs) ms" : "")
+                                    + (prefix != nil ? ", after \u{201C}\(announcePrefix ?? "")\u{201D}" : "")
+                                    + (mixer != nil ? ", announcement every ~\(self.fillerAnnouncePeriodSeconds)s" : ""))
+                if fade { self.rampFillerGain(fromGain: Self.fillerSilentGain, toGain: 1.0, ms: self.fillerFadeMs) }
+                if mixer != nil { self.startFillerAnnouncementFeeder(generation: generation) }
+            } catch {
+                self.lastError = error
+                if !keepGqrxStatus { self.taskMode = .stopped }
+                LogStore.shared.log(.error, source: "SDRController", "filler start failed: \(error)")
+            }
+        }
+
+        if let prefix {
+            Task { @MainActor in
+                await Self.renderAnnouncementClip(prefix.pending)
+                launch()
+            }
+        } else {
+            launch()
         }
     }
 
@@ -1576,6 +1851,10 @@ final class SDRController {
     /// incoming and outgoing PCMUDPSenders never both feed LiveAudioServer.
     /// Otherwise (fade off, or stale leftovers) it's an outright stop.
     private func stopFillerForNewSource() {
+        // Every real source starts by calling this; it's the one chokepoint
+        // that reliably fires when we leave Gqrx mode for another source.
+        teardownGqrxRemote()
+
         fillerGeneration &+= 1
 
         // Stop the announcement feeder outright — it only feeds the filler
@@ -1814,6 +2093,13 @@ final class SDRController {
     static func announcementText(forControlBooth name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Now playing Control Booth." : "Now playing \(trimmed)."
+    }
+
+    /// Spoken when the "Listen to Gqrx" relay starts. `program` is a bookmark /
+    /// station name when one is known (a bookmark Tune), else the generic line.
+    static func announcementText(forGqrx program: String?) -> String {
+        let name = program?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Now playing Gqrx." : "Now playing \(name)."
     }
 
     /// True when `name` is just a frequency readout — digits with a decimal
