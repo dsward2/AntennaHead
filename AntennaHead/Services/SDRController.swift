@@ -895,6 +895,23 @@ final class SDRController {
     /// Uses `waitForDyingProcesses: true` so the dying pipeline releases port
     /// 7355 before the new PCMUDPReceiver tries to bind it.
     func startGqrxListening(channels: Int = 2) {
+        startGqrxRelay(channels: channels,
+                       announceText: announcementEnabled ? Self.announcementText(forGqrx: nil) : nil)
+        if Self.gqrxRemoteControlEnabled { startGqrxRemote() }
+    }
+
+    /// Channels the last `startGqrxRelay` used, so `relaunchGqrxRelay` (e.g. to
+    /// speak a bookmark name) can rebuild the audio path with the same format.
+    @ObservationIgnored private var gqrxRelayChannels = 2
+    /// While true, `teardownGqrxRemote()` leaves the remote-control client
+    /// alone — set around a relay-only rebuild that keeps the same Gqrx.
+    @ObservationIgnored private var preserveGqrxRemote = false
+
+    /// Build (or rebuild) just the `PCMUDPReceiver(7355) → sox → … →
+    /// PCMUDPSender(6020)` audio relay, optionally with a spoken "Now playing …"
+    /// prefix. Does **not** touch the remote-control client.
+    private func startGqrxRelay(channels: Int, announceText: String?) {
+        gqrxRelayChannels = channels
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
         stopFillerForNewSource()
@@ -919,19 +936,28 @@ final class SDRController {
                                                  inputChannels: max(1, channels),
                                                  audioOutputFilter: "vol 1"),
               let sender = makeUDPSenderTaskItem() else { return }
+        // `drop` mode: the live UDP relay keeps running while the clip plays.
+        let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
+        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
-        launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
-        if Self.gqrxRemoteControlEnabled { startGqrxRemote() }
+        launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
+                              announcement: announcement?.pending)
     }
 
-    /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
-    /// filter / gain / bookmarks driving a running Gqrx over TCP 7356).
-    ///
+    /// Rebuild the Gqrx audio relay to speak `text` over it, keeping the current
+    /// remote-control client and connection. No-op unless a Gqrx relay is live.
+    private func relaunchGqrxRelay(announceText: String) {
+        guard taskMode == .customTask, statusFunction == "Gqrx" else { return }
+        preserveGqrxRemote = true
+        defer { preserveGqrxRemote = false }
+        startGqrxRelay(channels: gqrxRelayChannels, announceText: announceText)
+    }
+
     /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
     /// filter / gain / bookmarks driving a running Gqrx over TCP 7356, on top of
     /// the Gqrx PRs [#1463](https://github.com/gqrx-sdr/gqrx/pull/1463) /
@@ -977,6 +1003,7 @@ final class SDRController {
     }
 
     private func teardownGqrxRemote() {
+        if preserveGqrxRemote { return }   // relay-only rebuild; same Gqrx
         gqrxRemote?.stop()
         gqrxRemote = nil
         gqrxAvailable = false
@@ -1023,6 +1050,14 @@ final class SDRController {
 
     func gqrxApplyBookmark(_ frequencyHz: Int64) {
         gqrxRemote?.applyBookmarkFrequency(frequencyHz)
+        // Speak the bookmark's program name over the relay, same as tuning a
+        // saved favourite does. Only when announcements are on and we can name it.
+        guard announcementEnabled,
+              let name = gqrxBookmarks.first(where: { $0.frequencyHz == frequencyHz })?.name
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty
+        else { return }
+        relaunchGqrxRelay(announceText: "Now playing \(name).")
     }
 
     private func makeUDPReceiverTaskItem(port: UInt16, bind: String = "127.0.0.1") -> TaskItem? {
@@ -1947,6 +1982,13 @@ final class SDRController {
     static func announcementText(forControlBooth name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Now playing Control Booth." : "Now playing \(trimmed)."
+    }
+
+    /// Spoken when the "Listen to Gqrx" relay starts. `program` is a bookmark /
+    /// station name when one is known (a bookmark Tune), else the generic line.
+    static func announcementText(forGqrx program: String?) -> String {
+        let name = program?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Now playing Gqrx." : "Now playing \(name)."
     }
 
     /// True when `name` is just a frequency readout — digits with a decimal
