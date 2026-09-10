@@ -27,6 +27,41 @@ documented remote‑control protocol over TCP?
 
 ---
 
+> ## Implementation status — updated 2026-09-10
+>
+> **The AntennaHead side is built and merged.** This study's recommendation was
+> followed; phases 1 and 3 of §12 are done in one pass (the optional panels were
+> written behind their runtime probes rather than deferred):
+>
+> - **[dsward2/AntennaHead#15](https://github.com/dsward2/AntennaHead/pull/15) — MERGED** (`7b6ce69` on `main`, 5 commits).
+>   `GqrxRemoteControlClient` (a plain blocking-BSD-socket class on its own
+>   serial `DispatchQueue` — **not** an `actor`/`NWConnection`; the Swift-
+>   concurrency versions deadlocked the app's hand-rolled async HTTP server),
+>   the `/gqrxset*.html` endpoints, the `gqrx` sub-object in
+>   `nowplayingstatus.html`, and the `#gqrxPanel` control panel
+>   (frequency · mode + width · filter shape · discovered RF gain · AF · squelch ·
+>   signal meter · mute · **SDR + audio-output device pickers** · **bookmark list
+>   with per-row Tune** · Play/Pause DSP). Spoken "Now playing" / per-bookmark
+>   announcements, and a **"Gqrx paused." + Filler hand-off** when the receiver is
+>   paused. All optional panels are gated on runtime capability probes (§9) and on
+>   `SDRController.gqrxRemoteControlEnabled`; verified end-to-end against a live
+>   Gqrx built with all three protocol PRs.
+>   - **Root-cause bug worth remembering:** a non-finite `Double` (Gqrx returns
+>     `nan`/`inf` dBFS for `l STRENGTH` with no signal) reaching
+>     `JSONSerialization.data(withJSONObject:)` raises an **uncatchable ObjC
+>     `NSException`** that `try?` does not catch and AppKit swallows — it wedged
+>     the async HTTP server. Every `Double` in a status-JSON field now passes a
+>     `.isFinite` guard.
+> - **This document — [dsward2/AntennaHead#14](https://github.com/dsward2/AntennaHead/pull/14) — MERGED** (`87a2877`).
+>
+> **The three Gqrx protocol PRs remain open upstream** (not merged) — all three
+> rebased onto `upstream/master` `08f84f5` on 2026-09-10 and reported `MERGEABLE`;
+> see §10 / §11 for current branches and SHAs. Until they land in a tagged Gqrx
+> release the matching AntennaHead panels only appear when the client's probe
+> finds the command at runtime.
+
+---
+
 ## 1. Verdict
 
 **Feasible. Moderate effort (~2.5–3 days). No architectural obstacles, no new
@@ -271,8 +306,10 @@ submittable change to `remote_control.cpp` (+ its doc + a test).
 | `\set_output_device <string>` | — | `RPRT 0` / `RPRT 1` |
 
 This closes the *device* half of §2's "input device not remote‑controllable"
-gap — AntennaHead could show a Gqrx input/output picker. As of 2026‑09‑09: open,
-no maintainer review, author‑targeted at the next release. Not guaranteed to
+gap — AntennaHead now shows a Gqrx input/output picker (built in
+[AntennaHead#15](https://github.com/dsward2/AntennaHead/pull/15), hidden unless
+the probe succeeds). As of 2026‑09‑10: open, rebased onto `08f84f5`, `MERGEABLE`,
+no maintainer review yet, author‑targeted at the next release. Not guaranteed to
 land.
 
 ### 8b. Bookmarks — submitted as [gqrx-sdr/gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)
@@ -415,11 +452,15 @@ reviewable on its own, touching only the remote‑control layer (`remote_control
 Qt signal wiring in `mainwindow.cpp`. None touches the DSP/GNU Radio flowgraph.
 Order below is by ascending size / review risk.
 
-> **Status (2026‑09‑09):** all three are open upstream —
-> **PR 1 = [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)**,
-> **PR 2 = [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (both just
-> filed, `MERGEABLE`, no review yet; one commit each off `upstream/master`
-> `08f84f5`, Qt5 build green), **PR 3 = the older [gqrx#1446](https://github.com/gqrx-sdr/gqrx/pull/1446)**.
+> **Status (2026‑09‑10):** all three still **open upstream, not merged**, all
+> three rebased onto `upstream/master` `08f84f5` and `MERGEABLE` —
+> **PR 1 = [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (branch
+> already current, no-op rebase),
+> **PR 2 = [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (same);
+> both filed 2026‑09‑09, one commit each, Qt5 build green, no maintainer review
+> yet. **PR 3 = the older [gqrx#1446](https://github.com/gqrx-sdr/gqrx/pull/1446)**
+> was 6 commits behind — rebased 2026‑09‑10, now two commits (`0e3763e` tip),
+> `MERGEABLE`, still awaiting review. A "rebased and ready" note is posted on each.
 > Branch names and commit hashes are in §11.
 
 ### PR 1 — `L/l FILTER_SHAPE` remote level  *(new, ~0.5 day)*
@@ -453,7 +494,7 @@ Order below is by ascending size / review risk.
 | **Adds** | `\get_input_device_list` · `\get_input_device` · `\set_input_device <gr‑osmosdr string>` and the three `_output_` equivalents; `RPRT 0/1` on set. |
 | **Enables (AntennaHead)** | a Gqrx input/output device picker on the page. |
 | **Tests / docs** | Present in the PR; also fixes an unrelated `plotter.h` negative‑value crash and updates an I/O‑config tooltip. |
-| **Status** | <https://github.com/gqrx-sdr/gqrx/pull/1446> — open, no maintainer review as of 2026‑09‑09. Local branch `gqrx-remote-control-device-managment` (commit `57f5ae4`) is off the older `d657e66` and wants a rebase onto current `upstream/master` (`08f84f5`, +6). Action: rebase, split out the `plotter.h` fix if a reviewer asks, respond to review. |
+| **Status** | <https://github.com/gqrx-sdr/gqrx/pull/1446> — **open, not merged**; no maintainer review as of 2026‑09‑10. **Rebased 2026‑09‑10** onto current `upstream/master` `08f84f5` (was 6 behind, off `d657e66`) — clean, no conflicts, force‑pushed, `MERGEABLE`. Branch `gqrx-remote-control-device-managment` now replays as two commits: the original device‑management commit (`6928601`) + `0e3763e` (getter reads the QSettings value instead of re‑probing hardware; setters accept device names containing spaces). Remaining: split out the `plotter.h` fix if a reviewer asks, respond to review. |
 
 ### Shared submission notes
 
@@ -487,8 +528,8 @@ temporary build AntennaHead is developed against.
 | | |
 |---|---|
 | Remotes | `origin` → `github.com/dsward2/gqrx`, `upstream` → `github.com/gqrx-sdr/gqrx` — correct topology for PRs. |
-| Branches | `gqrx-remote-control-device-managment` = **#1446** (`57f5ae4`, off `d657e66`) · **`gqrx-rc-filter-shape`** = **#1463** (`4c4be36`, +70/−2) · **`gqrx-rc-bookmarks`** = **#1464** (`889e801`, +182) — the last two each one commit off `upstream/master` `08f84f5`, pushed to `origin` and open upstream. `master` still tracks the stale Feb `upstream/master`. |
-| Currency | `git fetch upstream` done — `upstream/master` now at `08f84f5` (`v2.6.1`+…; the local `master` ref is still the Feb `v2.17.7-17-g57f5ae4` and is behind, but the two new branches are off the fresh `upstream/master`, so it doesn't matter). Re‑`fetch` again before pushing, in case upstream moved. |
+| Branches *(as of 2026‑09‑10)* | `gqrx-remote-control-device-managment` = **#1446** — **rebased**, now `0e3763e` (2 commits) off `upstream/master` `08f84f5`, force‑pushed to `origin` · **`gqrx-rc-filter-shape`** = **#1463** (`4c4be36`, +70/−2) · **`gqrx-rc-bookmarks`** = **#1464** (`889e801`, +182) — the last two each one commit already off `08f84f5` (rebase was a no‑op). All three pushed to `origin`, open upstream, `MERGEABLE`. Local `master` still tracks the stale Feb `upstream/master` — irrelevant, every PR branch is off the fresh one. |
+| Currency | `git fetch upstream` — `upstream/master` at `08f84f5`. All three PR branches confirmed on that base 2026‑09‑10. Re‑`fetch` before any further push in case upstream moved. |
 | Toolchain | MacPorts at `/opt/local`: `cmake` 3.31, **Qt 5.15.18**, GNU Radio **3.8.5**, boost 1.76. Older SDR stack, fine for RC‑protocol work. |
 | Build dir | The original `gqrx/build/` was configured for the pre‑move path and is gone (trashed). Current working build dir is **`gqrx/build-fs/`** (`cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=/opt/local -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ ..`); `build-fs/src/gqrx` compiles and **runs** (arm64, linker ad‑hoc signed). Not branch‑specific — `make` there rebuilds whatever is checked out. |
 | Toolchain caveat | `Xcode-beta.app` was removed mid‑session (an `Xcode_27_RC.xip` is sitting in `/Applications`), so `xcode-select` now points at `/Library/Developer/CommandLineTools` (Apple clang 21). A `build-fs/` configured against the old Xcode‑beta path fails with `c++: No such file or directory` — reconfigure with the explicit `CMAKE_*_COMPILER=/usr/bin/clang…` above. Builds are green under CLT clang 21. |
@@ -552,27 +593,32 @@ separate task from the protocol PRs.
 
 ## 12. Recommendation
 
-Proceed, in phases:
+Proceed, in phases. **Phases 1 and 3 are done — see the status callout at the top;
+phase 2 is the only work left, and it's not ours.**
 
-1. **Core control panel against stock Gqrx.** Build `GqrxRemoteControlClient`
-   first, in isolation, with a stub‑server test suite — it's the only genuinely
-   new mechanism; everything else is a known pattern here. Ship **Option B**
-   (frequency, mode + width, RF/AF gain, squelch, signal meter). Fast‑follow
-   with mute / Gqrx‑record / RDS text.
-2. **Shepherd the three Gqrx PRs** (§10). Filter shape ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463))
-   and bookmarks ([#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)) are
-   **filed, `MERGEABLE`, and smoke‑tested** — transcripts posted as PR comments
+1. **Core control panel against stock Gqrx.** ✅ **Done** — shipped in
+   [AntennaHead#15](https://github.com/dsward2/AntennaHead/pull/15) (MERGED).
+   `GqrxRemoteControlClient` was built in isolation first, as recommended (with
+   the one design change noted in the callout: a plain blocking‑socket class, not
+   an `actor`/`NWConnection`). Delivered a superset of **Option B** —
+   frequency, mode + width, discovered RF gain, AF, squelch, signal meter, **plus**
+   mute and Play/Pause DSP from Option A, plus the spoken announcements /
+   "Gqrx paused." + Filler hand‑off.
+2. **Shepherd the three Gqrx PRs** (§10) — **in progress, upstream‑gated.** All
+   three are open, `MERGEABLE`, rebased onto `upstream/master` `08f84f5`
+   (2026‑09‑10), each with a smoke‑test transcript and a "rebased and ready" note
+   posted as PR comments
    ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463#issuecomment-5611595188),
-   [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464#issuecomment-5611596577)) —
-   so remaining work is responding to review. Rebase
-   [#1446](https://github.com/gqrx-sdr/gqrx/pull/1446) onto current
-   `upstream/master` and shepherd it too.
+   [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464#issuecomment-5611596577)).
+   Remaining work is **responding to maintainer review** if/when it comes — nothing
+   further to push unless a reviewer asks.
 3. **Wire the matching AntennaHead panels**, each gated on its runtime probe
-   (§9): the shape selector on `FILTER_SHAPE` appearing in `l ?`; the device
-   picker on `\get_input_device_list`; the bookmarks panel on `\get_bookmarks`.
-   Develop against your temporary Gqrx build so each is ready the moment its
-   protocol change ships in an official release.
+   (§9). ✅ **Done in the same PR #15** rather than deferred — the shape selector
+   (on `FILTER_SHAPE` in `l ?`), the SDR + audio‑output device pickers (on
+   `\get_input_device_list`), and the bookmark list with per‑row Tune (on
+   `\get_bookmarks`) are all built and hidden until the probe succeeds. They were
+   developed against a local Gqrx build carrying all three protocol PRs.
 
-If all three PRs make the next Gqrx release, phase 3 is "flip the panels on for
-everyone"; if none do, AntennaHead still has a complete, useful Gqrx control
-page from phase 1.
+Net: AntennaHead already has a complete, useful Gqrx control page against **stock**
+Gqrx today. If the three PRs make a future Gqrx release, the extra panels light up
+automatically for everyone — no AntennaHead change needed.
