@@ -1255,6 +1255,8 @@ function updateStatusDisplay(statusData)
       return;
     }
 
+    gqrxUpdatePanel(statusObj.gqrx);
+
     var rtlsdr_task_mode = statusObj.rtlsdr_task_mode;
     
     var audio_output_filter = statusObj.audio_output_filter;
@@ -1970,3 +1972,273 @@ function initFeedbackSettings()
     toggle.checked = ahTapFeedbackEnabled();
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Listen to Gqrx" remote-control panel.
+//
+// Rendered hidden by gqrxControlPanelHTML() in AntennaHeadHTTPServer.swift.
+// updateStatusDisplay() calls gqrxUpdatePanel() on every poll with the `gqrx`
+// object from nowplayingstatus.html; writes go to the /gqrx* endpoints in the
+// jQuery serializeArray() shape the server's formFields() parser expects.
+
+var gqrxModesInit = false;
+var gqrxBookmarksData = null;
+var gqrxTouched = {};          // control id -> last user-interaction timestamp
+var gqrxDebounceTimers = {};
+
+function gqrxPost(path, obj)
+{
+    var arr = [];
+    for (var k in obj) { if (obj.hasOwnProperty(k)) { arr.push({ name: k, value: String(obj[k]) }); } }
+    var base = window.location.protocol + "//" + window.location.host + "/";
+    var x = new XMLHttpRequest();
+    x.open("POST", base + path, true);
+    x.send(JSON.stringify(arr));
+}
+
+function gqrxDebounce(key, fn, ms)
+{
+    if (gqrxDebounceTimers[key]) { clearTimeout(gqrxDebounceTimers[key]); }
+    gqrxDebounceTimers[key] = setTimeout(function () { gqrxDebounceTimers[key] = null; fn(); }, ms);
+}
+
+function gqrxMark(id) { gqrxTouched[id] = Date.now(); }
+function gqrxFresh(id) { return (Date.now() - (gqrxTouched[id] || 0)) < 1500; }
+
+function gqrxSetVal(id, text)
+{
+    var el = document.getElementById(id);
+    if (el != null) { el.innerText = text; }
+}
+
+// ── live refresh from the poll ───────────────────────────────────────────────
+
+function gqrxUpdatePanel(g)
+{
+    var panel = document.getElementById("gqrxPanel");
+    if (panel == null) { return; }                 // not on the Gqrx page
+    if (g == null) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    var status = document.getElementById("gqrxStatus");
+    if (status != null)
+    {
+        status.innerText = g.available
+            ? "Connected to Gqrx on port 7356"
+            : "Gqrx remote control not reachable — enable Tools ▸ Remote control in Gqrx";
+        status.className = "gqrx-status" + (g.available ? " ok" : " bad");
+    }
+
+    // Mode dropdown — populate once from the modes Gqrx reported.
+    var modeSel = document.getElementById("gqrxMode");
+    if (modeSel != null && !gqrxModesInit && g.modes && g.modes.length)
+    {
+        modeSel.innerHTML = "";
+        for (var i = 0; i < g.modes.length; i++)
+        {
+            var o = document.createElement("option");
+            o.value = g.modes[i]; o.text = g.modes[i];
+            modeSel.appendChild(o);
+        }
+        gqrxModesInit = true;
+    }
+    if (modeSel != null && !gqrxFresh("gqrxMode") && g.mode) { modeSel.value = g.mode; }
+
+    if (!gqrxFresh("gqrxFreq"))
+    {
+        var f = document.getElementById("gqrxFreq");
+        if (f != null && document.activeElement !== f && g.frequency)
+        {
+            f.value = (g.frequency / 1e6).toFixed(3);
+        }
+    }
+
+    if (!gqrxFresh("gqrxWidth"))
+    {
+        var w = document.getElementById("gqrxWidth");
+        if (w != null && g.passband) { w.value = g.passband; }
+        gqrxSetVal("gqrxWidthVal", (g.passband ? (g.passband / 1000).toFixed(1) + " kHz" : ""));
+    }
+
+    var shapeRow = document.getElementById("gqrxShapeRow");
+    if (shapeRow != null)
+    {
+        shapeRow.hidden = !g.has_filter_shape;
+        var sh = document.getElementById("gqrxShape");
+        if (sh != null && g.has_filter_shape && !gqrxFresh("gqrxShape"))
+        {
+            sh.value = String(g.filter_shape);
+        }
+    }
+
+    var rfRow = document.getElementById("gqrxRFRow");
+    if (rfRow != null)
+    {
+        var hasRF = g.rf_gain_name && g.rf_gain_name.length > 0;
+        rfRow.hidden = !hasRF;
+        if (hasRF)
+        {
+            gqrxSetVal("gqrxRFName", g.rf_gain_name);
+            if (!gqrxFresh("gqrxRF"))
+            {
+                var rf = document.getElementById("gqrxRF");
+                if (rf != null) { rf.value = g.rf_gain; }
+                gqrxSetVal("gqrxRFVal", (g.rf_gain != null ? Number(g.rf_gain).toFixed(1) : ""));
+            }
+        }
+    }
+
+    if (!gqrxFresh("gqrxAF"))
+    {
+        var af = document.getElementById("gqrxAF");
+        if (af != null && g.af_gain != null) { af.value = Math.round(g.af_gain); }
+        gqrxSetVal("gqrxAFVal", (g.af_gain != null ? Number(g.af_gain).toFixed(0) : "–"));
+    }
+    if (!gqrxFresh("gqrxSql"))
+    {
+        var sq = document.getElementById("gqrxSql");
+        if (sq != null && g.squelch != null) { sq.value = Math.round(g.squelch); }
+        gqrxSetVal("gqrxSqlVal", (g.squelch != null ? Number(g.squelch).toFixed(0) : "–"));
+    }
+
+    gqrxSetVal("gqrxSig", (g.signal != null ? Number(g.signal).toFixed(1) : "–"));
+    var bar = document.getElementById("gqrxSigBar");
+    if (bar != null && g.signal != null)
+    {
+        var pct = Math.max(0, Math.min(100, (Number(g.signal) + 120) / 120 * 100));
+        bar.style.width = pct.toFixed(0) + "%";
+    }
+
+    if (!gqrxFresh("gqrxMute"))
+    {
+        var mu = document.getElementById("gqrxMute");
+        if (mu != null) { mu.checked = !!g.muted; }
+    }
+
+    var bmRow = document.getElementById("gqrxBookmarksRow");
+    if (bmRow != null)
+    {
+        var have = g.bookmarks && g.bookmarks.length > 0;
+        bmRow.hidden = !have;
+        if (have && gqrxBookmarksData === null)
+        {
+            gqrxBookmarksData = g.bookmarks;
+            gqrxRenderBookmarks();
+        }
+    }
+}
+
+function gqrxRenderBookmarks()
+{
+    var box = document.getElementById("gqrxBookmarks");
+    if (box == null || gqrxBookmarksData == null) { return; }
+    var filterEl = document.getElementById("gqrxBmFilter");
+    var q = filterEl ? filterEl.value.trim().toLowerCase() : "";
+
+    box.innerHTML = "";
+    for (var i = 0; i < gqrxBookmarksData.length; i++)
+    {
+        var b = gqrxBookmarksData[i];
+        var hay = (b.name + " " + (b.tags || []).join(" ") + " " + b.modulation).toLowerCase();
+        if (q && hay.indexOf(q) === -1) { continue; }
+
+        var row = document.createElement("div");
+        row.className = "gqrx-bm";
+        var label = document.createElement("span");
+        label.className = "gqrx-bm-name";
+        label.innerText = (b.frequency / 1e6).toFixed(4) + "  " + b.name;
+        var btn = document.createElement("input");
+        btn.type = "button";
+        btn.className = "button gqrx-bm-btn";
+        btn.value = "Tune";
+        (function (hz) { btn.onclick = function () { gqrxPost("gqrxbookmark.html", { freq: hz }); }; })(b.frequency);
+        row.appendChild(label);
+        row.appendChild(btn);
+        box.appendChild(row);
+    }
+}
+
+// ── user actions ────────────────────────────────────────────────────────────
+
+function gqrxSetFreq()
+{
+    var f = document.getElementById("gqrxFreq");
+    if (f == null || f.value === "") { return; }
+    var hz = Math.round(parseFloat(f.value) * 1e6);
+    if (!isFinite(hz)) { return; }
+    gqrxMark("gqrxFreq");
+    gqrxPost("gqrxsetfrequency.html", { freq: hz });
+}
+
+function gqrxWidthInput()
+{
+    gqrxMark("gqrxWidth");
+    var w = document.getElementById("gqrxWidth");
+    if (w != null) { gqrxSetVal("gqrxWidthVal", (parseInt(w.value, 10) / 1000).toFixed(1) + " kHz"); }
+}
+
+function gqrxSendMode()
+{
+    gqrxMark("gqrxMode"); gqrxMark("gqrxWidth");
+    var m = document.getElementById("gqrxMode");
+    var w = document.getElementById("gqrxWidth");
+    if (m == null || m.value === "") { return; }
+    gqrxPost("gqrxsetmode.html", { mode: m.value, passband: (w ? parseInt(w.value, 10) : 0) });
+}
+
+function gqrxSendShape()
+{
+    gqrxMark("gqrxShape");
+    var s = document.getElementById("gqrxShape");
+    if (s != null) { gqrxPost("gqrxsetshape.html", { shape: s.value }); }
+}
+
+function gqrxRFInput()
+{
+    gqrxMark("gqrxRF");
+    var rf = document.getElementById("gqrxRF");
+    if (rf != null) { gqrxSetVal("gqrxRFVal", parseFloat(rf.value).toFixed(1)); }
+    gqrxDebounce("rf", gqrxSendRF, 120);
+}
+function gqrxSendRF()
+{
+    gqrxMark("gqrxRF");
+    var rf = document.getElementById("gqrxRF");
+    var name = document.getElementById("gqrxRFName");
+    if (rf != null && name != null) { gqrxPost("gqrxsetlevel.html", { name: name.innerText + "_GAIN", value: rf.value }); }
+}
+
+function gqrxAFInput()
+{
+    gqrxMark("gqrxAF");
+    var af = document.getElementById("gqrxAF");
+    if (af != null) { gqrxSetVal("gqrxAFVal", parseFloat(af.value).toFixed(0)); }
+    gqrxDebounce("af", gqrxSendAF, 120);
+}
+function gqrxSendAF()
+{
+    gqrxMark("gqrxAF");
+    var af = document.getElementById("gqrxAF");
+    if (af != null) { gqrxPost("gqrxsetlevel.html", { name: "AF", value: af.value }); }
+}
+
+function gqrxSqlInput()
+{
+    gqrxMark("gqrxSql");
+    var sq = document.getElementById("gqrxSql");
+    if (sq != null) { gqrxSetVal("gqrxSqlVal", parseFloat(sq.value).toFixed(0)); }
+    gqrxDebounce("sql", gqrxSendSql, 120);
+}
+function gqrxSendSql()
+{
+    gqrxMark("gqrxSql");
+    var sq = document.getElementById("gqrxSql");
+    if (sq != null) { gqrxPost("gqrxsetlevel.html", { name: "SQL", value: sq.value }); }
+}
+
+function gqrxToggleMute()
+{
+    gqrxMark("gqrxMute");
+    var mu = document.getElementById("gqrxMute");
+    if (mu != null) { gqrxPost("gqrxmute.html", { on: mu.checked ? 1 : 0 }); }
+}

@@ -506,6 +506,37 @@ final class SDRController {
 
     private(set) var lastError: Error?
 
+    // MARK: Gqrx remote control
+    //
+    // Populated only while `statusFunction == "Gqrx"`. `startGqrxRemote()` opens
+    // a `GqrxRemoteControlClient` to `127.0.0.1:7356` and runs a ~1 Hz poll that
+    // mirrors Gqrx's state into these `@Observable` properties; the "Listen to
+    // Gqrx" web panel reads them via `nowplayingstatus.html` and writes back
+    // through the `gqrxSet*` methods. Everything tears down in
+    // `teardownGqrxRemote()` the moment any other source starts or Stop is hit.
+
+    @ObservationIgnored private var gqrxRemote: GqrxRemoteControlClient?
+
+    /// True while a `GqrxRemoteControlClient` is talking to a live Gqrx.
+    private(set) var gqrxAvailable = false
+    private(set) var gqrxFrequencyHz: Int64 = 0
+    private(set) var gqrxMode = ""
+    private(set) var gqrxPassbandHz = 0
+    private(set) var gqrxFilterShape = 1
+    /// True when this Gqrx build carries the `FILTER_SHAPE` level (PR #1463).
+    private(set) var gqrxHasFilterShape = false
+    private(set) var gqrxSquelchDBFS: Double = -150
+    private(set) var gqrxAFGainDB: Double = 0
+    /// The first `<stage>_GAIN` name `l ?` advertised (usually `RF` for RTL-SDR),
+    /// or "" when the running device exposes no remote-settable gain.
+    private(set) var gqrxRFGainName = ""
+    private(set) var gqrxRFGainValue: Double = 0
+    private(set) var gqrxSignalDBFS: Double = -120
+    private(set) var gqrxMuted = false
+    private(set) var gqrxModeList: [String] = []
+    /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
+    private(set) var gqrxBookmarks: [GqrxBookmark] = []
+
     init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
@@ -895,6 +926,103 @@ final class SDRController {
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true)
+        if Self.gqrxRemoteControlEnabled { startGqrxRemote() }
+    }
+
+    /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
+    /// filter / gain / bookmarks driving a running Gqrx over TCP 7356).
+    ///
+    /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
+    /// filter / gain / bookmarks driving a running Gqrx over TCP 7356, on top of
+    /// the Gqrx PRs [#1463](https://github.com/gqrx-sdr/gqrx/pull/1463) /
+    /// [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)). With it `false` the
+    /// "Listen to Gqrx" page is the unchanged one‑way audio relay.
+    static let gqrxRemoteControlEnabled = true
+
+    // MARK: Gqrx remote-control channel
+
+    /// Open a fresh `GqrxRemoteControlClient` and start its poll. Called at the
+    /// end of `startGqrxListening`; independent of the audio relay, so the page
+    /// still streams audio if Gqrx's remote control is off.
+    ///
+    /// The client is a plain class over a blocking BSD socket on its own serial
+    /// queue (like `RTLSDRStatusListener`) — nothing here touches the Swift
+    /// concurrency pool or the main actor except the `onSnapshot` hop below, so
+    /// a slow or dead Gqrx can never stall the web server.
+    private func startGqrxRemote() {
+        teardownGqrxRemote()
+        let client = GqrxRemoteControlClient()
+        client.onSnapshot = { [weak self] snap in
+            Task { @MainActor [weak self] in self?.applyGqrxSnapshot(snap) }
+        }
+        gqrxRemote = client
+        client.start()
+    }
+
+    @MainActor private func applyGqrxSnapshot(_ s: GqrxSnapshot) {
+        gqrxAvailable = s.reachable
+        if let v = s.frequencyHz { gqrxFrequencyHz = v }
+        if let v = s.mode { gqrxMode = v }
+        if let v = s.passbandHz { gqrxPassbandHz = v }
+        if let v = s.filterShape { gqrxFilterShape = v }
+        if let v = s.squelchDBFS, v.isFinite { gqrxSquelchDBFS = v }
+        if let v = s.afGainDB, v.isFinite { gqrxAFGainDB = v }
+        if let v = s.rfGainValue, v.isFinite { gqrxRFGainValue = v }
+        if let v = s.signalDBFS, v.isFinite { gqrxSignalDBFS = v }
+        if let v = s.muted { gqrxMuted = v }
+        gqrxHasFilterShape = s.hasFilterShape
+        gqrxRFGainName = s.rfGainName
+        if !s.modeList.isEmpty { gqrxModeList = s.modeList }
+        if !s.bookmarks.isEmpty { gqrxBookmarks = s.bookmarks }
+    }
+
+    private func teardownGqrxRemote() {
+        gqrxRemote?.stop()
+        gqrxRemote = nil
+        gqrxAvailable = false
+        gqrxBookmarks = []
+        gqrxModeList = []
+        gqrxHasFilterShape = false
+        gqrxRFGainName = ""
+    }
+
+    /// Live writes from the "Listen to Gqrx" control panel. Each updates the
+    /// mirrored property immediately (optimistic) and hands the command to the
+    /// client's queue (fire-and-forget); the ~1 Hz poll corrects the mirror if
+    /// the write was rejected or Gqrx's own GUI also moved.
+
+    func gqrxSetFrequency(_ hz: Int64) {
+        gqrxFrequencyHz = hz
+        gqrxRemote?.setFrequency(hz)
+    }
+
+    func gqrxSetMode(_ mode: String, passbandHz: Int) {
+        gqrxMode = mode
+        if passbandHz > 0 { gqrxPassbandHz = passbandHz }
+        gqrxRemote?.setMode(mode, passbandHz: passbandHz)
+    }
+
+    func gqrxSetFilterShape(_ shape: Int) {
+        gqrxFilterShape = shape
+        gqrxRemote?.setFilterShape(shape)
+    }
+
+    func gqrxSetLevel(_ name: String, _ value: Double) {
+        switch name.uppercased() {
+        case "SQL": gqrxSquelchDBFS = value
+        case "AF":  gqrxAFGainDB = value
+        default:    if name.uppercased().hasSuffix("_GAIN") { gqrxRFGainValue = value }
+        }
+        gqrxRemote?.setLevel(name, value)
+    }
+
+    func gqrxSetMuted(_ on: Bool) {
+        gqrxMuted = on
+        gqrxRemote?.setMuted(on)
+    }
+
+    func gqrxApplyBookmark(_ frequencyHz: Int64) {
+        gqrxRemote?.applyBookmarkFrequency(frequencyHz)
     }
 
     private func makeUDPReceiverTaskItem(port: UInt16, bind: String = "127.0.0.1") -> TaskItem? {
@@ -1151,6 +1279,7 @@ final class SDRController {
     func terminateTasks(enterIdle: Bool = true) {
         pipelineStartTask?.cancel()
         pipelineStartTask = nil
+        teardownGqrxRemote()
         radioTaskPipelineManager.terminate()
         cleanUpSpeechSynthTextFile()
         cleanUpAnnouncementClip()
@@ -1576,6 +1705,10 @@ final class SDRController {
     /// incoming and outgoing PCMUDPSenders never both feed LiveAudioServer.
     /// Otherwise (fade off, or stale leftovers) it's an outright stop.
     private func stopFillerForNewSource() {
+        // Every real source starts by calling this; it's the one chokepoint
+        // that reliably fires when we leave Gqrx mode for another source.
+        teardownGqrxRemote()
+
         fillerGeneration &+= 1
 
         // Stop the announcement feeder outright — it only feeds the filler
