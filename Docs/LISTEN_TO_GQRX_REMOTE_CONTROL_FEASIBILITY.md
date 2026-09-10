@@ -432,7 +432,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `receiver::set_filter(low, high, filter_shape)` already takes the shape; `receiver::filter_shape` enum already defined; `DockRxOpt::setCurrentFilterShape` / `currentFilterShape`. |
 | **Tests / docs** | Gqrx has no RC unit‑test harness (no `test/`, no `add_test`) — manual `nc` steps in the PR body, same as #1446. One block added to `remote-control.txt`. |
 | **Review‑risk notes** | Shape is a single app‑wide setting in Gqrx (not per‑mode) and persists across demod switches — stated in the doc block. Accepts ints and `SOFT`/`NORMAL`/`SHARP`. |
-| **Status** | **Open — [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-filter-shape` = commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`; Qt5 Debug build green. Filed 2026‑09‑09; not yet runtime‑tested beyond compilation. |
+| **Status** | **Open — [gqrx#1463](https://github.com/gqrx-sdr/gqrx/pull/1463)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-filter-shape` = commit `4c4be36` (5 files, +70/−2), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build (Qt5 offscreen, no SDR): `l ?`/`L ?` list `FILTER_SHAPE`; `l FILTER_SHAPE`=`1` default; `L FILTER_SHAPE 2`/`soft`/`normal` → `RPRT 0` with correct readback; `L FILTER_SHAPE 5` → `RPRT 1`; `m` still two lines. |
 
 ### PR 2 — bookmark download & recall  *(new, ~0.5–1 day)*
 
@@ -444,7 +444,7 @@ Order below is by ascending size / review risk.
 | **Reuses** | `Bookmarks` singleton, `BookmarkInfo` (`frequency·name·modulation·bandwidth·tags[]`), `MainWindow::onBookmarkActivated`. |
 | **Tests / docs** | No RC unit‑test harness in Gqrx — manual `nc` steps in the PR body. New `remote-control.txt` block incl. the delimiter/sanitisation contract. |
 | **Review‑risk notes** | Index staleness if the list changes between calls — that's why `\set_bookmark_freq` ships alongside. Read + apply only; `\add_bookmark`/`\remove_bookmark` explicitly out of scope. `bandwidth` is narrowed `qint64`→`int` to match the existing dock signal. |
-| **Status** | **Open — [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-bookmarks` = commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`; Qt5 Debug build green. Filed 2026‑09‑09; not yet runtime‑tested beyond compilation. |
+| **Status** | **Open — [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)** (`MERGEABLE`, no review yet). Branch `gqrx-rc-bookmarks` = commit `889e801` (4 files, +182), off `upstream/master` `08f84f5`. **Smoke‑tested 2026‑09‑09** against a headless build with a seeded `bookmarks.csv`: `\get_bookmarks` returns the count + `\|`‑rows (a `\|` in a name came back space‑sanitised); `\get_bookmark_tags` and `\get_bookmarks_in_range` correct; `\get_bookmarks_in_range 100 50` → `RPRT 1`; `\set_bookmark 0` / `\set_bookmark_freq <Hz>` retuned (`f` confirmed) and switched mode; out‑of‑range / no‑match → `RPRT 1`; `\reload_bookmarks` → `RPRT 0`. |
 
 ### PR 3 — input/output device control — **#1446**  *(open, by Douglas Ward)*
 
@@ -490,7 +490,9 @@ temporary build AntennaHead is developed against.
 | Branches | `gqrx-remote-control-device-managment` = **#1446** (`57f5ae4`, off `d657e66`) · **`gqrx-rc-filter-shape`** = **#1463** (`4c4be36`, +70/−2) · **`gqrx-rc-bookmarks`** = **#1464** (`889e801`, +182) — the last two each one commit off `upstream/master` `08f84f5`, pushed to `origin` and open upstream. `master` still tracks the stale Feb `upstream/master`. |
 | Currency | `git fetch upstream` done — `upstream/master` now at `08f84f5` (`v2.6.1`+…; the local `master` ref is still the Feb `v2.17.7-17-g57f5ae4` and is behind, but the two new branches are off the fresh `upstream/master`, so it doesn't matter). Re‑`fetch` again before pushing, in case upstream moved. |
 | Toolchain | MacPorts at `/opt/local`: `cmake` 3.31, **Qt 5.15.18**, GNU Radio **3.8.5**, boost 1.76. Older SDR stack, fine for RC‑protocol work. |
-| Build dir | The original `gqrx/build/` was configured for the pre‑move path and is gone (trashed). Current working build dir is **`gqrx/build-fs/`** (`cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=/opt/local ..`); `build-fs/src/gqrx` compiles and **runs** (arm64, linker ad‑hoc signed). Not branch‑specific — `make` there rebuilds whatever is checked out. |
+| Build dir | The original `gqrx/build/` was configured for the pre‑move path and is gone (trashed). Current working build dir is **`gqrx/build-fs/`** (`cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=/opt/local -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ ..`); `build-fs/src/gqrx` compiles and **runs** (arm64, linker ad‑hoc signed). Not branch‑specific — `make` there rebuilds whatever is checked out. |
+| Toolchain caveat | `Xcode-beta.app` was removed mid‑session (an `Xcode_27_RC.xip` is sitting in `/Applications`), so `xcode-select` now points at `/Library/Developer/CommandLineTools` (Apple clang 21). A `build-fs/` configured against the old Xcode‑beta path fails with `c++: No such file or directory` — reconfigure with the explicit `CMAKE_*_COMPILER=/usr/bin/clang…` above. Builds are green under CLT clang 21. |
+| Headless run | For a no‑device smoke test: `XDG_CONFIG_HOME=<scratch>/config QT_QPA_PLATFORM=offscreen build-fs/src/gqrx -c smoke.conf`, with `smoke.conf` = `[General] configversion=4, crashed=false` + `[remote_control] enabled=true` and **no `input/device`** (empty device ⇒ `loadConfig` still returns true, no modal I/O dialog). Seed `<scratch>/config/gqrx/bookmarks.csv` for the bookmark commands. RC server binds `127.0.0.1:7356`; drive it with a short Python `socket` client (macOS `nc` didn't print replies here). |
 | Uncommitted | one line in `macos_bundle.sh` (`CONDA_PREFIX="/opt/local"`) — a local hack; kept out of all three PR commits. |
 
 ### Iterating on a PR
@@ -559,9 +561,10 @@ Proceed, in phases:
    with mute / Gqrx‑record / RDS text.
 2. **Shepherd the three Gqrx PRs** (§10). Filter shape ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463))
    and bookmarks ([#1464](https://github.com/gqrx-sdr/gqrx/pull/1464)) are
-   **filed** and `MERGEABLE`; do the manual `nc` pass against a running Gqrx and
-   respond to review. Rebase [#1446](https://github.com/gqrx-sdr/gqrx/pull/1446)
-   onto current `upstream/master` and shepherd it too.
+   **filed, `MERGEABLE`, and smoke‑tested** (headless build, `nc` against the RC
+   port — see §10 status rows) — remaining work is responding to review. Rebase
+   [#1446](https://github.com/gqrx-sdr/gqrx/pull/1446) onto current
+   `upstream/master` and shepherd it too.
 3. **Wire the matching AntennaHead panels**, each gated on its runtime probe
    (§9): the shape selector on `FILTER_SHAPE` appearing in `l ?`; the device
    picker on `\get_input_device_list`; the bookmarks panel on `\get_bookmarks`.
