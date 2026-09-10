@@ -536,6 +536,12 @@ final class SDRController {
     private(set) var gqrxModeList: [String] = []
     /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
     private(set) var gqrxBookmarks: [GqrxBookmark] = []
+    /// True when this Gqrx carries the device-control commands (PR #1446).
+    private(set) var gqrxHasDeviceControl = false
+    private(set) var gqrxInputDevices: [String] = []   // labels
+    private(set) var gqrxInputDevice = ""              // current gr-osmosdr string
+    private(set) var gqrxOutputDevices: [String] = []
+    private(set) var gqrxOutputDevice = ""
 
     init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
         self.sqliteController = sqliteController ?? .shared
@@ -1000,6 +1006,11 @@ final class SDRController {
         gqrxRFGainName = s.rfGainName
         if !s.modeList.isEmpty { gqrxModeList = s.modeList }
         if !s.bookmarks.isEmpty { gqrxBookmarks = s.bookmarks }
+        gqrxHasDeviceControl = s.hasDeviceControl
+        if !s.inputDeviceList.isEmpty { gqrxInputDevices = s.inputDeviceList }
+        if !s.outputDeviceList.isEmpty { gqrxOutputDevices = s.outputDeviceList }
+        if !s.inputDevice.isEmpty { gqrxInputDevice = s.inputDevice }
+        if !s.outputDevice.isEmpty { gqrxOutputDevice = s.outputDevice }
     }
 
     private func teardownGqrxRemote() {
@@ -1011,6 +1022,9 @@ final class SDRController {
         gqrxModeList = []
         gqrxHasFilterShape = false
         gqrxRFGainName = ""
+        gqrxHasDeviceControl = false
+        gqrxInputDevices = []
+        gqrxOutputDevices = []
     }
 
     /// Live writes from the "Listen to Gqrx" control panel. Each updates the
@@ -1046,6 +1060,16 @@ final class SDRController {
     func gqrxSetMuted(_ on: Bool) {
         gqrxMuted = on
         gqrxRemote?.setMuted(on)
+    }
+
+    func gqrxSetInputDevice(_ device: String) {
+        gqrxInputDevice = device
+        gqrxRemote?.setInputDevice(device)
+    }
+
+    func gqrxSetOutputDevice(_ device: String) {
+        gqrxOutputDevice = device
+        gqrxRemote?.setOutputDevice(device)
     }
 
     func gqrxApplyBookmark(_ frequencyHz: Int64) {

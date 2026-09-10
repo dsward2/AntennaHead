@@ -1982,7 +1982,19 @@ function initFeedbackSettings()
 // jQuery serializeArray() shape the server's formFields() parser expects.
 
 var gqrxModesInit = false;
+var gqrxInDevInit = false;
+var gqrxOutDevInit = false;
 var gqrxBookmarksData = null;
+
+// A gr-osmosdr device string for one \get_input_device_list label. RTL-SDR
+// labels carry the dongle serial ("… SN: 00000180") -> "rtl=<serial>", which
+// \set_input_device accepts unambiguously; anything else is sent as-is.
+function gqrxDeviceStringFor(label)
+{
+    var m = label.match(/SN:\s*([0-9A-Za-z]+)/);
+    if (m) { return "rtl=" + m[1]; }
+    return label;
+}
 var gqrxTouched = {};          // control id -> last user-interaction timestamp
 var gqrxDebounceTimers = {};
 
@@ -2126,6 +2138,79 @@ function gqrxUpdatePanel(g)
             gqrxRenderBookmarks();
         }
     }
+
+    // Device pickers (Gqrx PR #1446)
+    var devRow = document.getElementById("gqrxDevRow");
+    if (devRow != null)
+    {
+        devRow.hidden = !g.has_device_control;
+        if (g.has_device_control)
+        {
+            var inSel = document.getElementById("gqrxInDev");
+            var outSel = document.getElementById("gqrxOutDev");
+
+            if (!gqrxInDevInit && g.input_devices && g.input_devices.length)
+            {
+                inSel.innerHTML = "";
+                // The device list gives labels, not the strings \set_input_device
+                // wants, and gqrx's current string ("rtl=1") rarely matches a
+                // serial-based option — so lead with a "keep current" entry.
+                var keep = document.createElement("option");
+                keep.value = "";
+                keep.text = g.input_device ? ("— keep current (" + g.input_device + ") —") : "— keep current —";
+                inSel.appendChild(keep);
+                for (var i = 0; i < g.input_devices.length; i++)
+                {
+                    var o = document.createElement("option");
+                    o.text = g.input_devices[i];
+                    o.value = gqrxDeviceStringFor(g.input_devices[i]);
+                    inSel.appendChild(o);
+                }
+                gqrxInDevInit = true;
+            }
+            else if (!gqrxInDevInit)
+            {
+                inSel.innerHTML = "<option value=''>(list unavailable — stop Gqrx's DSP to enumerate)</option>";
+            }
+
+            if (!gqrxOutDevInit && g.output_devices && g.output_devices.length)
+            {
+                outSel.innerHTML = "";
+                for (var j = 0; j < g.output_devices.length; j++)
+                {
+                    var oo = document.createElement("option");
+                    oo.text = g.output_devices[j]; oo.value = g.output_devices[j];
+                    outSel.appendChild(oo);
+                }
+                gqrxOutDevInit = true;
+            }
+
+            var cur = document.getElementById("gqrxInDevCur");
+            if (cur != null) { cur.innerText = g.input_device ? ("current: " + g.input_device) : ""; }
+
+            if (gqrxInDevInit && !gqrxFresh("gqrxInDev") && g.input_device)
+            {
+                for (var k = 0; k < inSel.options.length; k++)
+                {
+                    if (inSel.options[k].value === g.input_device) { inSel.selectedIndex = k; break; }
+                }
+            }
+            if (gqrxOutDevInit && !gqrxFresh("gqrxOutDev") && g.output_device) { outSel.value = g.output_device; }
+        }
+    }
+}
+
+function gqrxSendInDev()
+{
+    gqrxMark("gqrxInDev");
+    var s = document.getElementById("gqrxInDev");
+    if (s != null && s.value) { gqrxPost("gqrxsetinputdevice.html", { device: s.value }); }
+}
+function gqrxSendOutDev()
+{
+    gqrxMark("gqrxOutDev");
+    var s = document.getElementById("gqrxOutDev");
+    if (s != null && s.value) { gqrxPost("gqrxsetoutputdevice.html", { device: s.value }); }
 }
 
 function gqrxRenderBookmarks()

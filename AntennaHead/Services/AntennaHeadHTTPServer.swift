@@ -595,6 +595,18 @@ final class AntennaHeadHTTPServer {
             }
             return okResponse()
 
+        case "/gqrxsetinputdevice.html":
+            if let d = formFields(fromBody: request.body)["device"], !d.isEmpty {
+                sdrController?.gqrxSetInputDevice(d)
+            }
+            return okResponse()
+
+        case "/gqrxsetoutputdevice.html":
+            if let d = formFields(fromBody: request.body)["device"], !d.isEmpty {
+                sdrController?.gqrxSetOutputDevice(d)
+            }
+            return okResponse()
+
         case "/texttospeechchoosefolder.html":
             // Runs a native folder chooser on the host Mac and persists the
             // selection (security-scoped bookmark + path). Responds with the
@@ -1449,6 +1461,15 @@ final class AntennaHeadHTTPServer {
         s += "<hr><label>Gqrx Remote Control</label>"
         s += "<p id='gqrxStatus' class='gqrx-status'>Connecting…</p>"
 
+        // Input / output device (only when Gqrx carries PR #1446)
+        s += "<div class='gqrx-row' id='gqrxDevRow' hidden>"
+        s += "<label for='gqrxInDev'>SDR device</label>"
+        s += "<select id='gqrxInDev' class='u-full-width' onchange='gqrxSendInDev();'></select>"
+        s += "<p id='gqrxInDevCur' class='gqrx-status'></p>"
+        s += "<label for='gqrxOutDev'>Audio output</label>"
+        s += "<select id='gqrxOutDev' class='u-full-width' onchange='gqrxSendOutDev();'></select>"
+        s += "</div>"
+
         // Frequency
         s += "<div class='gqrx-row'><label for='gqrxFreq'>Frequency (MHz)</label>"
         s += "<div class='gqrx-inline'>"
@@ -2281,6 +2302,11 @@ final class AntennaHeadHTTPServer {
                     "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,
                     "bandwidth": $0.bandwidthHz, "tags": $0.tags,
                 ] },
+                "has_device_control": sdr.gqrxHasDeviceControl,
+                "input_devices": sdr.gqrxInputDevices,
+                "input_device": sdr.gqrxInputDevice,
+                "output_devices": sdr.gqrxOutputDevices,
+                "output_device": sdr.gqrxOutputDevice,
             ]
         }
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)

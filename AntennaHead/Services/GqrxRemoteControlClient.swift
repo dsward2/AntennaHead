@@ -26,6 +26,13 @@ struct GqrxSnapshot: Sendable {
     var muted: Bool?
     var modeList: [String] = []
     var bookmarks: [GqrxBookmark] = []
+
+    /// True when Gqrx carries the device-control commands (PR #1446).
+    var hasDeviceControl = false
+    var inputDeviceList: [String] = []     // human-readable labels
+    var inputDevice = ""                    // current gr-osmosdr device string
+    var outputDeviceList: [String] = []     // audio output device names
+    var outputDevice = ""
 }
 
 /// A client for Gqrx's rigctl-style TCP remote-control protocol
@@ -60,6 +67,11 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     private var rfGainName = ""
     private var modeList: [String] = []
     private var bookmarks: [GqrxBookmark] = []
+    private var hasDeviceControl = false
+    private var inputDeviceList: [String] = []
+    private var outputDeviceList: [String] = []
+    private var currentInputDevice = ""
+    private var currentOutputDevice = ""
 
     init(host: String = "127.0.0.1", port: UInt16 = 7356) {
         self.host = host
@@ -101,6 +113,8 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     func setLevel(_ name: String, _ value: Double) { send("L \(name) \(String(format: "%.2f", value))") }
     func setMuted(_ on: Bool)                   { send("U MUTE \(on ? 1 : 0)") }
     func applyBookmarkFrequency(_ hz: Int64)    { send("\\set_bookmark_freq \(hz)") }
+    func setInputDevice(_ dev: String)         { send("\\set_input_device \(dev)") }
+    func setOutputDevice(_ dev: String)        { send("\\set_output_device \(dev)") }
 
     private func send(_ command: String) {
         queue.async { [weak self] in _ = self?.exchange(command) }
@@ -194,11 +208,66 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
 
     private func discover() {
         guard exchange("_") != nil else { return }
+
+        discoverDevices()
+
         let levels = exchange("l ?")?.first?.split(separator: " ").map(String.init) ?? []
         hasFilterShape = levels.contains { $0.caseInsensitiveCompare("FILTER_SHAPE") == .orderedSame }
         rfGainName = levels.first { $0.uppercased().hasSuffix("_GAIN") }.map { String($0.dropLast(5)) } ?? ""
         modeList = exchange("M ?")?.first?.split(separator: " ").map(String.init) ?? []
         bookmarks = fetchBookmarks() ?? []
+    }
+
+    /// Device control (Gqrx PR #1446), fetched **once per connection** — every
+    /// `\get_*_device*` command in #1446 re-enumerates the SDR hardware, which
+    /// stalls for several seconds while a device is open, so this must not run
+    /// in the 1 Hz poll. Runs right after `_` on a fresh connection, before any
+    /// other command, so replies can't batch up behind it.
+    private func discoverDevices() {
+        let inList = deviceListReply("\\get_input_device_list", timeoutSec: 12)
+        hasDeviceControl = !inList.isEmpty && inList != ["RPRT 1"]
+        guard hasDeviceControl else {
+            inputDeviceList = []; outputDeviceList = []
+            currentInputDevice = ""; currentOutputDevice = ""
+            return
+        }
+        inputDeviceList = inList
+        outputDeviceList = deviceListReply("\\get_output_device_list", timeoutSec: 10)
+            .filter { $0 != "RPRT 1" }
+        currentInputDevice  = exchangeLong("\\get_input_device")
+        currentOutputDevice = exchangeLong("\\get_output_device")
+    }
+
+    /// Like `exchange(_, lineCount: 1)` but with a long read window, for the
+    /// #1446 getters that re-probe hardware. Returns "" on failure.
+    private func exchangeLong(_ cmd: String) -> String {
+        let lines = deviceListReply(cmd, timeoutSec: 10)
+        return (lines.first ?? "") == "RPRT 1" ? "" : (lines.first ?? "")
+    }
+
+    /// Send a command whose reply is an uncounted newline list, and return the
+    /// lines. One `read()` — Gqrx writes the whole (short) list in one go —
+    /// with `timeoutSec` applied just for this call.
+    private func deviceListReply(_ cmd: String, timeoutSec: Int) -> [String] {
+        guard ensureConnected() else { return [] }
+        readBuffer.removeAll(keepingCapacity: true)
+
+        var tv = timeval(tv_sec: timeoutSec, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        defer {
+            var back = timeval(tv_sec: 2, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &back, socklen_t(MemoryLayout<timeval>.size))
+        }
+
+        let payload = Array((cmd + "\n").utf8)
+        guard payload.withUnsafeBytes({ write(fd, $0.baseAddress, $0.count) }) == payload.count
+        else { closeSocket(); return [] }
+        var chunk = [UInt8](repeating: 0, count: 65536)
+        let n = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+        guard n > 0 else { closeSocket(); return [] }
+        return String(decoding: chunk[0..<n], as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\r")) }
     }
 
     private func fetchBookmarks() -> [GqrxBookmark]? {
@@ -239,6 +308,9 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         snap.rfGainName = rfGainName
         snap.modeList = modeList
         snap.bookmarks = bookmarks
+        snap.hasDeviceControl = hasDeviceControl
+        snap.inputDeviceList = inputDeviceList
+        snap.outputDeviceList = outputDeviceList
 
         let freq = exchange("f")?.first.flatMap { Int64($0.trimmingCharacters(in: .whitespaces)) }
         snap.reachable = (freq != nil)
@@ -256,6 +328,10 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         snap.afGainDB = doubleReply("l AF")
         if !rfGainName.isEmpty { snap.rfGainValue = doubleReply("l \(rfGainName)_GAIN") }
         if let mu = exchange("u MUTE")?.first?.trimmingCharacters(in: .whitespaces) { snap.muted = (mu == "1") }
+        // Cached from discoverDevices() — never re-queried in the poll (#1446's
+        // getters re-probe hardware and would stall the 1 Hz loop).
+        snap.inputDevice = currentInputDevice
+        snap.outputDevice = currentOutputDevice
 
         onSnapshot?(snap)
     }
