@@ -12,6 +12,10 @@ against `gqrx-sdr/gqrx` (see
 | [gqrx#1464](https://github.com/gqrx-sdr/gqrx/pull/1464) | `\get_bookmarks` / `\set_bookmark*` / `\reload_bookmarks` | `gqrx-rc-bookmarks` |
 | [gqrx#1446](https://github.com/gqrx-sdr/gqrx/pull/1446) | `\get/set_input_device` + `_output_` variants | `gqrx-remote-control-device-managment` |
 
+The three are combined on **`dsward2/gqrx` branch `gqrx-for-antennahead`**
+(first cut `aafbb7c`, 2026‑09‑10 — compiles + RC‑probe verified). §2 is how it's
+built and refreshed.
+
 Until they land in a tagged release it may be a long wait, and acceptance isn't
 guaranteed. **Gqrx for AntennaHead** is a stop‑gap: official Gqrx source +
 those three PRs, built into a **Developer‑ID‑signed, hardened‑runtime,
@@ -63,31 +67,59 @@ layout `macos_bundle.sh` expects (that matters for Path B below).
 ## 2. The build branch
 
 Keep a long‑lived branch on **`dsward2/gqrx`** that is *fresh upstream* + a
-**merge** (not rebase/squash) of the three PR branches, so each PR stays
-independently updatable and re‑merging after a review revision is trivial.
+**sequential `--no-ff` merge** (not rebase/squash) of the three PR branches, so
+each PR stays independently updatable and re‑merging after a review revision is
+trivial.
+
+**Merge `gqrx-remote-control-device-managment` LAST**, one branch per `git
+merge` call:
 
 ```bash
 cd "/path/to/gqrx"                       # the dsward2/gqrx checkout
 git fetch upstream
 git switch -C gqrx-for-antennahead upstream/master
-git merge --no-ff gqrx-rc-filter-shape gqrx-rc-bookmarks gqrx-remote-control-device-managment
-#   (octopus merge; all three are add‑only in remote_control.{h,cpp} +
-#    remote-control.txt and have merged cleanly before — see feasibility §10)
+git merge --no-ff gqrx-rc-filter-shape        # clean
+git merge --no-ff gqrx-rc-bookmarks           # clean (auto-merge)
+git merge --no-ff gqrx-remote-control-device-managment   # 2 additive conflicts — see below
 git push -f origin gqrx-for-antennahead
 ```
 
-Refresh it whenever **upstream moves** or **any PR branch is updated**:
+Same recipe to **refresh** it whenever upstream moves or any PR branch is
+updated (it's a `switch -C` rebuild from scratch each time, not an incremental
+merge).
 
-```bash
-git fetch upstream
-git switch -C gqrx-for-antennahead upstream/master
-git merge --no-ff gqrx-rc-filter-shape gqrx-rc-bookmarks gqrx-remote-control-device-managment
-git push -f origin gqrx-for-antennahead
-```
-
-> This is the same content as the throw‑away `gqrx-rc-all` branch used for local
-> `build-fs/` testing during AntennaHead development — now given a stable name
-> and pushed so CI can build it.
+> ### Merge‑last caveat (learned 2026‑09‑10 building `aafbb7c`)
+>
+> A single **octopus** `git merge A B C` **fails** — the device branch
+> content‑conflicts with the other two. So does a naïve "keep both hunks"
+> auto‑resolve. All three PRs *append* to the same three regions of
+> `src/applications/gqrx/remote_control.cpp` and `.h` (the `cmd_*` declaration
+> list, the `\command` dispatch `else if` chain, and the function definitions
+> after `cmd_dump_state()`), plus `resources/remote-control.txt`.
+>
+> - `remote-control.txt`, `mainwindow.cpp`, `mainwindow.h`, `ioconfig.ui`,
+>   `plotter.h` **auto‑merge cleanly.**
+> - `remote_control.h` — **one** conflict, the `cmd_*` block at the end of the
+>   class. Resolve = keep **both** lists (bookmarks' six `cmd_*` then the device
+>   six).
+> - `remote_control.cpp` — **four** conflict hunks: the `#include` block, the
+>   dispatch chain, and two in the function‑definitions tail. The tail hunks are
+>   the tricky ones: git pairs `cmd_set_bookmark`'s closing
+>   `return QString("RPRT 0\n"); }` with `cmd_set_input_device`'s (they're
+>   identical), and `cmd_reload_bookmarks`'s `}` with `cmd_set_output_device`'s.
+>   Resolve by giving **each** function its own closing brace — the merged tail
+>   should contain all 14 new symbols (`rc_bookmark_sanitize`,
+>   `rc_bookmark_line`, the six `cmd_*bookmark*`, and the six
+>   `cmd_*_device*`), each a complete function. Interleaved source order is fine.
+> - **Verify the resolution builds** before pushing: `cmake` a throwaway dir and
+>   `make -j gqrx` (MacPorts Qt5 is enough for a syntax/link check — see
+>   [feasibility §11](LISTEN_TO_GQRX_REMOTE_CONTROL_FEASIBILITY.md#11-local-gqrx-build--test-environment)),
+>   then the `l ?` / `\get_bookmarks` / `\get_input_device_list` RC probe from §5.
+>   `aafbb7c` passed both.
+>
+> This is the same content as the throw‑away `gqrx-rc-all` branch once used for
+> local `build-fs/` testing — now `gqrx-for-antennahead`, pushed so CI can build
+> it.
 
 ### Branding patch (carry on the build branch, or as a 4th tiny "branch")
 
@@ -300,8 +332,11 @@ future official one.
 
 ## 7. TL;DR checklist
 
-1. `gqrx-for-antennahead` branch on `dsward2/gqrx` = `upstream/master` + `--no-ff`
-   merge of the three PR branches; push (`-f`).
+1. `gqrx-for-antennahead` branch on `dsward2/gqrx` = `upstream/master` + three
+   **sequential** `--no-ff` merges, **device‑control branch last**; resolve the
+   two additive `remote_control.{cpp,h}` conflicts (keep every new symbol,
+   brace each function), `make -j gqrx` to check, push (`-f`). First cut:
+   `aafbb7c`.
 2. Apply the branding patch (`macos_bundle.sh` names + identifier; optional
    settings‑dir isolation).
 3. Get a **Developer ID Application** cert + notary app‑specific password.
