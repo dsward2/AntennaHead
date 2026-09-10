@@ -59,6 +59,12 @@ documented remote‑control protocol over TCP?
 > see §10 / §11 for current branches and SHAs. Until they land in a tagged Gqrx
 > release the matching AntennaHead panels only appear when the client's probe
 > finds the command at runtime.
+>
+> **Interim distribution for other users:** rather than wait for the PRs,
+> [`GQRX_FOR_ANTENNAHEAD_BUILD.md`](GQRX_FOR_ANTENNAHEAD_BUILD.md) covers building
+> a Developer-ID-signed / notarized **Gqrx for AntennaHead** DMG from official
+> source + the three PRs (combined on `dsward2/gqrx` branch `gqrx-for-antennahead`,
+> first cut `aafbb7c` — compiles + RC-probe verified). Not sandboxed, and why.
 
 ---
 
@@ -611,7 +617,9 @@ phase 2 is the only work left, and it's not ours.**
    ([#1463](https://github.com/gqrx-sdr/gqrx/pull/1463#issuecomment-5611595188),
    [#1464](https://github.com/gqrx-sdr/gqrx/pull/1464#issuecomment-5611596577)).
    Remaining work is **responding to maintainer review** if/when it comes — nothing
-   further to push unless a reviewer asks.
+   further to push unless a reviewer asks. For users who don't want to wait, an
+   interim signed/notarized build carrying all three is documented in
+   [`GQRX_FOR_ANTENNAHEAD_BUILD.md`](GQRX_FOR_ANTENNAHEAD_BUILD.md).
 3. **Wire the matching AntennaHead panels**, each gated on its runtime probe
    (§9). ✅ **Done in the same PR #15** rather than deferred — the shape selector
    (on `FILTER_SHAPE` in `l ?`), the SDR + audio‑output device pickers (on
