@@ -2127,6 +2127,15 @@ function gqrxUpdatePanel(g)
         if (mu != null) { mu.checked = !!g.muted; }
     }
 
+    var dsp = document.getElementById("gqrxDsp");
+    if (dsp != null && !gqrxFresh("gqrxDsp"))
+    {
+        var on = !!g.dsp_running;
+        dsp.dataset.on = on ? "1" : "0";
+        dsp.value = on ? "⏸ Pause Gqrx receiver" : "▶ Start Gqrx receiver";
+        dsp.className = "twelve columns button" + (on ? " button-primary" : "");
+    }
+
     var bmRow = document.getElementById("gqrxBookmarksRow");
     if (bmRow != null)
     {
@@ -2326,4 +2335,16 @@ function gqrxToggleMute()
     gqrxMark("gqrxMute");
     var mu = document.getElementById("gqrxMute");
     if (mu != null) { gqrxPost("gqrxmute.html", { on: mu.checked ? 1 : 0 }); }
+}
+
+function gqrxToggleDsp()
+{
+    gqrxMark("gqrxDsp");
+    var dsp = document.getElementById("gqrxDsp");
+    if (dsp == null) { return; }
+    var next = dsp.dataset.on === "1" ? 0 : 1;
+    dsp.dataset.on = String(next);
+    dsp.value = next ? "⏸ Pause Gqrx receiver" : "▶ Start Gqrx receiver";
+    dsp.className = "twelve columns button" + (next ? " button-primary" : "");
+    gqrxPost("gqrxsetdsp.html", { on: next });
 }

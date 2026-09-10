@@ -589,6 +589,10 @@ final class AntennaHeadHTTPServer {
             sdrController?.gqrxSetMuted(formFields(fromBody: request.body)["on"] == "1")
             return okResponse()
 
+        case "/gqrxsetdsp.html":
+            sdrController?.gqrxSetDSP(formFields(fromBody: request.body)["on"] == "1")
+            return okResponse()
+
         case "/gqrxbookmark.html":
             if let hz = Int64(formFields(fromBody: request.body)["freq"] ?? "") {
                 sdrController?.gqrxApplyBookmark(hz)
@@ -1461,6 +1465,11 @@ final class AntennaHeadHTTPServer {
         s += "<hr><label>Gqrx Remote Control</label>"
         s += "<p id='gqrxStatus' class='gqrx-status'>Connecting…</p>"
 
+        // Receiver run state (Gqrx's Play/Pause = DSP on/off). The Tune actions
+        // also nudge this on, but a visible control matches Gqrx's own button.
+        s += "<div class='gqrx-row'><input type='button' id='gqrxDsp' class='twelve columns button' "
+        s += "value='Receiver' onclick='gqrxToggleDsp();'></div>"
+
         // Input / output device (only when Gqrx carries PR #1446)
         s += "<div class='gqrx-row' id='gqrxDevRow' hidden>"
         s += "<label for='gqrxInDev'>SDR device</label>"
@@ -2297,6 +2306,7 @@ final class AntennaHeadHTTPServer {
                 "rf_gain": finite(sdr.gqrxRFGainValue),
                 "signal": finite(sdr.gqrxSignalDBFS),
                 "muted": sdr.gqrxMuted,
+                "dsp_running": sdr.gqrxDSPRunning,
                 "modes": sdr.gqrxModeList,
                 "bookmarks": sdr.gqrxBookmarks.map { [
                     "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,

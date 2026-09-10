@@ -24,6 +24,8 @@ struct GqrxSnapshot: Sendable {
     var rfGainValue: Double?
     var signalDBFS: Double?
     var muted: Bool?
+    /// Gqrx's DSP / receiver run state (`u DSP`) — nil until first polled.
+    var dspRunning: Bool?
     var modeList: [String] = []
     var bookmarks: [GqrxBookmark] = []
 
@@ -112,6 +114,7 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     func setFilterShape(_ shape: Int)           { send("L FILTER_SHAPE \(shape)") }
     func setLevel(_ name: String, _ value: Double) { send("L \(name) \(String(format: "%.2f", value))") }
     func setMuted(_ on: Bool)                   { send("U MUTE \(on ? 1 : 0)") }
+    func setDSP(_ on: Bool)                     { send("U DSP \(on ? 1 : 0)") }
     func applyBookmarkFrequency(_ hz: Int64)    { send("\\set_bookmark_freq \(hz)") }
     func setInputDevice(_ dev: String)         { send("\\set_input_device \(dev)") }
     func setOutputDevice(_ dev: String)        { send("\\set_output_device \(dev)") }
@@ -328,6 +331,7 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         snap.afGainDB = doubleReply("l AF")
         if !rfGainName.isEmpty { snap.rfGainValue = doubleReply("l \(rfGainName)_GAIN") }
         if let mu = exchange("u MUTE")?.first?.trimmingCharacters(in: .whitespaces) { snap.muted = (mu == "1") }
+        if let dsp = exchange("u DSP")?.first?.trimmingCharacters(in: .whitespaces) { snap.dspRunning = (dsp == "1") }
         // Cached from discoverDevices() — never re-queried in the poll (#1446's
         // getters re-probe hardware and would stall the 1 Hz loop).
         snap.inputDevice = currentInputDevice

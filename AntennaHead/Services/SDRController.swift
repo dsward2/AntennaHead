@@ -533,6 +533,9 @@ final class SDRController {
     private(set) var gqrxRFGainValue: Double = 0
     private(set) var gqrxSignalDBFS: Double = -120
     private(set) var gqrxMuted = false
+    /// Gqrx's DSP/receiver run state (`u DSP`). A paused Gqrx makes no sound no
+    /// matter how it's tuned, so the Tune actions nudge this back on.
+    private(set) var gqrxDSPRunning = false
     private(set) var gqrxModeList: [String] = []
     /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
     private(set) var gqrxBookmarks: [GqrxBookmark] = []
@@ -1002,6 +1005,7 @@ final class SDRController {
         if let v = s.rfGainValue, v.isFinite { gqrxRFGainValue = v }
         if let v = s.signalDBFS, v.isFinite { gqrxSignalDBFS = v }
         if let v = s.muted { gqrxMuted = v }
+        if let v = s.dspRunning { gqrxDSPRunning = v }
         gqrxHasFilterShape = s.hasFilterShape
         gqrxRFGainName = s.rfGainName
         if !s.modeList.isEmpty { gqrxModeList = s.modeList }
@@ -1025,6 +1029,7 @@ final class SDRController {
         gqrxHasDeviceControl = false
         gqrxInputDevices = []
         gqrxOutputDevices = []
+        gqrxDSPRunning = false
     }
 
     /// Live writes from the "Listen to Gqrx" control panel. Each updates the
@@ -1035,6 +1040,21 @@ final class SDRController {
     func gqrxSetFrequency(_ hz: Int64) {
         gqrxFrequencyHz = hz
         gqrxRemote?.setFrequency(hz)
+        gqrxEnsureDSPRunning()
+    }
+
+    func gqrxSetDSP(_ on: Bool) {
+        gqrxDSPRunning = on
+        gqrxRemote?.setDSP(on)
+    }
+
+    /// Nudge Gqrx's receiver back on if a Tune/bookmark action arrives while the
+    /// user has it paused (Gqrx's Play/Pause button = DSP toggle). Only sends
+    /// when we've polled it as stopped, so a running receiver isn't restarted.
+    private func gqrxEnsureDSPRunning() {
+        guard !gqrxDSPRunning else { return }
+        gqrxDSPRunning = true
+        gqrxRemote?.setDSP(true)
     }
 
     func gqrxSetMode(_ mode: String, passbandHz: Int) {
@@ -1074,6 +1094,7 @@ final class SDRController {
 
     func gqrxApplyBookmark(_ frequencyHz: Int64) {
         gqrxRemote?.applyBookmarkFrequency(frequencyHz)
+        gqrxEnsureDSPRunning()
         // Speak the bookmark's program name over the relay, same as tuning a
         // saved favourite does. Only when announcements are on and we can name it.
         guard announcementEnabled,
