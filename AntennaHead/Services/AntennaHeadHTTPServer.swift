@@ -2578,9 +2578,9 @@ final class AntennaHeadHTTPServer {
                 """
             }
             var items: [String] = [
-                col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner.",                              label: "Radio",       description: "Listen to RTL-SDR radio"),
+                col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner, or to listen to Gqrx.",                label: "Radio",       description: "Favorites, Categories, Tuner, or Gqrx."),
                 col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
-                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input, Gqrx, or text to speech."),
+                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input or text to speech."),
             ]
             items.append(contentsOf: [
                 col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
@@ -2602,33 +2602,40 @@ final class AntennaHeadHTTPServer {
             dict["FAVORITES_ICON"]  = loadSVG(named: "favorites")
             dict["CATEGORIES_ICON"] = loadSVG(named: "categories")
             dict["TUNER_ICON"]      = loadSVG(named: "tuner")
+            // "Listen to Gqrx" lives here (moved from the Audio Devices page)
+            // since it's another way to listen to the radio, alongside
+            // Favorites/Categories/Tuner.
+            dict["GQRX_ICON"]       = loadSVG(named: "gqrx")
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         case "devices.html":
             // Tile icons, in the same inlined-SVG style as the top-level menu.
             // "ControlBooth" reuses the icon it carried on the old top-level hub
-            // (its onclick target is the same in both places); Gqrx and
-            // Text-to-Speech get their own matching line-art icons. "Select
-            // Audio Input" uses its own copy of the hub's phono-jack glyph
-            // (`audioinput.svg`) rather than sharing `devices.svg`, because that
-            // file bakes in `onclick=loadContent('devices.html')` — correct on
-            // the hub, but a same-page no-op here where the tile must open
-            // `deviceaudioinput.html`.
+            // (its onclick target is the same in both places); Text-to-Speech
+            // gets its own matching line-art icon. "Select Audio Input" uses its
+            // own copy of the hub's phono-jack glyph (`audioinput.svg`) rather
+            // than sharing `devices.svg`, because that file bakes in
+            // `onclick=loadContent('devices.html')` — correct on the hub, but a
+            // same-page no-op here where the tile must open
+            // `deviceaudioinput.html`. ("Listen to Gqrx" moved to the Radio page
+            // — it's another way to listen, not an audio device.)
             dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "audioinput")
-            dict["GQRX_ICON"]            = loadSVG(named: "gqrx")
             dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
             // The ControlBooth remote-control page is reached from a tile on the
             // Devices page (it used to be a top-level hub item). The tile only
             // appears when ControlBooth integration is enabled in Configuration,
-            // mirroring the old hub gate.
+            // mirroring the old hub gate. It carries its own row wrapper so the
+            // placeholder disappears entirely (no empty row) when disabled.
             dict["CONTROLBOOTH_TILE"] = webConfig.controlBoothEnabled ? """
-                            <div class="six columns value-prop">
-                                \(loadSVG(named: "controlbooth"))
-                                <div class="value-prop">
-                                    <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
-                                </div>
-                                Start a ControlBooth pipeline<br>as the audio source
+                    <div class="value-prop row">
+                        <div class="six columns value-prop">
+                            \(loadSVG(named: "controlbooth"))
+                            <div class="value-prop">
+                                <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
                             </div>
+                            Start a ControlBooth pipeline<br>as the audio source
+                        </div>
+                    </div>
                 """ : ""
         default:
             break
