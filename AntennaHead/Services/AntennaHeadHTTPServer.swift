@@ -1330,10 +1330,12 @@ final class AntennaHeadHTTPServer {
         return folder
     }
 
-    /// `%%RECORDINGS_LIST%%` — filter/sort controls, the file table, a Repeat
-    /// checkbox, and the Listen button. Sorting/filtering happens client-side
-    /// (`js/antennahead.js`) against the `data-name`/`data-date` attributes
-    /// rendered on each row, so no round trip is needed while typing.
+    /// `%%RECORDINGS_LIST%%` — filter/sort controls, the file table (in a
+    /// `.scrolling-file-list` wrapper so a long Recordings folder doesn't push
+    /// Repeat/Listen off screen), a Repeat checkbox, and the Listen button.
+    /// Sorting/filtering happens client-side (`js/antennahead.js`) against the
+    /// `data-name`/`data-date` attributes rendered on each row, so no round
+    /// trip is needed while typing.
     @MainActor private func recordingsListHTML() -> String {
         guard let folder = SharedRecordingFolder.url else {
             return "<p>AntennaHead's shared Recordings folder isn't available — check its App Group entitlement.</p>"
@@ -1388,10 +1390,12 @@ final class AntennaHeadHTTPServer {
         s += "<option value='date'>Date (Newest First)</option>"
         s += "<option value='size'>Size (Largest First)</option>"
         s += "</select>"
+        s += "<div class='scrolling-file-list'>"
         s += "<table class='u-full-width' id='recordingsTable'>"
         s += "<thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>"
         s += "<tbody id='recordingsTableBody'>\(rows)</tbody>"
         s += "</table>"
+        s += "</div>"
         s += "<label for='recordings_repeat' title='Loop the selected file continuously until you play something else.'>"
         s += "<input type='checkbox' id='recordings_repeat' name='repeat_flag' value='1'> Repeat continuously</label>"
         s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
@@ -1526,24 +1530,18 @@ final class AntennaHeadHTTPServer {
 
     /// `%%TEXT_TO_SPEECH_FORM%%` — the folder is a persistent setting chosen in
     /// AntennaHead's Configuration tab on the host Mac (see `ConfigurationView`;
-    /// a folder chooser can't be shown to a remote browser), so this form is
-    /// just the order and repeat toggle, then Listen.
-    /// `/texttospeechlistenbuttonclicked.html` resolves the saved
-    /// security-scoped bookmark, reads the folder's `.txt` files, and hands
-    /// them to `SDRController.startTextToSpeech` → PCMSpeechSynth → sox →
-    /// PCMUDPSender.
+    /// a folder chooser can't be shown to a remote browser), so this form just
+    /// lists what's in it (`textToSpeechFilesListHTML()`) plus the order and
+    /// repeat toggle, then Listen. `/texttospeechlistenbuttonclicked.html`
+    /// resolves the saved security-scoped bookmark, reads the folder's `.txt`
+    /// files, and hands them to `SDRController.startTextToSpeech` →
+    /// PCMSpeechSynth → sox → PCMUDPSender.
     @MainActor private func textToSpeechFormHTML() -> String {
-        let storedPath = ((try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderPathKey)) ?? nil) ?? ""
-        let folderLabel = storedPath.isEmpty
-            ? "No folder selected — choose one in AntennaHead\u{2019}s Configuration tab on the Mac."
-            : storedPath
-
         var s = "<form class='text_to_speech_form' id='textToSpeechForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Text to Speech</label>"
         s += "<p>Speak the <code>.txt</code> files from a folder through the live audio pipeline "
         s += "(<code>PCMSpeechSynth</code> synthesizes each one in turn).</p>"
-        s += "<label for='tts_folder_status'>Text Files Folder</label>"
-        s += "<p id='tts_folder_status' class='tts-folder-path'>\(htmlText(folderLabel))</p>"
+        s += textToSpeechFilesListHTML()
         s += "<label for='tts_sequence'>Sequence</label>"
         s += "<select id='tts_sequence' name='tts_sequence' class='u-full-width' "
         s += "title='Chronological plays the oldest file first; Random shuffles the order.'>"
@@ -1559,31 +1557,88 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
-    /// Resolves the saved Text-to-Speech folder bookmark and reads its `.txt`
-    /// files (name, modification date, contents) while holding security-scoped
-    /// access. Returns `[]` when no folder is configured or it can't be read.
-    @MainActor private func textToSpeechFolderFiles() -> [SDRController.SpeechTextFile] {
+    /// Read-only listing of the `.txt` files in the configured Text to Speech
+    /// folder, in the same name order Listen speaks them chronologically —
+    /// purely informational, since (unlike Recordings) there's no per-file
+    /// selection here: Listen always speaks the whole folder. Wrapped in the
+    /// same `.scrolling-file-list` container Recordings uses, so a large
+    /// folder doesn't push Sequence/Repeat/Listen off screen.
+    @MainActor private func textToSpeechFilesListHTML() -> String {
+        guard let folderURL = resolveTextToSpeechFolder() else {
+            return "<p class='value-prop'>No folder selected — choose one in AntennaHead\u{2019}s Configuration tab on the Mac.</p>"
+        }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles])) ?? [])
+            .filter { $0.pathExtension.lowercased() == "txt" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        guard !entries.isEmpty else {
+            return "<p class='value-prop'>No <code>.txt</code> files in \(htmlText(folderURL.path)).</p>"
+        }
+
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        let byteFormatter = ByteCountFormatter()
+        byteFormatter.countStyle = .file
+        byteFormatter.allowedUnits = [.useKB, .useMB, .useGB]
+
+        var rows = ""
+        for url in entries {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            let sizeText = byteFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0))
+            rows += "<tr><td>\(htmlText(url.lastPathComponent)) "
+            rows += "<span class='rec-size'>(\(htmlText(sizeText)))</span></td>"
+            rows += "<td>\(htmlText(df.string(from: modified)))</td></tr>"
+        }
+
+        var s = "<div class='scrolling-file-list'>"
+        s += "<table class='u-full-width'>"
+        s += "<thead><tr><th>Name</th><th>Date</th></tr></thead>"
+        s += "<tbody>\(rows)</tbody>"
+        s += "</table></div>"
+        return s
+    }
+
+    /// Resolves the saved Text-to-Speech folder bookmark (refreshing it if
+    /// stale). Shared by `textToSpeechFolderFiles()` (Listen-time, needs file
+    /// contents) and `textToSpeechFilesListHTML()` (the read-only listing on
+    /// the web page) so the bookmark-resolution logic lives in one place.
+    /// Callers are responsible for `startAccessingSecurityScopedResource()`.
+    @MainActor private func resolveTextToSpeechFolder() -> URL? {
         guard let base64 = (try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderBookmarkKey)) ?? nil,
               let data = Data(base64Encoded: base64) else {
             LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
-                                "Text to Speech: no folder selected — use \"Select Text Folder…\" first")
-            return []
+                                "Text to Speech: no folder selected — choose one in Configuration")
+            return nil
         }
         var isStale = false
         guard let folderURL = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
                                        relativeTo: nil, bookmarkDataIsStale: &isStale) else {
             LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
                                 "Text to Speech: saved folder bookmark could not be resolved — re-select the folder")
-            return []
+            return nil
         }
-        let accessed = folderURL.startAccessingSecurityScopedResource()
-        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
-
         if isStale, let fresh = try? folderURL.bookmarkData(options: .withSecurityScope,
                                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
             try? sqlite?.storeAppSettingsValue(fresh.base64EncodedString(),
                                                forKey: Self.textToSpeechFolderBookmarkKey)
         }
+        return folderURL
+    }
+
+    /// Resolves the saved Text-to-Speech folder bookmark and reads its `.txt`
+    /// files (name, modification date, contents) while holding security-scoped
+    /// access. Returns `[]` when no folder is configured or it can't be read.
+    @MainActor private func textToSpeechFolderFiles() -> [SDRController.SpeechTextFile] {
+        guard let folderURL = resolveTextToSpeechFolder() else { return [] }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
 
         let entries = ((try? FileManager.default.contentsOfDirectory(
             at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey],
