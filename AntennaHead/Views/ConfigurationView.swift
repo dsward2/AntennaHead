@@ -39,6 +39,7 @@ struct ConfigurationView: View {
     @State private var fillerAnnouncePeriodSeconds = 60
     @State private var fillerAnnounceSSML = false
     @State private var fillerAnnounceSpeechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
+    @State private var textToSpeechFolderPath = ""
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -114,6 +115,28 @@ struct ConfigurationView: View {
                 Text("Speech-to-Text")
             } footer: {
                 Text("Runs a \u{201C}PCMTranscriber\u{201D} tap on the outgoing audio using Apple\u{2019}s on-device SpeechAnalyzer (requires macOS 26). Recognition results stream as JSON on UDP port \(Int(sdrController.transcriptionUDPPort)) for a caption client; the optional SRT file lands in the shared Recordings folder. Broadcast audio \u{2014} music, weak FM, overlapping speech \u{2014} transcribes unevenly. Language is a BCP-47 code such as \u{201C}en-US\u{201D}; the model downloads once on first use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent("Folder") {
+                    HStack {
+                        Text(textToSpeechFolderPath.isEmpty ? "No folder selected." : textToSpeechFolderPath)
+                            .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                        if !textToSpeechFolderPath.isEmpty {
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting(
+                                    [URL(fileURLWithPath: textToSpeechFolderPath)])
+                            }
+                        }
+                        Button("Choose Folder\u{2026}") { chooseTextToSpeechFolder() }
+                    }
+                }
+            } header: {
+                Text("Text to Speech")
+            } footer: {
+                Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the web UI (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -375,6 +398,26 @@ struct ConfigurationView: View {
         transcriptionSavesTranscript = saveTranscript == "1"
         let spatialEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.spatialAudioEnabledKey)) ?? nil
         spatialAudioEnabled = spatialEnabled == "1"
+        var ttsResolvedFromBookmark = false
+        if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.textToSpeechFolderBookmarkKey)) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                textToSpeechFolderPath = url.path
+                ttsResolvedFromBookmark = true
+                if isStale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                               includingResourceValuesForKeys: nil,
+                                                               relativeTo: nil) {
+                    try? SQLiteController.shared.storeAppSettingsValue(
+                        fresh.base64EncodedString(), forKey: AntennaHeadHTTPServer.textToSpeechFolderBookmarkKey)
+                }
+            }
+        }
+        if !ttsResolvedFromBookmark {
+            let storedPath = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.textToSpeechFolderPathKey)) ?? nil
+            textToSpeechFolderPath = storedPath ?? ""
+        }
         // Filler defaults ON: an absent key counts as enabled.
         fillerEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerEnabledKey)) ?? nil) ?? "1") != "0"
         fillerFadeEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeEnabledKey)) ?? nil) ?? "1") != "0"
@@ -524,6 +567,34 @@ struct ConfigurationView: View {
         let copied = sdrController.setFillerSourceFolder(url)
         fillerSyncMessage = "Copied \(copied) file(s)"
         saveFillerSettings()
+    }
+
+    /// Runs a native folder chooser on this Mac and, on "Select", persists the
+    /// choice as a security-scoped bookmark plus a plain path — read back by
+    /// `AntennaHeadHTTPServer` when the web UI's Text to Speech page presses
+    /// Listen. Formerly triggered from that web page itself via a server
+    /// route, but a folder chooser popping up on this Mac's screen was silent
+    /// and useless to a remote client, so the picker lives only here now.
+    private func chooseTextToSpeechFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select"
+        panel.message = "Choose the folder that holds the text (.txt) files to speak"
+        if !textToSpeechFolderPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: textToSpeechFolderPath)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? SQLiteController.shared.storeAppSettingsValue(
+                data.base64EncodedString(), forKey: AntennaHeadHTTPServer.textToSpeechFolderBookmarkKey)
+        }
+        try? SQLiteController.shared.storeAppSettingsValue(
+            url.path, forKey: AntennaHeadHTTPServer.textToSpeechFolderPathKey)
+        textToSpeechFolderPath = url.path
     }
 
     /// Opens the Application Support folder holding the database and exported

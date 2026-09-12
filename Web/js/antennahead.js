@@ -1767,38 +1767,12 @@ var captionsPollIntervalID = setInterval(captionsPoll, 750);
 
 // ---- Text to Speech (Audio Devices page) --------------------------------
 //
-// "Select Text Folder…" asks the server to run a native folder chooser on the
-// Mac running AntennaHead; the choice is saved as a persistent setting
-// (security-scoped bookmark). Listen just tells the server the order and the
-// repeat flag — the server resolves the saved folder, reads its .txt files,
-// and feeds them to the PCMSpeechSynth pipeline stage.
-
-function textToSpeechChooseFolderButtonClicked()
-{
-  var status = document.getElementById("tts_folder_status");
-  if (status) { status.textContent = "Choose a folder in the panel on the AntennaHead Mac…"; }
-
-  var getUrl = window.location;
-  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
-
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-      if (this.readyState == 4)
-      {
-        if (this.status == 200)
-        {
-          var path = (this.responseText || "").trim();
-          if (status) { status.textContent = path ? path : "No folder selected."; }
-        }
-        else if (status)
-        {
-          status.textContent = "Could not open the folder chooser.";
-        }
-      }
-    };
-  xhttp.open("POST", baseUrl + "texttospeechchoosefolder.html", true);
-  xhttp.send();
-}
+// The text folder is chosen in AntennaHead's Configuration tab on the Mac
+// running AntennaHead (a folder chooser can't be shown to a remote browser),
+// where it's saved as a persistent setting (security-scoped bookmark). Listen
+// just tells the server the order and the repeat flag — the server resolves
+// the saved folder, reads its .txt files, and feeds them to the
+// PCMSpeechSynth pipeline stage.
 
 function textToSpeechListenButtonClicked(form)
 {

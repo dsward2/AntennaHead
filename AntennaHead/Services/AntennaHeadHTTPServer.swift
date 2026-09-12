@@ -62,11 +62,13 @@ final class AntennaHeadHTTPServer {
     static let webUIThemeOptions = ["auto", "light", "dark"]
     static let defaultWebUITheme = "auto"
 
-    /// App-settings keys for the "Text to Speech" folder chosen on the Audio
-    /// Devices page. The bookmark is security-scoped (created from an
-    /// NSOpenPanel selection, same pattern as ConfigurationView's ControlBooth
-    /// picker); the plain path is kept alongside it for display and as a
-    /// fallback. Both persist in the app-settings table across launches.
+    /// App-settings keys for the "Text to Speech" folder, chosen in
+    /// `ConfigurationView` on the host Mac (an NSOpenPanel selection can't be
+    /// shown to a remote browser, so it doesn't live on the Devices page). The
+    /// bookmark is security-scoped, same pattern as ConfigurationView's
+    /// ControlBooth picker; the plain path is kept alongside it for display
+    /// and as a fallback. Both persist in the app-settings table across
+    /// launches.
     static let textToSpeechFolderBookmarkKey = "AntennaHeadTextToSpeechFolderBookmark"
     static let textToSpeechFolderPathKey = "AntennaHeadTextToSpeechFolderPath"
     /// Guard rails when reading the folder — a spoken sequence far larger than
@@ -610,15 +612,6 @@ final class AntennaHeadHTTPServer {
                 sdrController?.gqrxSetOutputDevice(d)
             }
             return okResponse()
-
-        case "/texttospeechchoosefolder.html":
-            // Runs a native folder chooser on the host Mac and persists the
-            // selection (security-scoped bookmark + path). Responds with the
-            // currently-saved path so the web UI can update its label.
-            let path = chooseTextToSpeechFolder()
-            return HTTPResponse(status: 200, reason: "OK",
-                                headers: ["Content-Type": "text/plain; charset=utf-8"],
-                                body: Data(path.utf8))
 
         case "/texttospeechlistenbuttonclicked.html":
             // Body is a JSON *object*: {sequence, repeat}. The folder itself is
@@ -1531,15 +1524,19 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
-    /// `%%TEXT_TO_SPEECH_FORM%%` — a persistent folder setting (chosen with a
-    /// native NSOpenPanel via `/texttospeechchoosefolder.html`), an order, and a
-    /// repeat toggle, then Listen. `/texttospeechlistenbuttonclicked.html`
-    /// resolves the saved security-scoped bookmark, reads the folder's `.txt`
-    /// files, and hands them to `SDRController.startTextToSpeech` → PCMSpeechSynth
-    /// → sox → PCMUDPSender.
+    /// `%%TEXT_TO_SPEECH_FORM%%` — the folder is a persistent setting chosen in
+    /// AntennaHead's Configuration tab on the host Mac (see `ConfigurationView`;
+    /// a folder chooser can't be shown to a remote browser), so this form is
+    /// just the order and repeat toggle, then Listen.
+    /// `/texttospeechlistenbuttonclicked.html` resolves the saved
+    /// security-scoped bookmark, reads the folder's `.txt` files, and hands
+    /// them to `SDRController.startTextToSpeech` → PCMSpeechSynth → sox →
+    /// PCMUDPSender.
     @MainActor private func textToSpeechFormHTML() -> String {
         let storedPath = ((try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderPathKey)) ?? nil) ?? ""
-        let folderLabel = storedPath.isEmpty ? "No folder selected." : storedPath
+        let folderLabel = storedPath.isEmpty
+            ? "No folder selected — choose one in AntennaHead\u{2019}s Configuration tab on the Mac."
+            : storedPath
 
         var s = "<form class='text_to_speech_form' id='textToSpeechForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Text to Speech</label>"
@@ -1547,9 +1544,6 @@ final class AntennaHeadHTTPServer {
         s += "(<code>PCMSpeechSynth</code> synthesizes each one in turn).</p>"
         s += "<label for='tts_folder_status'>Text Files Folder</label>"
         s += "<p id='tts_folder_status' class='tts-folder-path'>\(htmlText(folderLabel))</p>"
-        s += "<input class='twelve columns button' type='button' value='Select Text Folder…' "
-        s += "onclick='textToSpeechChooseFolderButtonClicked();' "
-        s += "title='Open a folder chooser on the Mac running AntennaHead and press Select. The choice is remembered.'>"
         s += "<label for='tts_sequence'>Sequence</label>"
         s += "<select id='tts_sequence' name='tts_sequence' class='u-full-width' "
         s += "title='Chronological plays the oldest file first; Random shuffles the order.'>"
@@ -1563,36 +1557,6 @@ final class AntennaHeadHTTPServer {
         s += "title='Synthesize the selected folder&#39;s text files and stream them through the live audio pipeline.'>"
         s += "</form><br>&nbsp;<br>"
         return s
-    }
-
-    /// Runs a native folder chooser on the host Mac and, on "Select", persists
-    /// the choice as a security-scoped bookmark plus a plain path (same storage
-    /// pattern as ConfigurationView's ControlBooth picker). Returns the saved
-    /// path — the freshly chosen one, or the previously stored value if the
-    /// user cancels — for the web UI to display.
-    @MainActor private func chooseTextToSpeechFolder() -> String {
-        let stored = ((try? sqlite?.appSettingsValue(forKey: Self.textToSpeechFolderPathKey)) ?? nil) ?? ""
-
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Select"
-        panel.message = "Choose the folder that holds the text (.txt) files to speak"
-        if !stored.isEmpty {
-            panel.directoryURL = URL(fileURLWithPath: stored)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-
-        guard panel.runModal() == .OK, let url = panel.url else { return stored }
-
-        if let data = try? url.bookmarkData(options: .withSecurityScope,
-                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
-            try? sqlite?.storeAppSettingsValue(data.base64EncodedString(),
-                                               forKey: Self.textToSpeechFolderBookmarkKey)
-        }
-        try? sqlite?.storeAppSettingsValue(url.path, forKey: Self.textToSpeechFolderPathKey)
-        return url.path
     }
 
     /// Resolves the saved Text-to-Speech folder bookmark and reads its `.txt`
