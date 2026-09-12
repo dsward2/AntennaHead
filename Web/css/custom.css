@@ -743,6 +743,23 @@ html {
     font-size: 85%;
     white-space: nowrap;
 }
+/* Scrolling wrapper around a file-listing table — Recordings' recordings
+   list and Text to Speech's read-only .txt listing both use this so a long
+   folder doesn't push the rest of the page's controls off screen. */
+.scrolling-file-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--ah-border);
+    border-radius: 6px;
+    margin: 6px 0 12px;
+}
+.scrolling-file-list table { margin-bottom: 0; }
+.scrolling-file-list thead th {
+    position: sticky;
+    top: 0;
+    background: var(--ah-bg);
+    z-index: 1;
+}
 @keyframes aac-rec-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
