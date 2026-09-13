@@ -760,6 +760,13 @@ html {
     background: var(--ah-bg);
     z-index: 1;
 }
+/* Select All / Select None row above the Text to Speech file list. */
+.tts-select-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.tts-select-actions .button { margin-bottom: 0; }
 @keyframes aac-rec-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }

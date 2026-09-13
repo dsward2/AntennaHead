@@ -1769,18 +1769,32 @@ var captionsPollIntervalID = setInterval(captionsPoll, 750);
 //
 // The text folder is chosen in AntennaHead's Configuration tab on the Mac
 // running AntennaHead (a folder chooser can't be shown to a remote browser),
-// where it's saved as a persistent setting (security-scoped bookmark). Listen
-// just tells the server the order and the repeat flag — the server resolves
-// the saved folder, reads its .txt files, and feeds them to the
-// PCMSpeechSynth pipeline stage.
+// where it's saved as a persistent setting (security-scoped bookmark).
+// textToSpeechFilesListHTML() (server-side) renders one checkbox per .txt
+// file, checked by default. Listen sends the order, the repeat flag, and the
+// names still checked — the server resolves the saved folder, reads just
+// those .txt files, and feeds them to the PCMSpeechSynth pipeline stage.
+
+// Select All / Select None buttons above the file list — purely client-side,
+// no round trip.
+function ttsSelectAllFiles(selected)
+{
+  var checkboxes = document.querySelectorAll(".tts-file-checkbox");
+  checkboxes.forEach(function(checkbox) { checkbox.checked = selected; });
+}
 
 function textToSpeechListenButtonClicked(form)
 {
   var sequenceSelect = form.querySelector("#tts_sequence");
   var repeatCheckbox = form.querySelector("#tts_repeat");
+  var fileCheckboxes = form.querySelectorAll(".tts-file-checkbox:checked");
+  var selectedFiles = Array.prototype.map.call(fileCheckboxes, function(checkbox) {
+    return checkbox.value;
+  });
   var payload = {
     sequence: sequenceSelect ? sequenceSelect.value : "chronological",
-    repeat: (repeatCheckbox && repeatCheckbox.checked) ? "1" : "0"
+    repeat: (repeatCheckbox && repeatCheckbox.checked) ? "1" : "0",
+    files: selectedFiles
   };
 
   var getUrl = window.location;

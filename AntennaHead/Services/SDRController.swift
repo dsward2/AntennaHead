@@ -109,6 +109,14 @@ final class SDRController {
         let text: String
     }
 
+    /// Playback order for `startTextToSpeech` — mirrors the "Sequence" <select>
+    /// on the web UI's Text to Speech page (`tts_sequence`'s option values).
+    enum TextToSpeechSequence: String {
+        case chronological  // oldest file first, by modification date
+        case alphabetical   // by file name
+        case random
+    }
+
     /// Sample rate PCMSpeechSynth is told to emit for the Text-to-Speech
     /// pipeline; the downstream sox stage resamples it to the 48 kHz / 2 ch
     /// LiveAudioServer contract.
@@ -552,14 +560,30 @@ final class SDRController {
         self.statusUDPPort = statusUDPPort
         radioTaskPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            guard let self else { return }
+
             // Coupled to PCMUDPReceiver's own log wording (see its main.swift) —
             // this is the readiness signal `startControlBoothListening` awaits
             // so ControlBooth's PCMUDPSender never starts sending before this
             // process has actually bound the port (see that function's doc).
-            guard source == "PCMUDPReceiver", message.contains("started — listening"),
-                  let self, let pending = self.controlBoothReceiverReadyContinuation else { return }
-            self.controlBoothReceiverReadyContinuation = nil
-            pending.resume()
+            if source == "PCMUDPReceiver", message.contains("started — listening"),
+               let pending = self.controlBoothReceiverReadyContinuation {
+                self.controlBoothReceiverReadyContinuation = nil
+                pending.resume()
+            }
+
+            // Text to Speech finished its one (non-repeating) pass. `--repeat`
+            // keeps PCMSpeechSynth running forever internally, so it only exits
+            // on its own — surfacing here as TaskPipelineManager's generic
+            // "failed task detected" (not necessarily an error; see
+            // checkLiveness()) — when Repeat indefinitely was off. Start the
+            // filler pipeline so the stream isn't left silent. `statusFunction`
+            // carries no "(repeating)" suffix in that case (see
+            // startTextToSpeech()), which is what tells the two apart here.
+            if source == "PCMSpeechSynth", message.contains("failed task detected"),
+               self.statusFunction == "Text to Speech" {
+                self.startFillerPipeline()
+            }
         }
         fillerPipelineManager.onLog = { source, message in
             LogStore.shared.log(.info, source: source, message)
@@ -1159,17 +1183,25 @@ final class SDRController {
     /// Start a PCMSpeechSynth → sox → PCMUDPSender pipeline that speaks the text
     /// files picked in the "Text to Speech" web UI. The files' text arrives from
     /// the browser (the sandboxed app can't read an arbitrary folder), so this
-    /// just orders them — by modification date, or shuffled when `randomOrder` —
-    /// concatenates the text into one container-local temp file, and points
-    /// PCMSpeechSynth at it. `repeatForever` maps to the helper's `--repeat`
-    /// (the whole concatenated sequence loops, with a short gap between passes).
-    func startTextToSpeech(files: [SpeechTextFile], randomOrder: Bool, repeatForever: Bool) {
+    /// just orders them per `sequence`, concatenates the text into one
+    /// container-local temp file, and points PCMSpeechSynth at it.
+    /// `repeatForever` maps to the helper's `--repeat` (the whole concatenated
+    /// sequence loops, with a short gap between passes) — when it's `false`,
+    /// PCMSpeechSynth exits on its own once done, and the
+    /// `radioTaskPipelineManager.onLog` handler (see `init`) starts the filler
+    /// pipeline so the stream isn't left silent.
+    func startTextToSpeech(files: [SpeechTextFile], sequence: TextToSpeechSequence, repeatForever: Bool) {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
         stopFillerForNewSource()
         radioTaskPipelineManager.terminate()
 
-        let ordered = randomOrder ? files.shuffled() : files.sorted { $0.modified < $1.modified }
+        let ordered: [SpeechTextFile]
+        switch sequence {
+        case .chronological: ordered = files.sorted { $0.modified < $1.modified }
+        case .alphabetical: ordered = files.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .random: ordered = files.shuffled()
+        }
         let combined = ordered
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
