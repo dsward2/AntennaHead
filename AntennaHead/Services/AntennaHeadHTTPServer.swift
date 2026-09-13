@@ -14,6 +14,14 @@ private extension Dictionary where Key == String, Value == Any {
         if let n = self[key] as? NSNumber { return n.stringValue }
         return ""
     }
+
+    /// String array for a key (e.g. a JSON `["a.txt", "b.txt"]`), dropping any
+    /// non-string elements. `nil` when the key is missing entirely — distinct
+    /// from `[]`, which means the key was present but every item was
+    /// deselected.
+    func stringArray(_ key: String) -> [String]? {
+        (self[key] as? [Any])?.compactMap { $0 as? String }
+    }
 }
 
 @MainActor
@@ -614,13 +622,17 @@ final class AntennaHeadHTTPServer {
             return okResponse()
 
         case "/texttospeechlistenbuttonclicked.html":
-            // Body is a JSON *object*: {sequence, repeat}. The folder itself is
-            // the saved setting — resolve its bookmark and read the .txt files
-            // here, then hand them to SDRController.
+            // Body is a JSON object: {sequence, repeat, files}. The folder
+            // itself is the saved setting — resolve its bookmark and read the
+            // .txt files here, then hand the checked subset to SDRController.
+            // `files` lists the names the user left checked; its absence (an
+            // older client) falls back to every file, but a present, empty
+            // array means the user unchecked everything.
             let o = jsonObject(fromBody: request.body)
             let randomOrder = (o["sequence"] as? String) == "random"
             let repeatForever = (o["repeat"] as? String) == "1"
-            sdrController?.startTextToSpeech(files: textToSpeechFolderFiles(),
+            let selectedNames = o.stringArray("files").map(Set.init)
+            sdrController?.startTextToSpeech(files: textToSpeechFolderFiles(selectedNames: selectedNames),
                                             randomOrder: randomOrder, repeatForever: repeatForever)
             return okResponse()
 
@@ -1531,11 +1543,12 @@ final class AntennaHeadHTTPServer {
     /// `%%TEXT_TO_SPEECH_FORM%%` — the folder is a persistent setting chosen in
     /// AntennaHead's Configuration tab on the host Mac (see `ConfigurationView`;
     /// a folder chooser can't be shown to a remote browser), so this form just
-    /// lists what's in it (`textToSpeechFilesListHTML()`) plus the order and
-    /// repeat toggle, then Listen. `/texttospeechlistenbuttonclicked.html`
-    /// resolves the saved security-scoped bookmark, reads the folder's `.txt`
-    /// files, and hands them to `SDRController.startTextToSpeech` →
-    /// PCMSpeechSynth → sox → PCMUDPSender.
+    /// lists what's in it, checkbox per file (`textToSpeechFilesListHTML()`),
+    /// plus the order and repeat toggle, then Listen.
+    /// `/texttospeechlistenbuttonclicked.html` resolves the saved
+    /// security-scoped bookmark, reads only the checked `.txt` files, and
+    /// hands them to `SDRController.startTextToSpeech` → PCMSpeechSynth →
+    /// sox → PCMUDPSender.
     @MainActor private func textToSpeechFormHTML() -> String {
         var s = "<form class='text_to_speech_form' id='textToSpeechForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Text to Speech</label>"
@@ -1557,12 +1570,15 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
-    /// Read-only listing of the `.txt` files in the configured Text to Speech
-    /// folder, in the same name order Listen speaks them chronologically —
-    /// purely informational, since (unlike Recordings) there's no per-file
-    /// selection here: Listen always speaks the whole folder. Wrapped in the
-    /// same `.scrolling-file-list` container Recordings uses, so a large
-    /// folder doesn't push Sequence/Repeat/Listen off screen.
+    /// Listing of the `.txt` files in the configured Text to Speech folder, in
+    /// the same name order Listen speaks them chronologically — each with a
+    /// checkbox (checked by default) so the user can leave out specific files,
+    /// plus Select All / Select None buttons (`ttsSelectAllFiles()` in
+    /// `antennahead.js`, client-side only). `textToSpeechListenButtonClicked()`
+    /// collects the checked names into the Listen POST's `files` array; the
+    /// server filters by them in `textToSpeechFolderFiles(selectedNames:)`.
+    /// Wrapped in the same `.scrolling-file-list` container Recordings uses,
+    /// so a large folder doesn't push Sequence/Repeat/Listen off screen.
     @MainActor private func textToSpeechFilesListHTML() -> String {
         guard let folderURL = resolveTextToSpeechFolder() else {
             return "<p class='value-prop'>No folder selected — choose one in AntennaHead\u{2019}s Configuration tab on the Mac.</p>"
@@ -1588,18 +1604,26 @@ final class AntennaHeadHTTPServer {
         byteFormatter.allowedUnits = [.useKB, .useMB, .useGB]
 
         var rows = ""
-        for url in entries {
+        for (index, url) in entries.enumerated() {
             let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             let modified = values?.contentModificationDate ?? .distantPast
             let sizeText = byteFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0))
-            rows += "<tr><td>\(htmlText(url.lastPathComponent)) "
-            rows += "<span class='rec-size'>(\(htmlText(sizeText)))</span></td>"
+            let name = url.lastPathComponent
+            let rowID = "tts-file-\(index)"
+            rows += "<tr><td><input type='checkbox' class='tts-file-checkbox' id='\(rowID)' "
+            rows += "value='\(htmlAttribute(name))' checked></td>"
+            rows += "<td><label for='\(rowID)'>\(htmlText(name)) "
+            rows += "<span class='rec-size'>(\(htmlText(sizeText)))</span></label></td>"
             rows += "<td>\(htmlText(df.string(from: modified)))</td></tr>"
         }
 
-        var s = "<div class='scrolling-file-list'>"
+        var s = "<div class='tts-select-actions'>"
+        s += "<input class='button' type='button' value='Select All' onclick='ttsSelectAllFiles(true);'>"
+        s += "<input class='button' type='button' value='Select None' onclick='ttsSelectAllFiles(false);'>"
+        s += "</div>"
+        s += "<div class='scrolling-file-list'>"
         s += "<table class='u-full-width'>"
-        s += "<thead><tr><th>Name</th><th>Date</th></tr></thead>"
+        s += "<thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>"
         s += "<tbody>\(rows)</tbody>"
         s += "</table></div>"
         return s
@@ -1635,7 +1659,11 @@ final class AntennaHeadHTTPServer {
     /// Resolves the saved Text-to-Speech folder bookmark and reads its `.txt`
     /// files (name, modification date, contents) while holding security-scoped
     /// access. Returns `[]` when no folder is configured or it can't be read.
-    @MainActor private func textToSpeechFolderFiles() -> [SDRController.SpeechTextFile] {
+    /// `selectedNames`, when non-`nil`, restricts the result to files whose
+    /// name is in the set — the checkboxes left checked on the web page; `nil`
+    /// means no filtering (every `.txt` file), matching the pre-checkbox
+    /// behavior for any older client that omits the field.
+    @MainActor private func textToSpeechFolderFiles(selectedNames: Set<String>? = nil) -> [SDRController.SpeechTextFile] {
         guard let folderURL = resolveTextToSpeechFolder() else { return [] }
         let accessed = folderURL.startAccessingSecurityScopedResource()
         defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
@@ -1644,6 +1672,7 @@ final class AntennaHeadHTTPServer {
             at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles])) ?? [])
             .filter { $0.pathExtension.lowercased() == "txt" }
+            .filter { selectedNames?.contains($0.lastPathComponent) ?? true }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
         var files: [SDRController.SpeechTextFile] = []
@@ -1663,8 +1692,9 @@ final class AntennaHeadHTTPServer {
             totalCharacters += text.count
         }
         if files.isEmpty {
-            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
-                                "Text to Speech: no readable .txt files in \(folderURL.path)")
+            let reason = (selectedNames?.isEmpty ?? false)
+                ? "no files were left checked" : "no readable .txt files in \(folderURL.path)"
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "Text to Speech: \(reason)")
         }
         return files
     }
