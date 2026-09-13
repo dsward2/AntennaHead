@@ -116,8 +116,23 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     func setMuted(_ on: Bool)                   { send("U MUTE \(on ? 1 : 0)") }
     func setDSP(_ on: Bool)                     { send("U DSP \(on ? 1 : 0)") }
     func applyBookmarkFrequency(_ hz: Int64)    { send("\\set_bookmark_freq \(hz)") }
-    func setInputDevice(_ dev: String)         { send("\\set_input_device \(dev)") }
-    func setOutputDevice(_ dev: String)        { send("\\set_output_device \(dev)") }
+    // Unlike the other setters, these also refresh the cached current-device
+    // string on success — `currentInputDevice`/`currentOutputDevice` are only
+    // ever set here and in `discoverDevices()` (see the poll() comment below),
+    // so without this the panel's dropdown would snap back to the value from
+    // connect time on the next poll, making the picker look inert.
+    func setInputDevice(_ dev: String) {
+        queue.async { [weak self] in
+            guard let self, Self.rprtOK(self.exchange("\\set_input_device \(dev)")) else { return }
+            self.currentInputDevice = self.exchangeLong("\\get_input_device")
+        }
+    }
+    func setOutputDevice(_ dev: String) {
+        queue.async { [weak self] in
+            guard let self, Self.rprtOK(self.exchange("\\set_output_device \(dev)")) else { return }
+            self.currentOutputDevice = self.exchangeLong("\\get_output_device")
+        }
+    }
 
     private func send(_ command: String) {
         queue.async { [weak self] in _ = self?.exchange(command) }
@@ -332,8 +347,11 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         if !rfGainName.isEmpty { snap.rfGainValue = doubleReply("l \(rfGainName)_GAIN") }
         if let mu = exchange("u MUTE")?.first?.trimmingCharacters(in: .whitespaces) { snap.muted = (mu == "1") }
         if let dsp = exchange("u DSP")?.first?.trimmingCharacters(in: .whitespaces) { snap.dspRunning = (dsp == "1") }
-        // Cached from discoverDevices() — never re-queried in the poll (#1446's
-        // getters re-probe hardware and would stall the 1 Hz loop).
+        // Set at connect (discoverDevices()) and refreshed by setInputDevice/
+        // setOutputDevice on a successful write — not re-queried here every
+        // tick. `\get_input_device_list`/`\get_output_device_list` re-probe
+        // hardware and would stall the 1 Hz loop, but that only applies to
+        // the *_list commands; the singular getters are cheap settings reads.
         snap.inputDevice = currentInputDevice
         snap.outputDevice = currentOutputDevice
 
