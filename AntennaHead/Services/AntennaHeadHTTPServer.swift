@@ -629,11 +629,11 @@ final class AntennaHeadHTTPServer {
             // older client) falls back to every file, but a present, empty
             // array means the user unchecked everything.
             let o = jsonObject(fromBody: request.body)
-            let randomOrder = (o["sequence"] as? String) == "random"
+            let sequence = SDRController.TextToSpeechSequence(rawValue: o.string("sequence")) ?? .chronological
             let repeatForever = (o["repeat"] as? String) == "1"
             let selectedNames = o.stringArray("files").map(Set.init)
             sdrController?.startTextToSpeech(files: textToSpeechFolderFiles(selectedNames: selectedNames),
-                                            randomOrder: randomOrder, repeatForever: repeatForever)
+                                            sequence: sequence, repeatForever: repeatForever)
             return okResponse()
 
         case "/settings.html":
@@ -1557,8 +1557,9 @@ final class AntennaHeadHTTPServer {
         s += textToSpeechFilesListHTML()
         s += "<label for='tts_sequence'>Sequence</label>"
         s += "<select id='tts_sequence' name='tts_sequence' class='u-full-width' "
-        s += "title='Chronological plays the oldest file first; Random shuffles the order.'>"
+        s += "title='Chronological plays the oldest file first; Alphabetical sorts by file name; Random shuffles the order.'>"
         s += "<option value='chronological'>Chronological (oldest file first)</option>"
+        s += "<option value='alphabetical'>Alphabetical (by file name)</option>"
         s += "<option value='random'>Random</option>"
         s += "</select>"
         s += "<label for='tts_repeat' title='Loop through the folder continuously until you play something else.'>"
