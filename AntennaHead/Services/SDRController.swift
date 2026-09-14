@@ -965,7 +965,13 @@ final class SDRController {
     ///
     /// Uses `waitForDyingProcesses: true` so the dying pipeline releases port
     /// 7355 before the new PCMUDPReceiver tries to bind it.
-    func startGqrxListening(channels: Int = 2) {
+    ///
+    /// `alsoStartReceiver` additionally starts Gqrx's own DSP (the ▶ "Start
+    /// Gqrx Receiver" button) once connected — set by the "Launch Gqrx" flow,
+    /// which is bringing up a brand-new Gqrx that isn't demodulating anything
+    /// yet; left off for the plain "Listen" button, which only attaches to
+    /// whatever Gqrx is already doing.
+    func startGqrxListening(channels: Int = 2, alsoStartReceiver: Bool = false) {
         startGqrxRelay(channels: channels,
                        announceText: announcementEnabled ? Self.announcementText(forGqrx: nil) : nil)
         if Self.gqrxRemoteControlEnabled {
@@ -983,6 +989,7 @@ final class SDRController {
             // reachable* snapshot instead (see `gqrxNeedsUDPStreamSync`),
             // which is guaranteed to have a live connection to send it on.
             gqrxNeedsUDPStreamSync = true
+            if alsoStartReceiver { gqrxNeedsDSPStart = true }
         }
     }
 
@@ -998,6 +1005,10 @@ final class SDRController {
     /// reachable, which is the earliest point a command is guaranteed not to
     /// be silently dropped by a not-yet-connected socket.
     @ObservationIgnored private var gqrxNeedsUDPStreamSync = false
+    /// Same idea as `gqrxNeedsUDPStreamSync`, for "Launch Gqrx"'s request to
+    /// also start Gqrx's own DSP once connected — see `startGqrxListening`'s
+    /// `alsoStartReceiver`.
+    @ObservationIgnored private var gqrxNeedsDSPStart = false
     /// True while the Gqrx page has paused Gqrx's receiver and handed the LAS
     /// input over to the filler loop; resuming rebuilds the relay.
     @ObservationIgnored private var gqrxPausedToFiller = false
@@ -1149,6 +1160,13 @@ final class SDRController {
         if gqrxNeedsUDPStreamSync {
             gqrxNeedsUDPStreamSync = false
             gqrxRemote?.setUDPStreaming(true)
+        }
+        // "Launch Gqrx" asked for the receiver started too, once connected —
+        // same reasoning as above, and `gqrxResumeReceiver` is exactly what
+        // the panel's own ▶ "Start Gqrx Receiver" button calls.
+        if gqrxNeedsDSPStart {
+            gqrxNeedsDSPStart = false
+            gqrxResumeReceiver()
         }
     }
 
