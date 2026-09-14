@@ -1160,6 +1160,7 @@ static void *output_thread_fn(void *arg)
 			pthread_rwlock_unlock(&b1->rw);
 			unmark_shared_buffer(b0->buf);
 			pthread_rwlock_unlock(&b0->rw);
+			fflush(s->file);  // dsward - see note below on the padded branch
 			continue;
 		}
 		if (!s->padded) {
@@ -1168,6 +1169,7 @@ static void *output_thread_fn(void *arg)
 			fwrite(b0->buf, 2, b0->len, s->file);
 			unmark_shared_buffer(b0->buf);
 			pthread_rwlock_unlock(&b0->rw);
+			fflush(s->file);  // dsward - see note below on the padded branch
 			continue;
 		}
 
@@ -1184,6 +1186,19 @@ static void *output_thread_fn(void *arg)
 			unmark_shared_buffer(b0->buf);
 			samples += (int64_t)b0->len;
 			pthread_rwlock_unlock(&b0->rw);
+			// dsward - this branch fires almost every 2ms poll whenever a real
+			// signal keeps demod output flowing, so it's the overwhelmingly
+			// common path — but only the *padding* branch below ever called
+			// fflush(). With a real signal, real writes went through fwrite()
+			// alone and just sat in stdio's own internal buffer (fully
+			// buffered, since `s->file` is a pipe, not a tty) until it filled
+			// on its own — the padding branch's fflush() rarely ran, since
+			// fresh data was essentially always ready. That produced a
+			// periodic burst-then-silence pattern once every N writes, worse
+			// at low output rates (fewer bytes/sec means longer to fill the
+			// same buffer) — measured as ~1.6s periodic stalls at 5000 Hz
+			// output, and the root cause of "choppy" narrowband audio.
+			fflush(s->file);
 			continue;
 		}
 #ifdef _WIN32
