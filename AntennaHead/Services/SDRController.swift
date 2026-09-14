@@ -968,7 +968,22 @@ final class SDRController {
     func startGqrxListening(channels: Int = 2) {
         startGqrxRelay(channels: channels,
                        announceText: announcementEnabled ? Self.announcementText(forGqrx: nil) : nil)
-        if Self.gqrxRemoteControlEnabled { startGqrxRemote() }
+        if Self.gqrxRemoteControlEnabled {
+            startGqrxRemote()
+            // `startGqrxRelay` above already flips `gqrxUDPAudioRunning` true,
+            // which makes the "Start UDP Audio" checkbox render checked the
+            // instant this page's panel appears — but until now nothing ever
+            // told Gqrx's *own* UDP-streaming button to turn on to match, so
+            // the checkbox lied: no real audio was flowing until the user
+            // unchecked and rechecked it once to actually send the command.
+            // Can't just fire `setUDPStreaming(true)` here, though — right
+            // after "Launch Gqrx", Gqrx's rc listener on 7356 isn't up yet,
+            // so the command would silently drop before the socket even
+            // connects. Defer it to `applyGqrxSnapshot`'s first *actually
+            // reachable* snapshot instead (see `gqrxNeedsUDPStreamSync`),
+            // which is guaranteed to have a live connection to send it on.
+            gqrxNeedsUDPStreamSync = true
+        }
     }
 
     /// Channels the last `startGqrxRelay` used, so `relaunchGqrxRelay` (e.g. to
@@ -977,6 +992,12 @@ final class SDRController {
     /// While true, `teardownGqrxRemote()` leaves the remote-control client
     /// alone — set around a relay-only rebuild that keeps the same Gqrx.
     @ObservationIgnored private var preserveGqrxRemote = false
+    /// Set by `startGqrxListening` when it wants Gqrx's own UDP-streaming
+    /// button turned on to match the relay it just started; consumed by
+    /// `applyGqrxSnapshot` on the first snapshot that actually finds Gqrx
+    /// reachable, which is the earliest point a command is guaranteed not to
+    /// be silently dropped by a not-yet-connected socket.
+    @ObservationIgnored private var gqrxNeedsUDPStreamSync = false
     /// True while the Gqrx page has paused Gqrx's receiver and handed the LAS
     /// input over to the filler loop; resuming rebuilds the relay.
     @ObservationIgnored private var gqrxPausedToFiller = false
@@ -1116,6 +1137,18 @@ final class SDRController {
                 applyLocalUDPAudioRunning(v)
             }
             gqrxUDPStreamingOnGqrx = v
+        }
+
+        // Now that a live, reachable connection is confirmed, it's safe to
+        // send the "turn Gqrx's own UDP button on" command `startGqrxListening`
+        // queued — sending it any earlier (e.g. right after `start()`, before
+        // Gqrx's rc listener on 7356 was even up) would just be dropped by a
+        // socket that isn't connected yet. The *next* poll's `s.udpStreaming`
+        // will read this back as true and the auto-follow block above brings
+        // `gqrxUDPAudioRunning`/the checkbox into line with it then.
+        if gqrxNeedsUDPStreamSync {
+            gqrxNeedsUDPStreamSync = false
+            gqrxRemote?.setUDPStreaming(true)
         }
     }
 
