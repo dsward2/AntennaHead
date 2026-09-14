@@ -472,9 +472,23 @@ final class SDRController {
     private(set) var audioOutputFilter: String = ""
     private(set) var tunerAGC: Bool = false
     private(set) var directSamplingQBranch: Bool = false
+    /// Raw sampling-mode selector (0 = standard, 2 = direct sampling Q-branch,
+    /// …) — `directSamplingQBranch` above is derived from this for the
+    /// pipeline-building check, but the Now Playing views display the raw
+    /// value LocalRadio's "sampling mode" field always showed.
+    private(set) var samplingMode: Int = 0
+    private(set) var oversampling: Int = 0
+    private(set) var firSize: Int = 0
+    private(set) var atanMath: String = ""
+    private(set) var biasTFlag: Int = 0
     /// Latest RMS signal level reported by rtl_fm (raw, matches LocalRadio's
     /// "signal level" display). Zero when no tuner is running.
     private(set) var signalLevel: Int = 0
+    /// Latest tuned frequency (Hz) reported by rtl_fm_localradio's own status
+    /// feed. During a category scan rtl_fm sweeps the tuner itself, so this —
+    /// not any locally-held tuning parameter — is the only live source for
+    /// which frequency it's currently on. Zero when no tuner is running.
+    private(set) var liveFrequencyHz: Int = 0
 
     /// Identity of the RTL-SDR dongle feeding the active frequency tuning,
     /// resolved once at tune time. librtlsdr can't read a device's EEPROM
@@ -544,6 +558,11 @@ final class SDRController {
     /// Gqrx's DSP/receiver run state (`u DSP`). A paused Gqrx makes no sound no
     /// matter how it's tuned, so the Tune actions nudge this back on.
     private(set) var gqrxDSPRunning = false
+    /// True while AntennaHead's own PCMUDPReceiver → sox → PCMUDPSender relay
+    /// (typically bound to `gqrxReceivePort`, 7355) is actively running.
+    /// Distinct from `gqrxDSPRunning`: this is AntennaHead's side of the UDP
+    /// hop, not Gqrx's own receiver — see `gqrxSetUDPAudioRunning`.
+    private(set) var gqrxUDPAudioRunning = false
     private(set) var gqrxModeList: [String] = []
     /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
     private(set) var gqrxBookmarks: [GqrxBookmark] = []
@@ -553,6 +572,21 @@ final class SDRController {
     private(set) var gqrxInputDevice = ""              // current gr-osmosdr string
     private(set) var gqrxOutputDevices: [String] = []
     private(set) var gqrxOutputDevice = ""
+    /// True when this Gqrx carries the `U UDP` streaming-toggle command
+    /// (`gqrx-rc-udp-streaming` patch) — lets the web UI note when an older
+    /// Gqrx build won't respond to `gqrxSetUDPAudioRunning`'s remote half.
+    private(set) var gqrxHasUDPControl = false
+    /// Gqrx's own UDP-streaming button state, as it last reported it (`u
+    /// UDP`) — purely informational; AntennaHead's own relay state is
+    /// tracked separately by `gqrxUDPAudioRunning`, which is what this
+    /// controller actually acts on.
+    private(set) var gqrxUDPStreamingOnGqrx = false
+    /// True when this Gqrx build carries the `FILTER_OFFSET` level (the
+    /// `gqrx-rc-filter-offset` patch).
+    private(set) var gqrxHasFilterOffset = false
+    /// The channel offset within the current passband, in Hz — tunes without
+    /// a hardware retune. Independent of `gqrxFrequencyHz`.
+    private(set) var gqrxFilterOffsetHz: Int64 = 0
 
     init(sqliteController: SQLiteController? = nil, udpInputPort: UInt16, statusUDPPort: UInt16 = 6021) {
         self.sqliteController = sqliteController ?? .shared
@@ -612,6 +646,10 @@ final class SDRController {
         statusListener?.onRMSPower = { [weak self] rms in
             guard let self else { return }
             Task { @MainActor in self.signalLevel = rms }
+        }
+        statusListener?.onFrequency = { [weak self] hz in
+            guard let self else { return }
+            Task { @MainActor in self.liveFrequencyHz = hz }
         }
         statusListener?.start()
     }
@@ -983,6 +1021,7 @@ final class SDRController {
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
                               announcement: announcement?.pending)
+        gqrxUDPAudioRunning = true
     }
 
     /// Rebuild the Gqrx audio relay to speak `text` over it, keeping the current
@@ -1022,11 +1061,30 @@ final class SDRController {
     }
 
     @MainActor private func applyGqrxSnapshot(_ s: GqrxSnapshot) {
+        let wasAvailable = gqrxAvailable
         gqrxAvailable = s.reachable
+        guard s.reachable else {
+            // Gqrx just went unreachable (crashed, quit, or the TCP
+            // connection otherwise dropped) — every value mirrored from it
+            // is now stale, and it certainly isn't muted/running/streaming
+            // UDP to us in a way we can still trust. Reset once, right on
+            // the transition, rather than leaving the checkboxes frozen on
+            // their last-known values until some future reconnect happens
+            // to report something different.
+            if wasAvailable {
+                gqrxMuted = false
+                gqrxDSPRunning = false
+                gqrxUDPStreamingOnGqrx = false
+                applyLocalUDPAudioRunning(false)
+            }
+            return
+        }
         if let v = s.frequencyHz { gqrxFrequencyHz = v }
         if let v = s.mode { gqrxMode = v }
         if let v = s.passbandHz { gqrxPassbandHz = v }
         if let v = s.filterShape { gqrxFilterShape = v }
+        gqrxHasFilterOffset = s.hasFilterOffset
+        if let v = s.filterOffsetHz { gqrxFilterOffsetHz = v }
         if let v = s.squelchDBFS, v.isFinite { gqrxSquelchDBFS = v }
         if let v = s.afGainDB, v.isFinite { gqrxAFGainDB = v }
         if let v = s.rfGainValue, v.isFinite { gqrxRFGainValue = v }
@@ -1042,6 +1100,23 @@ final class SDRController {
         if !s.outputDeviceList.isEmpty { gqrxOutputDevices = s.outputDeviceList }
         if !s.inputDevice.isEmpty { gqrxInputDevice = s.inputDevice }
         if !s.outputDevice.isEmpty { gqrxOutputDevice = s.outputDevice }
+        gqrxHasUDPControl = s.hasUDPControl
+        if let v = s.udpStreaming {
+            // Auto-follow: when Gqrx's *own* reported UDP state changes from
+            // what it was on the previous poll — a manual click over there,
+            // or a fresh value after a reconnect — bring AntennaHead's own
+            // relay into line with it, the same way the checkbox already
+            // drives Gqrx when the user acts on this side. Comparing against
+            // the previous poll (not against `gqrxUDPAudioRunning` directly)
+            // matters: right after "Listen" starts our relay, Gqrx's own
+            // button is typically still off, and that's an expected,
+            // one-time mismatch, not a change to follow — only an actual
+            // transition on Gqrx's side should move our relay.
+            if v != gqrxUDPStreamingOnGqrx {
+                applyLocalUDPAudioRunning(v)
+            }
+            gqrxUDPStreamingOnGqrx = v
+        }
     }
 
     private func teardownGqrxRemote() {
@@ -1058,6 +1133,19 @@ final class SDRController {
         gqrxOutputDevices = []
         gqrxDSPRunning = false
         gqrxPausedToFiller = false
+        // Reset so a stale value from a *previous* Gqrx session can't look
+        // like a real transition the moment the first poll of a fresh one
+        // arrives — see the auto-follow comment in `applyGqrxSnapshot`.
+        // Without this, a leftover `true` here from an earlier session could
+        // spuriously read as "Gqrx just turned UDP off" and stop the relay
+        // `startGqrxRelay` just started for the new one.
+        gqrxUDPStreamingOnGqrx = false
+        // Deliberately not touched here: `gqrxUDPAudioRunning` tracks the
+        // audio relay's own lifecycle (set by `startGqrxRelay`, cleared by
+        // `gqrxSetUDPAudioRunning(false)`/`gqrxPauseReceiver`), not the
+        // remote-control connection this function resets — this runs on
+        // every fresh `startGqrxRemote()` call too, which happens *after*
+        // `startGqrxRelay` already set the flag true for the new session.
     }
 
     /// Live writes from the "Listen to Gqrx" control panel. Each updates the
@@ -1094,6 +1182,7 @@ final class SDRController {
         if fillerEnabled {
             gqrxPausedToFiller = true
             radioTaskPipelineManager.terminate()   // stop the now-silent relay, free the LAS input port
+            gqrxUDPAudioRunning = false
             startFillerPipeline(announcePrefix: "Gqrx paused.", keepGqrxStatus: true)
         } else if announcementEnabled {
             relaunchGqrxRelay(announceText: "Gqrx paused.")
@@ -1128,6 +1217,13 @@ final class SDRController {
         gqrxRemote?.setFilterShape(shape)
     }
 
+    /// Tunes the channel offset within the current passband — a hop that
+    /// doesn't require retuning the hardware, unlike `gqrxSetFrequency`.
+    func gqrxSetFilterOffset(_ hz: Int64) {
+        gqrxFilterOffsetHz = hz
+        gqrxRemote?.setFilterOffset(hz)
+    }
+
     func gqrxSetLevel(_ name: String, _ value: Double) {
         switch name.uppercased() {
         case "SQL": gqrxSquelchDBFS = value
@@ -1140,6 +1236,59 @@ final class SDRController {
     func gqrxSetMuted(_ on: Bool) {
         gqrxMuted = on
         gqrxRemote?.setMuted(on)
+    }
+
+    /// The "Start UDP Audio" checkbox in the Gqrx remote-control panel:
+    /// starts or stops just the `PCMUDPReceiver(gqrxReceivePort) → sox →
+    /// PCMUDPSender` relay, leaving Gqrx's own DSP state and the
+    /// remote-control connection untouched — unlike `gqrxSetDSP`, which also
+    /// hands the LAS input over to the filler when pausing. No-op unless a
+    /// Gqrx session is already active (i.e. the page's initial "Listen" has
+    /// been clicked at least once, which is what stands up the panel itself).
+    ///
+    /// Also tells Gqrx itself to start/stop its own UDP output (the
+    /// `gqrx-rc-udp-streaming` patch's `U UDP` command) — both sides of the
+    /// UDP hop need to be on for audio to flow, and this is the one control
+    /// meant to drive both. Harmless against an older, unpatched Gqrx: the
+    /// command is simply ignored (`RPRT 1`) and AntennaHead's own half still
+    /// starts/stops normally — that Gqrx's own "UDP" button just needs a
+    /// manual click, as before this patch existed.
+    func gqrxSetUDPAudioRunning(_ on: Bool) {
+        guard statusFunction == "Gqrx" else { return }
+        gqrxRemote?.setUDPStreaming(on)
+        applyLocalUDPAudioRunning(on)
+    }
+
+    /// Starts/stops just the local relay half of `gqrxSetUDPAudioRunning`,
+    /// without touching Gqrx's own UDP button. Split out so `applyGqrxSnapshot`
+    /// can call it too — when Gqrx's *own* reported UDP state changes (a
+    /// manual click over there, or a value freshly reported after a
+    /// reconnect), AntennaHead's relay follows it automatically, the same way
+    /// the checkbox already drives Gqrx when the user acts on this side.
+    /// Re-sending `U UDP` here would just be a harmless echo, but skipping it
+    /// keeps this path a pure follower of whatever `applyGqrxSnapshot` just
+    /// learned, rather than a second writer.
+    private func applyLocalUDPAudioRunning(_ on: Bool) {
+        guard statusFunction == "Gqrx" else { return }
+        if on {
+            guard !gqrxUDPAudioRunning else { return }
+            preserveGqrxRemote = true
+            defer { preserveGqrxRemote = false }
+            // If paused-to-filler (see `gqrxPauseReceiver`), the filler is the
+            // one holding the LAS input right now — free it first, same as
+            // `gqrxResumeReceiver` does, or the rebuilt relay below would race
+            // it for the port.
+            if gqrxPausedToFiller {
+                gqrxPausedToFiller = false
+                fillerPipelineManager.terminate()
+                fillerAnnouncementManager.terminate()
+            }
+            startGqrxRelay(channels: gqrxRelayChannels, announceText: nil)
+        } else {
+            guard gqrxUDPAudioRunning else { return }
+            radioTaskPipelineManager.terminate()
+            gqrxUDPAudioRunning = false
+        }
     }
 
     func gqrxSetInputDevice(_ device: String) {
@@ -1442,6 +1591,7 @@ final class SDRController {
         activeFrequencyID = nil
         statusFunction = "No active tuning"
         signalLevel = 0
+        liveFrequencyHz = 0
         activeDeviceSerial = ""
         activeDeviceIndex = -1
         activeChannelCount = 0
@@ -2000,6 +2150,7 @@ final class SDRController {
         var biasT: Bool
         var oversampling: Int
         var atanMath: String
+        var samplingMode: Int
         var directQBranch: Bool
         var tunerAGC: Bool
         var stereoFlag: Bool
@@ -2025,6 +2176,7 @@ final class SDRController {
             biasT: f.biasTFlag == 1,
             oversampling: f.oversampling,
             atanMath: f.atanMath,
+            samplingMode: f.samplingMode,
             directQBranch: f.samplingMode == 2,
             tunerAGC: f.tunerAgc == 1,
             stereoFlag: f.stereoFlag,
@@ -2053,6 +2205,7 @@ final class SDRController {
             biasT: c.scanBiasTFlag == 1,
             oversampling: c.scanOversampling,
             atanMath: c.scanAtanMath,
+            samplingMode: c.scanSamplingMode,
             directQBranch: c.scanSamplingMode == 2,
             tunerAGC: c.scanTunerAgc == 1,
             stereoFlag: false,   // category scan has no stereo setting; stays mono
@@ -2060,7 +2213,7 @@ final class SDRController {
             audioOutputFilter: c.scanAudioOutputFilter,
             frequencyArgs: freqArgs,
             stationName: c.categoryName,
-            statusFunction: "Scanning category: \(c.categoryName)",
+            statusFunction: "scanning category: \(c.categoryName)",
             announcementText: "Scanning \(c.categoryName.trimmingCharacters(in: .whitespacesAndNewlines))."
         )
     }
@@ -2627,6 +2780,12 @@ final class SDRController {
         audioOutputFilter = tuning.audioOutputFilter
         tunerAGC = tuning.tunerAGC
         directSamplingQBranch = tuning.directQBranch
+        samplingMode = tuning.samplingMode
+        oversampling = tuning.oversampling
+        firSize = tuning.firSize
+        atanMath = tuning.atanMath
+        biasTFlag = tuning.biasT ? 1 : 0
+        liveFrequencyHz = 0   // reset until the new pipeline's own status feed reports one
         frequencyDisplay = tuning.frequencyArgs
             .filter { $0 != "-f" }
             .joined(separator: ", ")

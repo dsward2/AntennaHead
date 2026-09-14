@@ -14,6 +14,11 @@ import SharedLogging
 final class RTLSDRStatusListener: @unchecked Sendable {
     /// Invoked on a background queue each time a new RMS power value arrives.
     var onRMSPower: (@Sendable (Int) -> Void)?
+    /// Invoked on a background queue each time a new frequency (Hz) arrives.
+    /// During a category scan rtl_fm_localradio itself sweeps the tuner, so
+    /// this is the only source of truth for which frequency it's currently
+    /// on — the caller's own tuning parameters only describe the scan range.
+    var onFrequency: (@Sendable (Int) -> Void)?
 
     private let port: NWEndpoint.Port
     private let queue = DispatchQueue(label: "com.dsward.AntennaHead.RTLSDRStatusListener")
@@ -72,10 +77,16 @@ final class RTLSDRStatusListener: @unchecked Sendable {
 
     private func parse(_ text: String) {
         for line in text.split(separator: "\n") {
-            guard let range = line.range(of: "RMS Power:") else { continue }
-            let value = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
-            if let rms = Int(value) {
-                onRMSPower?(rms)
+            if let range = line.range(of: "RMS Power:") {
+                let value = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
+                if let rms = Int(value) {
+                    onRMSPower?(rms)
+                }
+            } else if let range = line.range(of: "Frequency:") {
+                let value = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
+                if let hz = Int(value) {
+                    onFrequency?(hz)
+                }
             }
         }
     }

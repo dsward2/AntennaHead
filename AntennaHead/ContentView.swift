@@ -169,6 +169,10 @@ struct ContentView: View {
 
         let controlBoothEnabled = ((try? SQLiteController.shared.appSettingsValue(
             forKey: "AntennaHeadControlBoothEnabled")) ?? nil) == "1"
+        // Gqrx defaults ON: an absent key (pre-existing installs, before this
+        // setting existed) counts as enabled, unlike controlBoothEnabled.
+        let gqrxEnabled = (((try? SQLiteController.shared.appSettingsValue(
+            forKey: "AntennaHeadGqrxEnabled")) ?? nil) ?? "1") != "0"
 
         // The web UI's audio player is proxied through this server's own port
         // (selfHTTPPort/selfHTTPSPort) rather than pointed directly at
@@ -180,6 +184,7 @@ struct ContentView: View {
             streamHTTPSPort: tlsConfig?.port,
             aacBitrate: outputBitrate,
             controlBoothEnabled: controlBoothEnabled,
+            gqrxEnabled: gqrxEnabled,
             selfHTTPPort: Int(ports.webHTTP),
             selfHTTPSPort: identity != nil ? Int(ports.webHTTPS) : nil
         )

@@ -611,6 +611,15 @@
                     captionsPoll();                 // fill immediately, don't wait for the interval
                 }
 
+                if (contentFileName == "devicegqrx.html")
+                {
+                    // A fresh #gqrxPanel just replaced whatever was here
+                    // before (empty Mode/device selects, no bookmarks) — drop
+                    // the "already populated" flags left over from a prior
+                    // visit, or gqrxUpdatePanel() will never fill it back in.
+                    gqrxResetPanelState();
+                }
+
             }
         };
         xhttp.open("GET", contentFileName, true);

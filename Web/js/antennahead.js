@@ -1308,7 +1308,7 @@ function updateStatusDisplay(statusData)
         squelch_level = statusObj.scan_squelch_level;
         tuner_agc = statusObj.scan_tuner_agc;
         tuner_gain = statusObj.scan_tuner_gain;
-        usb_device_string - statusObj.scan_usb_device_string;
+        usb_device_string = statusObj.scan_usb_device_string;
     }
     
     var nowPlayingDetails = document.getElementById("now-playing-details");
@@ -1322,7 +1322,6 @@ function updateStatusDisplay(statusData)
         {
           statusHtml += "<span id='now-playing-details' style='overflow-x: scroll; white-space: nowrap;'>";
 
-          statusHtml += "name: ";
           statusHtml += station_name;
           statusHtml += "<br>";
           
@@ -1974,6 +1973,22 @@ var gqrxInDevInit = false;
 var gqrxOutDevInit = false;
 var gqrxBookmarksData = null;
 
+// These "populate once" flags (and gqrxTouched's freshness timestamps) live
+// at this script's top level, so they survive a loadContent() navigation
+// away from and back to devicegqrx.html even though that swaps in a brand
+// new, empty #gqrxPanel each time — index.html's loadContent() must call
+// this right after inserting a fresh copy of the page, or the flags being
+// already "true" from the previous visit stops gqrxUpdatePanel() from ever
+// filling the new (empty) Mode/device selects or bookmarks list again.
+function gqrxResetPanelState()
+{
+    gqrxModesInit = false;
+    gqrxInDevInit = false;
+    gqrxOutDevInit = false;
+    gqrxBookmarksData = null;
+    gqrxTouched = {};
+}
+
 // A gr-osmosdr device string for one \get_input_device_list label. RTL-SDR
 // labels carry the dongle serial ("… SN: 00000180") -> "rtl=<serial>", which
 // \set_input_device accepts unambiguously; anything else is sent as-is.
@@ -2053,6 +2068,22 @@ function gqrxUpdatePanel(g)
         }
     }
 
+    var offsetRow = document.getElementById("gqrxOffsetRow");
+    if (offsetRow != null)
+    {
+        offsetRow.hidden = !g.has_filter_offset;
+        if (g.has_filter_offset && !gqrxFresh("gqrxOffset"))
+        {
+            var off = document.getElementById("gqrxOffset");
+            // filter_offset can legitimately be 0 (centered) — check for
+            // null/undefined, not truthiness, or a real 0 would never show.
+            if (off != null && document.activeElement !== off && g.filter_offset != null)
+            {
+                off.value = g.filter_offset;
+            }
+        }
+    }
+
     if (!gqrxFresh("gqrxWidth"))
     {
         var w = document.getElementById("gqrxWidth");
@@ -2113,6 +2144,12 @@ function gqrxUpdatePanel(g)
     {
         var mu = document.getElementById("gqrxMute");
         if (mu != null) { mu.checked = !!g.muted; }
+    }
+
+    if (!gqrxFresh("gqrxUdpAudio"))
+    {
+        var ua = document.getElementById("gqrxUdpAudio");
+        if (ua != null) { ua.checked = !!g.udp_audio_running; }
     }
 
     var dsp = document.getElementById("gqrxDsp");
@@ -2252,6 +2289,16 @@ function gqrxSetFreq()
     gqrxPost("gqrxsetfrequency.html", { freq: hz });
 }
 
+function gqrxSetOffset()
+{
+    var o = document.getElementById("gqrxOffset");
+    if (o == null || o.value === "") { return; }
+    var hz = Math.round(parseFloat(o.value));
+    if (!isFinite(hz)) { return; }
+    gqrxMark("gqrxOffset");
+    gqrxPost("gqrxsetoffset.html", { offset: hz });
+}
+
 function gqrxWidthInput()
 {
     gqrxMark("gqrxWidth");
@@ -2323,6 +2370,13 @@ function gqrxToggleMute()
     gqrxMark("gqrxMute");
     var mu = document.getElementById("gqrxMute");
     if (mu != null) { gqrxPost("gqrxmute.html", { on: mu.checked ? 1 : 0 }); }
+}
+
+function gqrxToggleUdpAudio()
+{
+    gqrxMark("gqrxUdpAudio");
+    var ua = document.getElementById("gqrxUdpAudio");
+    if (ua != null) { gqrxPost("gqrxsetudpaudio.html", { on: ua.checked ? 1 : 0 }); }
 }
 
 function gqrxToggleDsp()
