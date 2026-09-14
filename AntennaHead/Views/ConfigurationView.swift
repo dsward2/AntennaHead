@@ -19,6 +19,8 @@ struct ConfigurationView: View {
     @State private var controlBoothEnabled = false
     @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
     @State private var launchControlBoothOnStartup = false
+    @State private var gqrxEnabled = true
+    @State private var gqrxAppPath = "/Applications/Gqrx.app"
     @State private var announcementEnabled = false
     @State private var announcementVoiceID = ""
     @State private var previewSynth = AVSpeechSynthesizer()
@@ -50,6 +52,9 @@ struct ConfigurationView: View {
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
     static let controlBoothAutoLaunchKey = "AntennaHeadControlBoothAutoLaunch"
     static let controlBoothBookmarkKey = "AntennaHeadControlBoothBookmark"
+    private static let gqrxEnabledKey = "AntennaHeadGqrxEnabled"
+    static let gqrxPathKey = "AntennaHeadGqrxAppPath"
+    static let gqrxBookmarkKey = "AntennaHeadGqrxBookmark"
 
     var body: some View {
         Form {
@@ -290,6 +295,32 @@ struct ConfigurationView: View {
             }
 
             Section {
+                Toggle("Enable Gqrx integration", isOn: $gqrxEnabled)
+                    .onChange(of: gqrxEnabled) { _, _ in
+                        saveGqrxSettings()
+                        NotificationCenter.default.post(
+                            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+                    }
+                HStack {
+                    Text("App Path:")
+                    TextField(text: $gqrxAppPath,
+                              prompt: Text("/Applications/Gqrx.app")) { EmptyView() }
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(saveGqrxSettings)
+                    Button("Set Path") {
+                        chooseGqrxApp()
+                    }
+                }
+            } header: {
+                Text("Gqrx")
+            } footer: {
+                Text("The \u{201C}Listen to Gqrx\u{201D} page's Launch Gqrx button opens this app \u{2014} either a stock Gqrx install or the custom \u{201C}Gqrx for AntennaHead\u{201D} build.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 if let recordingFolderURL = SharedRecordingFolder.url {
                     LabeledContent("Folder") {
                         HStack {
@@ -381,6 +412,30 @@ struct ConfigurationView: View {
         }
         let autoLaunch = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothAutoLaunchKey)) ?? nil
         launchControlBoothOnStartup = autoLaunch == "1"
+        // Gqrx defaults ON (unlike ControlBooth's integration, which defaults
+        // off): an absent key means an install from before this setting
+        // existed, where Gqrx support was always on.
+        gqrxEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: Self.gqrxEnabledKey)) ?? nil) ?? "1") != "0"
+        var gqrxResolvedFromBookmark = false
+        if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: Self.gqrxBookmarkKey)) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                gqrxAppPath = url.path
+                gqrxResolvedFromBookmark = true
+                if isStale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                               includingResourceValuesForKeys: nil,
+                                                               relativeTo: nil) {
+                    try? SQLiteController.shared.storeAppSettingsValue(
+                        fresh.base64EncodedString(), forKey: Self.gqrxBookmarkKey)
+                }
+            }
+        }
+        if !gqrxResolvedFromBookmark {
+            let storedPath = (try? SQLiteController.shared.appSettingsValue(forKey: Self.gqrxPathKey)) ?? nil
+            gqrxAppPath = storedPath.flatMap { $0.isEmpty ? nil : $0 } ?? "/Applications/Gqrx.app"
+        }
         let announceEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementEnabledKey)) ?? nil
         announcementEnabled = announceEnabled == "1"
         let storedVoice = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.announcementVoiceKey)) ?? nil
@@ -453,6 +508,13 @@ struct ConfigurationView: View {
             controlBoothAppPath, forKey: Self.controlBoothPathKey)
         try? SQLiteController.shared.storeAppSettingsValue(
             launchControlBoothOnStartup ? "1" : "0", forKey: Self.controlBoothAutoLaunchKey)
+    }
+
+    private func saveGqrxSettings() {
+        try? SQLiteController.shared.storeAppSettingsValue(
+            gqrxEnabled ? "1" : "0", forKey: Self.gqrxEnabledKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            gqrxAppPath, forKey: Self.gqrxPathKey)
     }
 
     private func saveAnnouncementSettings() {
@@ -555,6 +617,28 @@ struct ConfigurationView: View {
                 data.base64EncodedString(), forKey: Self.controlBoothBookmarkKey)
         }
         saveControlBoothSettings()
+    }
+
+    /// Same pattern as `chooseControlBoothApp()`, but also accepts the
+    /// custom "Gqrx for AntennaHead" build, which is still just an
+    /// `.app` bundle to the file picker.
+    private func chooseGqrxApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.applicationBundle]
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.message = "Choose the Gqrx application (stock Gqrx, or Gqrx-for-AntennaHead.app)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        gqrxAppPath = url.path
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil) {
+            try? SQLiteController.shared.storeAppSettingsValue(
+                data.base64EncodedString(), forKey: Self.gqrxBookmarkKey)
+        }
+        saveGqrxSettings()
     }
 
     private func chooseFillerSourceFolder() {

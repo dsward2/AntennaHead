@@ -139,6 +139,11 @@ final class AntennaHeadHTTPServer {
         var aacBitrate: Int = 128_000
         var autoplay: Bool = false
         var controlBoothEnabled: Bool = false
+        /// Gates the "Listen to Gqrx" tile on the Radio page. Defaults true
+        /// (unlike `controlBoothEnabled`) because Gqrx support predates this
+        /// setting and was always shown — an absent stored value should not
+        /// silently hide a feature existing installs already rely on.
+        var gqrxEnabled: Bool = true
         /// AntennaHead's own web-server port(s). The `<audio>` element's HLS
         /// request is pointed at *this* server (proxied through to LAS
         /// internally) rather than LAS's separate port, so a browser
@@ -549,6 +554,11 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["GQRX_FORM": gqrxFormHTML()])
 
+        case "/gqrxlaunched.html":
+            launchGqrx()
+            return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["GQRX_FORM": gqrxFormHTML()])
+
         case "/devicetexttospeech.html":
             return renderHTML(relativePath: "devicetexttospeech.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["TEXT_TO_SPEECH_FORM": textToSpeechFormHTML()])
@@ -588,6 +598,12 @@ final class AntennaHeadHTTPServer {
             }
             return okResponse()
 
+        case "/gqrxsetoffset.html":
+            if let hz = Int64(formFields(fromBody: request.body)["offset"] ?? "") {
+                sdrController?.gqrxSetFilterOffset(hz)
+            }
+            return okResponse()
+
         case "/gqrxsetlevel.html":
             let f = formFields(fromBody: request.body)
             if let name = f["name"], !name.isEmpty, let value = Double(f["value"] ?? "") {
@@ -597,6 +613,10 @@ final class AntennaHeadHTTPServer {
 
         case "/gqrxmute.html":
             sdrController?.gqrxSetMuted(formFields(fromBody: request.body)["on"] == "1")
+            return okResponse()
+
+        case "/gqrxsetudpaudio.html":
+            sdrController?.gqrxSetUDPAudioRunning(formFields(fromBody: request.body)["on"] == "1")
             return okResponse()
 
         case "/gqrxsetdsp.html":
@@ -1237,6 +1257,39 @@ final class AntennaHeadHTTPServer {
         NSWorkspace.shared.open(url)
     }
 
+    /// Bundle identifiers to check when detecting whether Gqrx is already
+    /// running — either a stock build or the custom "Gqrx for AntennaHead"
+    /// build (`com.dsward.gqrx-for-antennahead`, see
+    /// `Docs/GQRX_FOR_ANTENNAHEAD_BUILD.md`).
+    private static let gqrxBundleIdentifiers = ["com.dsward.gqrx-for-antennahead", "dk.gqrx.gqrx"]
+
+    private static var isGqrxRunning: Bool {
+        gqrxBundleIdentifiers.contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+    }
+
+    /// Launches Gqrx using the security-scoped bookmark saved by
+    /// ConfigurationView's file picker, falling back to the stored path, then
+    /// to the standard `/Applications/Gqrx.app` location — same pattern as
+    /// `launchControlBooth()` above.
+    @MainActor private func launchGqrx() {
+        if let base64 = (try? sqlite?.appSettingsValue(forKey: "AntennaHeadGqrxBookmark")) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                NSWorkspace.shared.open(url)
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                return
+            }
+        }
+        let path = ((try? sqlite?.appSettingsValue(forKey: "AntennaHeadGqrxAppPath")) ?? nil)
+            ?? "/Applications/Gqrx.app"
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     /// `%%FAVORITES_TABLE%%` — ported from `generateFavoritesString`.
     @MainActor private func favoritesTableHTML() -> String {
         let frequencies = (try? sqlite?.allFrequencyRecords()) ?? []
@@ -1447,7 +1500,16 @@ final class AntennaHeadHTTPServer {
     /// Audio→Stereo setting (see `SDRController.startGqrxListening`).
     @MainActor private func gqrxFormHTML() -> String {
         let gqrxPort = sdrController?.gqrxReceivePort ?? 7355
-        var s = "<form class='gqrx_form' id='gqrxForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        var s = ""
+        // Only offer to launch Gqrx when it isn't already running — once it's
+        // up there's nothing left to launch, mirroring how the ControlBooth
+        // page hides "Launch ControlBooth" once ControlBooth is running.
+        if !Self.isGqrxRunning {
+            s += "<form action='javascript:loadContent(&quot;gqrxlaunched.html&quot;)'>"
+            s += "<input class='twelve columns button button-primary' type='submit' value='Launch Gqrx'>"
+            s += "</form><br>&nbsp;<br>"
+        }
+        s += "<form class='gqrx_form' id='gqrxForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Listen to Gqrx</label>"
         s += "<p>Receiving on UDP port <strong>\(gqrxPort)</strong> — set Gqrx's Audio ▸ UDP output to this port.</p>"
         s += "<label>Channels</label>"
@@ -1470,6 +1532,7 @@ final class AntennaHeadHTTPServer {
     /// live Gqrx on port 7356. All writes go to the `/gqrx*` endpoints.
     @MainActor private func gqrxControlPanelHTML() -> String {
         guard SDRController.gqrxRemoteControlEnabled else { return "" }
+        let gqrxPort = sdrController?.gqrxReceivePort ?? 7355
         var s = "<div id='gqrxPanel' class='gqrx-panel' hidden>"
         s += "<hr><label>Gqrx Remote Control</label>"
         s += "<p id='gqrxStatus' class='gqrx-status'>Connecting…</p>"
@@ -1493,6 +1556,15 @@ final class AntennaHeadHTTPServer {
         s += "<div class='gqrx-inline'>"
         s += "<input type='number' id='gqrxFreq' step='0.001' class='gqrx-freq'>"
         s += "<input type='button' class='button' value='Tune' onclick='gqrxSetFreq();'>"
+        s += "</div></div>"
+
+        // Channel offset within the current passband (only when Gqrx carries
+        // the gqrx-rc-filter-offset patch) — tunes without a hardware retune,
+        // unlike the Frequency field above.
+        s += "<div class='gqrx-row' id='gqrxOffsetRow' hidden><label for='gqrxOffset'>Channel offset (Hz)</label>"
+        s += "<div class='gqrx-inline'>"
+        s += "<input type='number' id='gqrxOffset' step='100' class='gqrx-freq'>"
+        s += "<input type='button' class='button' value='Set' onclick='gqrxSetOffset();'>"
         s += "</div></div>"
 
         // Mode + filter width
@@ -1529,6 +1601,11 @@ final class AntennaHeadHTTPServer {
         s += "<div class='gqrx-meter'><div id='gqrxSigBar' class='gqrx-meter-fill'></div></div></div>"
         s += "<div class='gqrx-row'><label class='gqrx-check'>"
         s += "<input type='checkbox' id='gqrxMute' onchange='gqrxToggleMute();'> Mute Gqrx audio</label></div>"
+        // Starts/stops just AntennaHead's PCMUDPReceiver relay (independent of
+        // Gqrx's own DSP state above) — see `SDRController.gqrxSetUDPAudioRunning`.
+        s += "<div class='gqrx-row'><label class='gqrx-check'>"
+        s += "<input type='checkbox' id='gqrxUdpAudio' onchange='gqrxToggleUdpAudio();'> "
+        s += "Start UDP Audio (port \(gqrxPort))</label></div>"
 
         // Bookmarks
         s += "<div class='gqrx-row' id='gqrxBookmarksRow' hidden>"
@@ -2237,7 +2314,7 @@ final class AntennaHeadHTTPServer {
             </div>
             """
         }
-        var html = "<div id=\"spatial-audio-controls\">"
+        var html = "<div id=\"spatial-audio-controls\" style=\"margin-top: 24px;\">"
         html += "<h4>Spatial Position</h4>"
         html += slider("spatial-azimuth", "Azimuth", sdr.azimuth, -180, 180, 1,
                        String(format: "%.0f\u{00B0}", sdr.azimuth))
@@ -2330,6 +2407,38 @@ final class AntennaHeadHTTPServer {
             dict["channels"] = channelCount
             dict["channels_display"] = channelsLabel(channelCount)
             dict["stereo_flag"] = f.stereoFlag ? 1 : 0
+        } else if let sdr = sdrController, sdr.taskMode == .scan {
+            // Category scan: there's no single `Frequency` row to read (rtl_fm
+            // itself sweeps a range), so populate `nowplaying.html`'s
+            // `scan_*`-prefixed fields (see antennahead.js `updateStatusDisplay`)
+            // from the controller's own live pipeline state instead — the same
+            // values `StatusView` already reads directly. `short_frequency`/
+            // `frequency` come from rtl_fm_localradio's own status feed
+            // (`RTLSDRStatusListener.onFrequency`), the only source that
+            // actually knows which frequency the sweep is on right now.
+            dict["station_name"] = sdr.statusFunction
+            let hz = sdr.liveFrequencyHz
+            dict["short_frequency"] = hz > 0 ? String(format: "%.3f MHz", Double(hz) / 1_000_000.0) : ""
+            dict["frequency"] = hz
+            dict["scan_modulation"] = sdr.modulation
+            dict["scan_sample_rate"] = sdr.sampleRate
+            dict["scan_sampling_mode"] = sdr.samplingMode
+            dict["scan_oversampling"] = sdr.oversampling
+            dict["scan_tuner_gain"] = sdr.tunerGain
+            // antennahead.js reads this one unprefixed even in scan mode (see
+            // updateStatusDisplay's `tuner_gain_display` var) — it's declared
+            // once above the mode switch and never reassigned in the scan branch.
+            dict["tuner_gain_display"] = gainLabel(gain: sdr.tunerGain, agc: sdr.tunerAGC)
+            dict["scan_tuner_agc"] = sdr.tunerAGC ? 1 : 0
+            dict["scan_squelch_level"] = sdr.squelchLevel
+            dict["scan_fir_size"] = sdr.firSize
+            dict["scan_atan_math"] = sdr.atanMath
+            dict["scan_audio_output_filter"] = sdr.audioOutputFilter
+            dict["scan_options"] = sdr.options
+            dict["scan_bias_t_flag"] = sdr.biasTFlag
+            dict["scan_usb_device_string"] = sdr.activeDeviceSerial
+            dict["usb_device_display"] = activeDeviceLabel(stored: sdr.activeDeviceSerial)
+            dict["channels_display"] = channelsLabel(sdr.activeChannelCount)
         } else {
             dict["station_name"] = sdrController?.statusFunction ?? "Not Playing"
             dict["short_frequency"] = ""
@@ -2350,6 +2459,8 @@ final class AntennaHeadHTTPServer {
                 "passband": sdr.gqrxPassbandHz,
                 "has_filter_shape": sdr.gqrxHasFilterShape,
                 "filter_shape": sdr.gqrxFilterShape,
+                "has_filter_offset": sdr.gqrxHasFilterOffset,
+                "filter_offset": sdr.gqrxFilterOffsetHz,
                 "squelch": finite(sdr.gqrxSquelchDBFS),
                 "af_gain": finite(sdr.gqrxAFGainDB),
                 "rf_gain_name": sdr.gqrxRFGainName,
@@ -2357,6 +2468,9 @@ final class AntennaHeadHTTPServer {
                 "signal": finite(sdr.gqrxSignalDBFS),
                 "muted": sdr.gqrxMuted,
                 "dsp_running": sdr.gqrxDSPRunning,
+                "udp_audio_running": sdr.gqrxUDPAudioRunning,
+                "has_udp_control": sdr.gqrxHasUDPControl,
+                "udp_streaming_on_gqrx": sdr.gqrxUDPStreamingOnGqrx,
                 "modes": sdr.gqrxModeList,
                 "bookmarks": sdr.gqrxBookmarks.map { [
                     "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,
@@ -2654,8 +2768,18 @@ final class AntennaHeadHTTPServer {
             dict["TUNER_ICON"]      = loadSVG(named: "tuner")
             // "Listen to Gqrx" lives here (moved from the Audio Devices page)
             // since it's another way to listen to the radio, alongside
-            // Favorites/Categories/Tuner.
-            dict["GQRX_ICON"]       = loadSVG(named: "gqrx")
+            // Favorites/Categories/Tuner. The tile only appears when Gqrx
+            // integration is enabled in Configuration, mirroring the
+            // CONTROLBOOTH_TILE gate below.
+            dict["GQRX_TILE"] = webConfig.gqrxEnabled ? """
+                    <div class="six columns value-prop">
+                        \(loadSVG(named: "gqrx"))
+                        <div class="value-prop">
+                            <a class="button button-primary" onclick="loadContent('devicegqrx.html');">Listen to Gqrx</a>
+                        </div>
+                        Receive Gqrx's UDP audio output<br>and stream it here
+                    </div>
+                """ : ""
         case "info.html":
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         case "devices.html":

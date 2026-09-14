@@ -18,6 +18,13 @@ struct GqrxSnapshot: Sendable {
     var passbandHz: Int?
     var filterShape: Int?
     var hasFilterShape = false
+    /// True when this Gqrx carries the `FILTER_OFFSET` level (the
+    /// `gqrx-rc-filter-offset` patch). Older builds simply won't answer it.
+    var hasFilterOffset = false
+    /// The channel offset within the current passband, in Hz (`l
+    /// FILTER_OFFSET`) — nil until first polled, or on a Gqrx build that
+    /// predates `hasFilterOffset`.
+    var filterOffsetHz: Int64?
     var squelchDBFS: Double?
     var afGainDB: Double?
     var rfGainName = ""
@@ -26,6 +33,12 @@ struct GqrxSnapshot: Sendable {
     var muted: Bool?
     /// Gqrx's DSP / receiver run state (`u DSP`) — nil until first polled.
     var dspRunning: Bool?
+    /// True when this Gqrx carries the `U UDP` streaming toggle (the
+    /// `gqrx-rc-udp-streaming` patch). Older builds simply won't answer it.
+    var hasUDPControl = false
+    /// Gqrx's own UDP audio-streaming button state (`u UDP`) — nil until
+    /// first polled, or on a Gqrx build that predates `hasUDPControl`.
+    var udpStreaming: Bool?
     var modeList: [String] = []
     var bookmarks: [GqrxBookmark] = []
 
@@ -66,10 +79,12 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
 
     // Discovered once per connection.
     private var hasFilterShape = false
+    private var hasFilterOffset = false
     private var rfGainName = ""
     private var modeList: [String] = []
     private var bookmarks: [GqrxBookmark] = []
     private var hasDeviceControl = false
+    private var hasUDPControl = false
     private var inputDeviceList: [String] = []
     private var outputDeviceList: [String] = []
     private var currentInputDevice = ""
@@ -112,9 +127,17 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     func setFrequency(_ hz: Int64)              { send("F \(hz)") }
     func setMode(_ mode: String, passbandHz: Int) { send("M \(mode) \(max(0, passbandHz))") }
     func setFilterShape(_ shape: Int)           { send("L FILTER_SHAPE \(shape)") }
+    /// Tunes the channel offset within the current passband, via the
+    /// `gqrx-rc-filter-offset` patch — no hardware retune. Harmless no-op
+    /// (`RPRT 1`, ignored) against a Gqrx build that predates it.
+    func setFilterOffset(_ hz: Int64)           { send("L FILTER_OFFSET \(hz)") }
     func setLevel(_ name: String, _ value: Double) { send("L \(name) \(String(format: "%.2f", value))") }
     func setMuted(_ on: Bool)                   { send("U MUTE \(on ? 1 : 0)") }
     func setDSP(_ on: Bool)                     { send("U DSP \(on ? 1 : 0)") }
+    /// Toggles Gqrx's own "UDP" audio-streaming button (Audio dock), via the
+    /// `gqrx-rc-udp-streaming` patch. Harmless no-op (RPRT 1, ignored) against
+    /// a Gqrx build that predates it.
+    func setUDPStreaming(_ on: Bool)            { send("U UDP \(on ? 1 : 0)") }
     func applyBookmarkFrequency(_ hz: Int64)    { send("\\set_bookmark_freq \(hz)") }
     // Unlike the other setters, these also refresh the cached current-device
     // string on success — `currentInputDevice`/`currentOutputDevice` are only
@@ -231,8 +254,11 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
 
         let levels = exchange("l ?")?.first?.split(separator: " ").map(String.init) ?? []
         hasFilterShape = levels.contains { $0.caseInsensitiveCompare("FILTER_SHAPE") == .orderedSame }
+        hasFilterOffset = levels.contains { $0.caseInsensitiveCompare("FILTER_OFFSET") == .orderedSame }
         rfGainName = levels.first { $0.uppercased().hasSuffix("_GAIN") }.map { String($0.dropLast(5)) } ?? ""
         modeList = exchange("M ?")?.first?.split(separator: " ").map(String.init) ?? []
+        let funcs = exchange("u ?")?.first?.split(separator: " ").map(String.init) ?? []
+        hasUDPControl = funcs.contains { $0.caseInsensitiveCompare("UDP") == .orderedSame }
         bookmarks = fetchBookmarks() ?? []
     }
 
@@ -323,10 +349,12 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
 
         var snap = GqrxSnapshot()
         snap.hasFilterShape = hasFilterShape
+        snap.hasFilterOffset = hasFilterOffset
         snap.rfGainName = rfGainName
         snap.modeList = modeList
         snap.bookmarks = bookmarks
         snap.hasDeviceControl = hasDeviceControl
+        snap.hasUDPControl = hasUDPControl
         snap.inputDeviceList = inputDeviceList
         snap.outputDeviceList = outputDeviceList
 
@@ -342,11 +370,17 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         if hasFilterShape {
             snap.filterShape = exchange("l FILTER_SHAPE")?.first.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
         }
+        if hasFilterOffset {
+            snap.filterOffsetHz = exchange("l FILTER_OFFSET")?.first.flatMap { Int64($0.trimmingCharacters(in: .whitespaces)) }
+        }
         snap.squelchDBFS = doubleReply("l SQL")
         snap.afGainDB = doubleReply("l AF")
         if !rfGainName.isEmpty { snap.rfGainValue = doubleReply("l \(rfGainName)_GAIN") }
         if let mu = exchange("u MUTE")?.first?.trimmingCharacters(in: .whitespaces) { snap.muted = (mu == "1") }
         if let dsp = exchange("u DSP")?.first?.trimmingCharacters(in: .whitespaces) { snap.dspRunning = (dsp == "1") }
+        if hasUDPControl, let udp = exchange("u UDP")?.first?.trimmingCharacters(in: .whitespaces) {
+            snap.udpStreaming = (udp == "1")
+        }
         // Set at connect (discoverDevices()) and refreshed by setInputDevice/
         // setOutputDevice on a successful write — not re-queried here every
         // tick. `\get_input_device_list`/`\get_output_device_list` re-probe
