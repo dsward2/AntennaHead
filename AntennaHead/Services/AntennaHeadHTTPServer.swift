@@ -556,6 +556,16 @@ final class AntennaHeadHTTPServer {
 
         case "/gqrxlaunched.html":
             launchGqrx()
+            // Also start listening right away (same as clicking "Listen" with
+            // the default 2-channel/stereo setting) so the remote-control
+            // panel — SDR Device, Audio Output, Frequency, Mode, etc. —
+            // appears immediately instead of needing a second, separate
+            // click before any of it shows up. `startGqrxListening` already
+            // tolerates Gqrx not being up yet (the UDP receiver just waits
+            // for packets, and the remote-control client retries the
+            // connection on every poll tick), so there's no need to wait for
+            // the just-launched process here.
+            sdrController?.startGqrxListening(channels: 2)
             return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["GQRX_FORM": gqrxFormHTML()])
 
