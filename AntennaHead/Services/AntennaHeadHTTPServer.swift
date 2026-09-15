@@ -564,8 +564,10 @@ final class AntennaHeadHTTPServer {
             // tolerates Gqrx not being up yet (the UDP receiver just waits
             // for packets, and the remote-control client retries the
             // connection on every poll tick), so there's no need to wait for
-            // the just-launched process here.
-            sdrController?.startGqrxListening(channels: 2)
+            // the just-launched process here. `alsoStartReceiver` also starts
+            // Gqrx's own DSP once connected, since a freshly launched Gqrx
+            // isn't demodulating anything until that ▶ button is pressed.
+            sdrController?.startGqrxListening(channels: 2, alsoStartReceiver: true)
             return renderHTML(relativePath: "devicegqrx.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["GQRX_FORM": gqrxFormHTML()])
 
