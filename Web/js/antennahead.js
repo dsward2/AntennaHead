@@ -1467,12 +1467,25 @@ function formatAudioDelay(seconds)
     return m + ":" + (s < 10 ? "0" : "") + s;
 }
 
+// "Estimated total from live" = the delay stage's setting plus the streaming
+// server's own built-in latency (data-builtin, set by the server).
+function updateAudioDelayTotal(seconds)
+{
+    var latency = document.getElementById("audio-delay-latency");
+    var total = document.getElementById("audio-delay-total");
+    if (latency == null || total == null) { return; }
+    var builtIn = parseFloat(latency.getAttribute("data-builtin"));
+    if (isNaN(builtIn)) { builtIn = 0; }
+    total.innerText = formatAudioDelay(seconds + builtIn);
+}
+
 function showAudioDelay(seconds)
 {
     var slider = document.getElementById("audio-delay");
     var valueSpan = document.getElementById("audio-delay-value");
     if (slider != null) { slider.value = seconds; }
     if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+    updateAudioDelayTotal(seconds);
 }
 
 function postAudioDelay(payload, applyResponse)
@@ -1506,6 +1519,7 @@ function audioDelaySliderChanged(persist)
     // takes the server's answer back, so a live drag is never yanked around.
     var valueSpan = document.getElementById("audio-delay-value");
     if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+    updateAudioDelayTotal(seconds);
 
     postAudioDelay({ seconds: seconds, persist: persist }, persist);
 }

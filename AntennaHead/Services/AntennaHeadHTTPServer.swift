@@ -2352,10 +2352,20 @@ final class AntennaHeadHTTPServer {
     /// page load, outside `#now-playing-details`, and wired with inline
     /// `oninput`/`onclick` handlers that live in antennahead.js because this
     /// fragment is injected via `innerHTML`.
+    /// Estimated latency the streaming server itself adds to the HLS stream,
+    /// before any buffering in the listener's player, in seconds: an HLS
+    /// client starts about three segments behind the newest one, and the
+    /// newest is only listed once complete (half a segment on average). Coupled
+    /// to LiveAudioServer's default `hlsSegmentDuration` (2.0 s), which
+    /// AntennaHead doesn't override — update this if that changes. The
+    /// progressive MP3/AAC streams add only ~0.1 s (chunk + encoder frame).
+    nonisolated private static let estimatedHLSLatencySeconds = 3 * 2.0 + 2.0 / 2
+
     @MainActor private func audioDelayControlsHTML() -> String {
         guard let sdr = sdrController, sdr.audioDelayEnabled else { return "" }
         let max = Int(SDRController.maxAudioDelaySeconds)
         let value = Int(sdr.audioDelaySeconds.rounded())
+        let builtIn = Int(Self.estimatedHLSLatencySeconds.rounded())
         return """
         <div id="audio-delay-controls" style="margin-top: 24px;">
           <h4>Audio Delay</h4>
@@ -2366,6 +2376,10 @@ final class AntennaHeadHTTPServer {
             <input class="button" type="button" value="Delay 1 Second" onclick="audioDelayAdjust(1)">
             <input class="button" type="button" value="Skip 1 Second" onclick="audioDelayAdjust(-1)">
           </div>
+          <p id="audio-delay-latency" data-builtin="\(builtIn)" style="margin-top: 8px; font-size: 0.85em;">
+          The streaming server itself adds about \(builtIn) s to the HLS stream (about 0.1 s for the MP3 and AAC streams),
+          before any buffering in your player. Estimated total from live:
+          <strong id="audio-delay-total">\(Self.formatDelay(seconds: value + builtIn))</strong>.</p>
           <p style="margin-top: 8px; font-size: 0.85em;">A short chirp is mixed into the audio when each change takes effect.
           Raising the delay pauses briefly; lowering it skips ahead.</p>
         </div>
