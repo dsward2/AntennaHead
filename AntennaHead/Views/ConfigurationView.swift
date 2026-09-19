@@ -28,6 +28,7 @@ struct ConfigurationView: View {
     @State private var transcriptionLocale = "en-US"
     @State private var transcriptionSavesTranscript = false
     @State private var spatialAudioEnabled = false
+    @State private var audioDelayEnabled = false
     @State private var fillerEnabled = true
     @State private var fillerFadeEnabled = true
     @State private var fillerFadeMs = 700
@@ -153,6 +154,35 @@ struct ConfigurationView: View {
                 Text("Spatial Audio")
             } footer: {
                 Text("Runs \u{201C}PCMDistanceGain\u{201D} and \u{201C}PCMBinauralPanner\u{201D} taps on the outgoing audio, so the Now Playing view's Distance, Azimuth, and Elevation sliders can move the source in real time. Control messages go to UDP ports \(Int(sdrController.spatialGainControlPort)) and \(Int(sdrController.binauralControlPort)) on this Mac. Direction uses interaural time/level differences, not a measured head-related transfer function \u{2014} it localizes left/right convincingly; elevation is a mild, approximate cue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Delay the audio (sync with a TV broadcast)", isOn: $audioDelayEnabled)
+                    .onChange(of: audioDelayEnabled) { _, _ in saveAudioDelaySettings() }
+                if audioDelayEnabled {
+                    HStack {
+                        Slider(
+                            value: Binding(
+                                get: { sdrController.audioDelaySeconds },
+                                set: { sdrController.audioDelaySeconds = $0 }
+                            ),
+                            in: 0...SDRController.maxAudioDelaySeconds,
+                            step: 0.5,
+                            onEditingChanged: { editing in
+                                if !editing { sdrController.persistAudioDelay() }
+                            }
+                        )
+                        Text(String(format: "%.1f s", sdrController.audioDelaySeconds))
+                            .monospacedDigit()
+                            .frame(width: 56, alignment: .trailing)
+                    }
+                }
+            } header: {
+                Text("Audio Delay")
+            } footer: {
+                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the outgoing audio back by up to \(Int(SDRController.maxAudioDelaySeconds)) seconds, so a radio play-by-play can be lined up with a TV picture that runs behind it. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence. The delay buffer uses about 11.5 MB of memory while the stage runs, whatever the setting. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -453,6 +483,8 @@ struct ConfigurationView: View {
         transcriptionSavesTranscript = saveTranscript == "1"
         let spatialEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.spatialAudioEnabledKey)) ?? nil
         spatialAudioEnabled = spatialEnabled == "1"
+        let delayEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.audioDelayEnabledKey)) ?? nil
+        audioDelayEnabled = delayEnabled == "1"
         var ttsResolvedFromBookmark = false
         if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.textToSpeechFolderBookmarkKey)) ?? nil,
            let data = Data(base64Encoded: base64) {
@@ -538,6 +570,11 @@ struct ConfigurationView: View {
     private func saveSpatialAudioSettings() {
         try? SQLiteController.shared.storeAppSettingsValue(
             spatialAudioEnabled ? "1" : "0", forKey: SDRController.spatialAudioEnabledKey)
+    }
+
+    private func saveAudioDelaySettings() {
+        try? SQLiteController.shared.storeAppSettingsValue(
+            audioDelayEnabled ? "1" : "0", forKey: SDRController.audioDelayEnabledKey)
     }
 
     private func saveFillerSettings() {
