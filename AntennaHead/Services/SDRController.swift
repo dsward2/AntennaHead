@@ -97,6 +97,10 @@ final class SDRController {
     /// for live azimuth/elevation updates. Same rationale as
     /// `spatialGainControlPort`: fixed, internal, no cross-app coordination.
     let binauralControlPort: UInt16 = 6025
+    /// UDP port the optional audio-delay stage (`PCMDelay`) listens on for live
+    /// `delay <seconds>` updates from the Configuration slider. Same rationale
+    /// as `spatialGainControlPort`: fixed, internal, no cross-app coordination.
+    let audioDelayControlPort: UInt16 = 6029
     private var statusListener: RTLSDRStatusListener?
     private var captionListener: TranscriptionCaptionListener?
 
@@ -221,6 +225,48 @@ final class SDRController {
     /// `sendSpatialDistanceUpdate` — harmless if nothing is listening.
     private func sendDirectionUpdate() {
         sendUDPMessage("pos \(azimuth) \(elevation)\n", toPort: binauralControlPort)
+    }
+
+    // MARK: Audio delay (sync radio with a lagging TV picture)
+
+    /// App-settings keys for the optional `PCMDelay` stage. The enabled flag is
+    /// read fresh each time a pipeline is built (so toggling it applies from
+    /// the next tuning); the delay itself is live — see `audioDelaySeconds`.
+    static let audioDelayEnabledKey = "AntennaHeadAudioDelayEnabled"
+    static let audioDelaySecondsKey = "AntennaHeadAudioDelaySeconds"
+
+    /// Largest delay the slider offers and `PCMDelay` is launched to accept.
+    /// Sizes the stage's ring buffer up front (~188 KiB per second at
+    /// 48 kHz / 2 ch S16LE, so ~11.5 MB at 60 s).
+    static let maxAudioDelaySeconds = 60.0
+
+    /// Whether the delay stage is switched on in Configuration.
+    var audioDelayEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.audioDelayEnabledKey)) ?? nil) == "1"
+    }
+
+    /// Current delay in seconds, live-adjustable from the Configuration slider
+    /// while a pipeline is running. Unlike the spatial-audio position values
+    /// this *is* persisted (via `persistAudioDelay()`, called when a slider
+    /// drag ends): the offset that lines the radio up with a given TV service
+    /// is a setup value you'd expect to find again next launch.
+    var audioDelaySeconds: Double = 0 {
+        didSet {
+            guard audioDelaySeconds != oldValue else { return }
+            sendUDPMessage("delay \(audioDelaySeconds)\n", toPort: audioDelayControlPort)
+        }
+    }
+
+    func persistAudioDelay() {
+        try? sqliteController.storeAppSettingsValue(
+            "\(audioDelaySeconds)", forKey: Self.audioDelaySecondsKey)
+    }
+
+    private func loadPersistedAudioDelay() {
+        let stored = (try? sqliteController.appSettingsValue(forKey: Self.audioDelaySecondsKey)) ?? nil
+        if let stored, let value = Double(stored) {
+            audioDelaySeconds = min(max(value, 0), Self.maxAudioDelaySeconds)
+        }
     }
 
     private func sendUDPMessage(_ message: String, toPort port: UInt16) {
@@ -592,6 +638,7 @@ final class SDRController {
         self.sqliteController = sqliteController ?? .shared
         self.udpInputPort = udpInputPort
         self.statusUDPPort = statusUDPPort
+        loadPersistedAudioDelay()
         radioTaskPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
             guard let self else { return }
@@ -778,6 +825,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -830,6 +878,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -917,6 +966,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
@@ -1050,6 +1100,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
                               announcement: announcement?.pending)
@@ -1456,6 +1507,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying)
     }
@@ -2439,6 +2491,7 @@ final class SDRController {
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
+        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -2734,6 +2787,41 @@ final class SDRController {
 
         LogStore.shared.log(.info, source: "SDRController",
                             "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°, distance \(spatialDistance)) — control udp:\(binauralControlPort)")
+    }
+
+    /// Adds the optional `PCMDelay` stage as the last stage before the terminal
+    /// `PCMUDPSender`, after the spatial stages — the whole processed signal is
+    /// delayed, and nothing downstream is left to get ahead of it. No-op unless
+    /// enabled in Configuration and the helper binary is present. Launched with
+    /// the current `audioDelaySeconds` (which it plays as leading silence) and
+    /// this controller's fixed `audioDelayControlPort`, so a later slider drag
+    /// reaches this exact running instance without restarting the pipeline.
+    ///
+    /// The delay is counted in samples, so it relies on every source that
+    /// feeds these pipelines already being real-time paced (rtl_fm, the
+    /// capture device, the ControlBooth/Gqrx UDP relays, PCMFilePlayer and
+    /// PCMSpeechSynth all are).
+    private func addAudioDelayStageIfEnabled() {
+        guard audioDelayEnabled else { return }
+
+        let path = helperPath("PCMDelay")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            LogStore.shared.log(.error, source: "SDRController",
+                                "PCMDelay helper missing at \(path) — audio delay disabled for this tuning")
+            return
+        }
+
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDelay")
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        item.addArgument("--delay"); item.addArgument("\(audioDelaySeconds)")
+        item.addArgument("--max-delay"); item.addArgument("\(Self.maxAudioDelaySeconds)")
+        item.addArgument("--control-port"); item.addArgument(Int(audioDelayControlPort))
+        item.addArgument("--exit-with-parent")
+        radioTaskPipelineManager.add(item)
+
+        LogStore.shared.log(.info, source: "SDRController",
+                            "audio delay on (\(audioDelaySeconds) s) — control udp:\(audioDelayControlPort)")
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`
