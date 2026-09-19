@@ -2352,24 +2352,15 @@ final class AntennaHeadHTTPServer {
     /// page load, outside `#now-playing-details`, and wired with inline
     /// `oninput`/`onclick` handlers that live in antennahead.js because this
     /// fragment is injected via `innerHTML`.
-    /// Estimated latency the streaming server itself adds to the HLS stream,
-    /// before any buffering in the listener's player, in seconds: an HLS
-    /// client starts about three segments behind the newest one, and the
-    /// newest is only listed once complete (half a segment on average). Coupled
-    /// to LiveAudioServer's default `hlsSegmentDuration` (2.0 s), which
-    /// AntennaHead doesn't override — update this if that changes. The
-    /// progressive MP3/AAC streams add only ~0.1 s (chunk + encoder frame).
-    nonisolated private static let estimatedHLSLatencySeconds = 3 * 2.0 + 2.0 / 2
-
     @MainActor private func audioDelayControlsHTML() -> String {
         guard let sdr = sdrController, sdr.audioDelayEnabled else { return "" }
         let max = Int(SDRController.maxAudioDelaySeconds)
         let value = Int(sdr.audioDelaySeconds.rounded())
-        let builtIn = Int(Self.estimatedHLSLatencySeconds.rounded())
+        let builtIn = Int(SDRController.estimatedHLSLatencySeconds.rounded())
         return """
         <div id="audio-delay-controls" style="margin-top: 24px;">
           <h4>Audio Delay</h4>
-          <label for="audio-delay">Delay: <span id="audio-delay-value">\(Self.formatDelay(seconds: value))</span></label><br>
+          <label for="audio-delay">Extra delay: <span id="audio-delay-value">\(Self.formatDelay(seconds: value))</span></label><br>
           <input type="range" id="audio-delay" min="0" max="\(max)" step="1" value="\(value)"
                  style="width: 100%;" oninput="audioDelaySliderChanged(false)" onchange="audioDelaySliderChanged(true)">
           <div style="margin-top: 8px;">

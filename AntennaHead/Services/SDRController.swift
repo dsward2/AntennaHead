@@ -330,6 +330,8 @@ final class SDRController {
     /// The announcement clip rendered for the current pipeline, if any. Deleted
     /// when the next pipeline starts or all tasks are stopped.
     private var announcementClipURL: URL?
+    /// The extended (states-the-delay) variant's clip; same lifetime.
+    private var announcementExtendedClipURL: URL?
 
     /// PCMSpeechSynth renders the announcement at this rate/format; PCMPrefix
     /// plays it (up-mixing mono → stereo) with no resampling, so it must match
@@ -343,6 +345,12 @@ final class SDRController {
         let text: String
         let voiceIdentifier: String?
         let clipURL: URL
+        /// A longer version of the announcement that also states the audio
+        /// delay ("… with audio delay of 28 seconds"), rendered to its own
+        /// clip when the delay is on. PCMDelay plays it in preference to
+        /// `clipURL` if it fits in the silent period, else falls back.
+        var extendedText: String?
+        var extendedClipURL: URL?
     }
 
     // MARK: Filler pipeline
@@ -1587,11 +1595,46 @@ final class SDRController {
             return nil
         }
         announcementClipURL = clipURL
-        return PreparedAnnouncement(
-            stage: stage,
-            pending: PendingAnnouncement(text: trimmed,
-                                         voiceIdentifier: validatedAnnouncementVoiceIdentifier(),
-                                         clipURL: clipURL))
+
+        var pending = PendingAnnouncement(text: trimmed,
+                                          voiceIdentifier: validatedAnnouncementVoiceIdentifier(),
+                                          clipURL: clipURL)
+        if audioDelayEnabled {
+            let extendedURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("AntennaHead-announce-\(UUID().uuidString)-delay.raw")
+            announcementExtendedClipURL = extendedURL
+            pending.extendedText = Self.announcementText(trimmed, withDelaySeconds: audioDelaySeconds)
+            pending.extendedClipURL = extendedURL
+        }
+        return PreparedAnnouncement(stage: stage, pending: pending)
+    }
+
+    /// Estimated latency the streaming server itself adds to the HLS stream,
+    /// before any buffering in the listener's player, in seconds: an HLS client
+    /// starts about three segments behind the newest one, and the newest is
+    /// only listed once complete (half a segment on average). Coupled to
+    /// LiveAudioServer's default `hlsSegmentDuration` (2.0 s), which
+    /// AntennaHead doesn't override — update this if that changes. The
+    /// progressive MP3/AAC streams add only ~0.1 s (chunk + encoder frame).
+    /// Shared by the Now Playing page's latency line and the spoken announcement.
+    static let estimatedHLSLatencySeconds = 3 * 2.0 + 2.0 / 2
+
+    /// `text` with the total delay a listener will experience appended:
+    /// "Now playing KUAR." → "Now playing KUAR, with audio delay of 28 seconds."
+    /// The total is the delay stage's setting plus the server's built-in HLS
+    /// latency (see `estimatedHLSLatencySeconds`).
+    static func announcementText(_ text: String, withDelaySeconds delay: Double) -> String {
+        let core = text.trimmingCharacters(in: CharacterSet(charactersIn: ".!? \n"))
+        let total = Int((delay + estimatedHLSLatencySeconds).rounded())
+        return "\(core), with audio delay of \(spokenDuration(seconds: total))."
+    }
+
+    /// "28 seconds", "1 minute", "4 minutes 8 seconds".
+    static func spokenDuration(seconds: Int) -> String {
+        func unit(_ n: Int, _ name: String) -> String { "\(n) \(name)" + (n == 1 ? "" : "s") }
+        if seconds < 60 { return unit(seconds, "second") }
+        let minutes = seconds / 60, rest = seconds % 60
+        return rest == 0 ? unit(minutes, "minute") : "\(unit(minutes, "minute")) \(unit(rest, "second"))"
     }
 
     /// PCMPrefix stage: plays the announcement clip, then passes the live audio
@@ -1632,13 +1675,25 @@ final class SDRController {
             try? FileManager.default.removeItem(at: url)
             announcementClipURL = nil
         }
+        if let url = announcementExtendedClipURL {
+            try? FileManager.default.removeItem(at: url)
+            announcementExtendedClipURL = nil
+        }
     }
 
     /// Renders `announcement.text` to a raw S16LE mono clip at
     /// `announcementRenderRate` by running PCMSpeechSynth once (not through the
     /// pipeline manager). Best-effort: on any failure the clip file is left
     /// missing/empty and PCMPrefix simply plays nothing.
+    /// Renders just the plain clip of `announcement` (callers that have no use
+    /// for the extended, states-the-delay variant).
     private static func renderAnnouncementClip(_ announcement: PendingAnnouncement) async {
+        await renderAnnouncementClip(text: announcement.text,
+                                     voiceIdentifier: announcement.voiceIdentifier,
+                                     clipURL: announcement.clipURL)
+    }
+
+    private static func renderAnnouncementClip(text: String, voiceIdentifier: String?, clipURL: URL) async {
         let synthPath = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/PCMSpeechSynth").path
         guard FileManager.default.isExecutableFile(atPath: synthPath) else {
@@ -1647,8 +1702,8 @@ final class SDRController {
             return
         }
 
-        FileManager.default.createFile(atPath: announcement.clipURL.path, contents: nil)
-        guard let outHandle = try? FileHandle(forWritingTo: announcement.clipURL) else {
+        FileManager.default.createFile(atPath: clipURL.path, contents: nil)
+        guard let outHandle = try? FileHandle(forWritingTo: clipURL) else {
             LogStore.shared.log(.error, source: "SDRController",
                                 "announcement: could not open clip file for writing")
             return
@@ -1656,10 +1711,10 @@ final class SDRController {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: synthPath)
-        var args = ["--text", announcement.text,
+        var args = ["--text", text,
                     "--rate", "\(announcementRenderRate)",
                     "--no-pace", "--exit-with-parent"]
-        if let voice = announcement.voiceIdentifier, !voice.isEmpty {
+        if let voice = voiceIdentifier, !voice.isEmpty {
             args.append(contentsOf: ["--voice", voice])
         }
         process.arguments = args
@@ -2249,7 +2304,22 @@ final class SDRController {
             }
             if let announcement {
                 // Render the "Now playing …" clip the PCMPrefix stage will read.
-                await Self.renderAnnouncementClip(announcement)
+                // The plain clip and (when the delay is on) the longer
+                // states-the-delay clip render in parallel.
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        await Self.renderAnnouncementClip(text: announcement.text,
+                                                          voiceIdentifier: announcement.voiceIdentifier,
+                                                          clipURL: announcement.clipURL)
+                    }
+                    if let text = announcement.extendedText, let url = announcement.extendedClipURL {
+                        group.addTask {
+                            await Self.renderAnnouncementClip(text: text,
+                                                              voiceIdentifier: announcement.voiceIdentifier,
+                                                              clipURL: url)
+                        }
+                    }
+                }
                 guard !Task.isCancelled else { return }
             }
             do {
@@ -2822,7 +2892,10 @@ final class SDRController {
     /// the audio you're trying to sync) nor able to swallow countdown cues, and
     /// it is skipped by the helper when the delay is too short to fit it.
     private func addAnnouncementAndDelayStages(_ announcement: PreparedAnnouncement?) {
-        let delayAdded = addAudioDelayStageIfEnabled(announcementClipURL: announcement?.pending.clipURL)
+        // Preference order for PCMDelay: the longer clip that states the delay,
+        // then the plain one — it plays the first that fits the silent period.
+        let clips = [announcement?.pending.extendedClipURL, announcement?.pending.clipURL].compactMap { $0 }
+        let delayAdded = addAudioDelayStageIfEnabled(announcementClipURLs: clips)
         if !delayAdded, let announcement {
             radioTaskPipelineManager.add(announcement.stage)
         }
@@ -2845,7 +2918,7 @@ final class SDRController {
     /// capture device, the ControlBooth/Gqrx UDP relays, PCMFilePlayer and
     /// PCMSpeechSynth all are).
     @discardableResult
-    private func addAudioDelayStageIfEnabled(announcementClipURL: URL? = nil) -> Bool {
+    private func addAudioDelayStageIfEnabled(announcementClipURLs: [URL] = []) -> Bool {
         guard audioDelayEnabled else { return false }
 
         let path = helperPath("PCMDelay")
@@ -2870,8 +2943,8 @@ final class SDRController {
         item.addArgument("--adjust-beep")
         // The clip is rendered before the pipeline starts (see
         // `launchCurrentPipeline`), so the file exists by the time PCMDelay reads it.
-        if let announcementClipURL {
-            item.addArgument("--announce-file"); item.addArgument(announcementClipURL.path)
+        for clip in announcementClipURLs {
+            item.addArgument("--announce-file"); item.addArgument(clip.path)
         }
         item.addArgument("--control-port"); item.addArgument(Int(audioDelayControlPort))
         item.addArgument("--exit-with-parent")
