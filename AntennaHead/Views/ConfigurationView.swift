@@ -162,27 +162,39 @@ struct ConfigurationView: View {
                 Toggle("Delay the audio (sync with a TV broadcast)", isOn: $audioDelayEnabled)
                     .onChange(of: audioDelayEnabled) { _, _ in saveAudioDelaySettings() }
                 if audioDelayEnabled {
+                    let delayBinding = Binding(
+                        get: { sdrController.audioDelaySeconds },
+                        set: { sdrController.audioDelaySeconds = $0 }
+                    )
                     HStack {
                         Slider(
-                            value: Binding(
-                                get: { sdrController.audioDelaySeconds },
-                                set: { sdrController.audioDelaySeconds = $0 }
-                            ),
+                            value: delayBinding,
                             in: 0...SDRController.maxAudioDelaySeconds,
-                            step: 0.5,
+                            step: 1,
                             onEditingChanged: { editing in
                                 if !editing { sdrController.persistAudioDelay() }
                             }
                         )
-                        Text(String(format: "%.1f s", sdrController.audioDelaySeconds))
+                        Text(Self.formatDelay(sdrController.audioDelaySeconds))
                             .monospacedDigit()
-                            .frame(width: 56, alignment: .trailing)
+                            .frame(width: 64, alignment: .trailing)
+                        // Fine adjustment: a ten-minute slider is ~2 s per pixel.
+                        Stepper(
+                            "Fine adjust",
+                            value: delayBinding,
+                            in: 0...SDRController.maxAudioDelaySeconds,
+                            step: 1,
+                            onEditingChanged: { editing in
+                                if !editing { sdrController.persistAudioDelay() }
+                            }
+                        )
+                        .labelsHidden()
                     }
                 }
             } header: {
                 Text("Audio Delay")
             } footer: {
-                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the outgoing audio back by up to \(Int(SDRController.maxAudioDelaySeconds)) seconds, so a radio play-by-play can be lined up with a TV picture that runs behind it. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence. The delay buffer uses about 11.5 MB of memory while the stage runs, whatever the setting. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
+                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the audio back by up to \(Int(SDRController.maxAudioDelaySeconds) / 60) minutes, so a radio play-by-play can be lined up with a TV picture that runs behind it. The stage sits right after the source, ahead of the speech-to-text and spatial stages, so captions stay in step with the delayed audio; the spoken station announcement is not delayed. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence. Memory is committed only as the delay fills \u{2014} about 11 MB per minute of delay actually buffered, up to roughly 115 MB at 10 minutes. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -570,6 +582,12 @@ struct ConfigurationView: View {
     private func saveSpatialAudioSettings() {
         try? SQLiteController.shared.storeAppSettingsValue(
             spatialAudioEnabled ? "1" : "0", forKey: SDRController.spatialAudioEnabledKey)
+    }
+
+    /// `m:ss` for the delay readout (a bare seconds count is unreadable at 300+).
+    private static func formatDelay(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private func saveAudioDelaySettings() {

@@ -235,10 +235,12 @@ final class SDRController {
     static let audioDelayEnabledKey = "AntennaHeadAudioDelayEnabled"
     static let audioDelaySecondsKey = "AntennaHeadAudioDelaySeconds"
 
-    /// Largest delay the slider offers and `PCMDelay` is launched to accept.
-    /// Sizes the stage's ring buffer up front (~188 KiB per second at
-    /// 48 kHz / 2 ch S16LE, so ~11.5 MB at 60 s).
-    static let maxAudioDelaySeconds = 60.0
+    /// Largest delay the slider offers and `PCMDelay` is launched to accept:
+    /// 10 minutes, enough for a chain of uplinks, downlinks and internet hops.
+    /// The stage's ring buffer costs ~188 KiB per second at 48 kHz / 2 ch S16LE
+    /// (~115 MB when completely full), but PCMDelay commits that memory lazily
+    /// as audio fills it, so a shorter setting or a young stream costs less.
+    static let maxAudioDelaySeconds = 600.0
 
     /// Whether the delay stage is switched on in Configuration.
     var audioDelayEnabled: Bool {
@@ -821,11 +823,11 @@ final class SDRController {
 
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
+        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -874,11 +876,11 @@ final class SDRController {
                                                holdInput: true)
 
         radioTaskPipelineManager.add(player)
+        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -962,11 +964,11 @@ final class SDRController {
                                                holdInput: false)
 
         radioTaskPipelineManager.add(receiver)
+        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
@@ -1096,11 +1098,11 @@ final class SDRController {
         let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
+        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
                               announcement: announcement?.pending)
@@ -1504,10 +1506,10 @@ final class SDRController {
         }
         radioTaskPipelineManager.add(synth)
         radioTaskPipelineManager.add(resample)
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying)
     }
@@ -2487,11 +2489,11 @@ final class SDRController {
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
+        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -2789,12 +2791,16 @@ final class SDRController {
                             "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°, distance \(spatialDistance)) — control udp:\(binauralControlPort)")
     }
 
-    /// Adds the optional `PCMDelay` stage as the last stage before the terminal
-    /// `PCMUDPSender`, after the spatial stages — the whole processed signal is
-    /// delayed, and nothing downstream is left to get ahead of it. No-op unless
-    /// enabled in Configuration and the helper binary is present. Launched with
-    /// the current `audioDelaySeconds` (which it plays as leading silence) and
-    /// this controller's fixed `audioDelayControlPort`, so a later slider drag
+    /// Adds the optional `PCMDelay` stage as early as the stream is in the
+    /// normalized 48 kHz / 2 ch form — right after the source/resample/de-
+    /// emphasis stages and *before* the announcement, transcriber and spatial
+    /// stages. That way the transcriber's captions are cut from the same
+    /// delayed audio the listener hears (so they stay aligned with it), and
+    /// the spoken station announcement plays at tuning time instead of after
+    /// the delay's leading silence. No-op unless enabled in Configuration and
+    /// the helper binary is present. Launched with the current
+    /// `audioDelaySeconds` (which it plays as leading silence) and this
+    /// controller's fixed `audioDelayControlPort`, so a later slider drag
     /// reaches this exact running instance without restarting the pipeline.
     ///
     /// The delay is counted in samples, so it relies on every source that
