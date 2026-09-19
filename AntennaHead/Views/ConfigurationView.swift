@@ -143,7 +143,7 @@ struct ConfigurationView: View {
             } header: {
                 Text("Text to Speech")
             } footer: {
-                Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the web UI (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac.")
+                Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the AntennaHead tab (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
