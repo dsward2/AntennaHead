@@ -162,42 +162,13 @@ struct ConfigurationView: View {
             Section {
                 Toggle("Delay the audio (sync with a TV broadcast)", isOn: $audioDelayEnabled)
                     .onChange(of: audioDelayEnabled) { _, _ in saveAudioDelaySettings() }
-                if audioDelayEnabled {
-                    let delayBinding = Binding(
-                        get: { sdrController.audioDelaySeconds },
-                        set: { sdrController.audioDelaySeconds = $0 }
-                    )
-                    HStack {
-                        Slider(
-                            value: delayBinding,
-                            in: 0...SDRController.maxAudioDelaySeconds,
-                            step: 1,
-                            onEditingChanged: { editing in
-                                if !editing { sdrController.persistAudioDelay() }
-                            }
-                        )
-                        Text(Self.formatDelay(sdrController.audioDelaySeconds))
-                            .monospacedDigit()
-                            .frame(width: 64, alignment: .trailing)
-                        // Fine adjustment: a ten-minute slider is ~2 s per pixel.
-                        Stepper(
-                            "Fine adjust",
-                            value: delayBinding,
-                            in: 0...SDRController.maxAudioDelaySeconds,
-                            step: 1,
-                            onEditingChanged: { editing in
-                                if !editing { sdrController.persistAudioDelay() }
-                            }
-                        )
-                        .labelsHidden()
-                    }
-                    Toggle("Count down the silent wait (beeps and spoken countdown)", isOn: $audioDelayCountdown)
-                        .onChange(of: audioDelayCountdown) { _, _ in saveAudioDelaySettings() }
-                }
+                Toggle("Count down the silent wait (beeps and spoken countdown)", isOn: $audioDelayCountdown)
+                    .onChange(of: audioDelayCountdown) { _, _ in saveAudioDelaySettings() }
+                    .disabled(!audioDelayEnabled)
             } header: {
                 Text("Audio Delay")
             } footer: {
-                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the audio back by up to \(Int(SDRController.maxAudioDelaySeconds) / 60) minutes, so a radio play-by-play can be lined up with a TV picture that runs behind it. The stage sits ahead of the speech-to-text and spatial stages, so captions stay in step with the delayed audio; the spoken station announcement is delayed along with everything else. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence; with the countdown on, that silence \u{2014} ending just before the announcement and the audio \u{2014} carries a beep every second and a spoken countdown (every 30 seconds above a minute, every 5 seconds from a minute down to 15, then every second for the last 10), in the station announcement\u{2019}s voice if one is chosen. Memory is committed only as the delay fills \u{2014} about 11 MB per minute of delay actually buffered, up to roughly 115 MB at 10 minutes. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
+                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the audio back by up to \(Int(SDRController.maxAudioDelaySeconds) / 60) minutes, so a radio play-by-play can be lined up with a TV picture that runs behind it. Set the delay with the slider on the Now Playing page of the web UI, and fine-tune it there with the \u{201C}Delay 1 Second\u{201D} and \u{201C}Skip 1 Second\u{201D} buttons; a short chirp is mixed into the audio each time a change takes effect, so you can tell when the last adjustment has landed. The stage sits ahead of the speech-to-text and spatial stages, so captions stay in step with the delayed audio. Turning this switch on or off applies from the next tuning. Each new tuning starts with the current delay as silence: the spoken \u{201C}now playing\u{201D} announcement plays at the start of that silence (and is skipped if the delay is too short to fit it), and with the countdown on, beeps every second and a spoken countdown (every 30 seconds above a minute, every 5 seconds from a minute down to 15, then every second for the last 10) lead up to the delayed audio. Memory is committed only as the delay fills \u{2014} about 11 MB per minute of delay actually buffered, up to roughly 115 MB at 10 minutes. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -587,12 +558,6 @@ struct ConfigurationView: View {
     private func saveSpatialAudioSettings() {
         try? SQLiteController.shared.storeAppSettingsValue(
             spatialAudioEnabled ? "1" : "0", forKey: SDRController.spatialAudioEnabledKey)
-    }
-
-    /// `m:ss` for the delay readout (a bare seconds count is unreadable at 300+).
-    private static func formatDelay(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private func saveAudioDelaySettings() {

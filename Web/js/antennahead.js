@@ -1454,6 +1454,68 @@ function spatialAudioSliderChanged(id)
 }
 
 
+// Audio-delay controls on the Now Playing page (see audioDelayControlsHTML in
+// AntennaHeadHTTPServer.swift). The slider sends live updates as it moves
+// (persist = false) and one persisting update when the drag ends; the
+// "Delay 1 Second" / "Skip 1 Second" buttons send a relative adjustment that
+// the server applies and clamps, and the response says what is now in force.
+function formatAudioDelay(seconds)
+{
+    var total = Math.round(seconds);
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function showAudioDelay(seconds)
+{
+    var slider = document.getElementById("audio-delay");
+    var valueSpan = document.getElementById("audio-delay-value");
+    if (slider != null) { slider.value = seconds; }
+    if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+}
+
+function postAudioDelay(payload, applyResponse)
+{
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (applyResponse && xhttp.readyState === 4 && xhttp.status === 200)
+        {
+            try
+            {
+                var response = JSON.parse(xhttp.responseText);
+                if (typeof response.seconds === "number") { showAudioDelay(response.seconds); }
+            }
+            catch (e) { }
+        }
+    };
+    xhttp.open("POST", baseUrl + "api/audio-delay/update", true);
+    xhttp.send(JSON.stringify(payload));
+}
+
+function audioDelaySliderChanged(persist)
+{
+    var slider = document.getElementById("audio-delay");
+    if (slider == null) { return; }
+    var seconds = parseFloat(slider.value);
+
+    // Update the readout immediately; only the persisting (drag-ended) call
+    // takes the server's answer back, so a live drag is never yanked around.
+    var valueSpan = document.getElementById("audio-delay-value");
+    if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+
+    postAudioDelay({ seconds: seconds, persist: persist }, persist);
+}
+
+function audioDelayAdjust(deltaSeconds)
+{
+    postAudioDelay({ adjust: deltaSeconds, persist: true }, true);
+}
+
+
 function applyAACSettings(form)
 {
   //console.log("frequencyListenButtonClicked");

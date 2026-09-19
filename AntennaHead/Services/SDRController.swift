@@ -271,6 +271,25 @@ final class SDRController {
             "\(audioDelaySeconds)", forKey: Self.audioDelaySecondsKey)
     }
 
+    /// Nudges the delay by `seconds` (negative shortens), clamped to
+    /// 0…`maxAudioDelaySeconds`, and returns the resulting value. Backs the web
+    /// UI's "Delay 1 Second" / "Skip 1 Second" buttons.
+    @discardableResult
+    func adjustAudioDelay(by seconds: Double) -> Double {
+        audioDelaySeconds = min(max(audioDelaySeconds + seconds, 0), Self.maxAudioDelaySeconds)
+        return audioDelaySeconds
+    }
+
+    /// Sets the delay (clamped), optionally persisting it — the web slider
+    /// sends live updates without persisting and one persisting update when the
+    /// drag ends. Returns the resulting value.
+    @discardableResult
+    func setAudioDelay(_ seconds: Double, persist: Bool) -> Double {
+        audioDelaySeconds = min(max(seconds, 0), Self.maxAudioDelaySeconds)
+        if persist { persistAudioDelay() }
+        return audioDelaySeconds
+    }
+
     private func loadPersistedAudioDelay() {
         let stored = (try? sqliteController.appSettingsValue(forKey: Self.audioDelaySecondsKey)) ?? nil
         if let stored, let value = Double(stored) {
@@ -830,8 +849,7 @@ final class SDRController {
 
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
-        addAudioDelayStageIfEnabled()
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -883,8 +901,7 @@ final class SDRController {
                                                holdInput: true)
 
         radioTaskPipelineManager.add(player)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
-        addAudioDelayStageIfEnabled()
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -971,8 +988,7 @@ final class SDRController {
                                                holdInput: false)
 
         radioTaskPipelineManager.add(receiver)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
-        addAudioDelayStageIfEnabled()
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -1105,8 +1121,7 @@ final class SDRController {
         let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
-        addAudioDelayStageIfEnabled()
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -2496,8 +2511,7 @@ final class SDRController {
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
-        addAudioDelayStageIfEnabled()
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -2798,36 +2812,47 @@ final class SDRController {
                             "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°, distance \(spatialDistance)) — control udp:\(binauralControlPort)")
     }
 
-    /// Adds the optional `PCMDelay` stage as early as the stream is in the
-    /// normalized 48 kHz / 2 ch form and any spoken station announcement has
-    /// been added — i.e. immediately *before* the transcriber and spatial
-    /// stages. The transcriber therefore cuts its captions from the same
-    /// delayed audio the listener hears, so they stay aligned with it.
+    /// Adds the stages that follow the source: either the delay stage (which
+    /// then also carries the "now playing" announcement) or, with the delay
+    /// off, the plain `PCMPrefix` announcement stage.
     ///
-    /// It goes *after* the announcement stage on purpose: that stage discards
-    /// upstream audio while its clip plays (in `drop` mode), which would eat
-    /// the first seconds of the delay's countdown if the delay sat ahead of
-    /// it. This way the countdown fills the silence, then the announcement
-    /// plays (delayed along with everything else), then the delayed radio.
+    /// With the delay on, the announcement is played by `PCMDelay` itself at
+    /// the very start of the silent period, and the countdown waits for it —
+    /// so it is neither delayed by minutes (which made it easy to mistake for
+    /// the audio you're trying to sync) nor able to swallow countdown cues, and
+    /// it is skipped by the helper when the delay is too short to fit it.
+    private func addAnnouncementAndDelayStages(_ announcement: PreparedAnnouncement?) {
+        let delayAdded = addAudioDelayStageIfEnabled(announcementClipURL: announcement?.pending.clipURL)
+        if !delayAdded, let announcement {
+            radioTaskPipelineManager.add(announcement.stage)
+        }
+    }
+
+    /// Adds the optional `PCMDelay` stage immediately before the transcriber
+    /// and spatial stages, so the transcriber cuts its captions from the same
+    /// delayed audio the listener hears and they stay aligned with it.
+    /// Returns whether the stage was added.
     ///
-    /// No-op unless enabled in Configuration and the helper binary is
-    /// present. Launched with the current `audioDelaySeconds` (which it plays
-    /// as leading silence, optionally with a countdown) and this controller's
-    /// fixed `audioDelayControlPort`, so a later slider drag reaches this exact
-    /// running instance without restarting the pipeline.
+    /// No-op (returns false) unless enabled in Configuration and the helper
+    /// binary is present. Launched with the current `audioDelaySeconds` (which
+    /// it plays as leading silence, optionally with a countdown) and this
+    /// controller's fixed `audioDelayControlPort`, so a later slider drag or
+    /// button press reaches this exact running instance without restarting the
+    /// pipeline. `--adjust-beep` makes it chirp when a live change takes effect.
     ///
     /// The delay is counted in samples, so it relies on every source that
     /// feeds these pipelines already being real-time paced (rtl_fm, the
     /// capture device, the ControlBooth/Gqrx UDP relays, PCMFilePlayer and
     /// PCMSpeechSynth all are).
-    private func addAudioDelayStageIfEnabled() {
-        guard audioDelayEnabled else { return }
+    @discardableResult
+    private func addAudioDelayStageIfEnabled(announcementClipURL: URL? = nil) -> Bool {
+        guard audioDelayEnabled else { return false }
 
         let path = helperPath("PCMDelay")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             LogStore.shared.log(.error, source: "SDRController",
                                 "PCMDelay helper missing at \(path) — audio delay disabled for this tuning")
-            return
+            return false
         }
 
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDelay")
@@ -2842,12 +2867,19 @@ final class SDRController {
                 item.addArgument("--countdown-voice"); item.addArgument(voice)
             }
         }
+        item.addArgument("--adjust-beep")
+        // The clip is rendered before the pipeline starts (see
+        // `launchCurrentPipeline`), so the file exists by the time PCMDelay reads it.
+        if let announcementClipURL {
+            item.addArgument("--announce-file"); item.addArgument(announcementClipURL.path)
+        }
         item.addArgument("--control-port"); item.addArgument(Int(audioDelayControlPort))
         item.addArgument("--exit-with-parent")
         radioTaskPipelineManager.add(item)
 
         LogStore.shared.log(.info, source: "SDRController",
                             "audio delay on (\(audioDelaySeconds) s\(audioDelayCountdownEnabled ? ", with countdown" : "")) — control udp:\(audioDelayControlPort)")
+        return true
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`
