@@ -234,6 +234,7 @@ final class SDRController {
     /// the next tuning); the delay itself is live — see `audioDelaySeconds`.
     static let audioDelayEnabledKey = "AntennaHeadAudioDelayEnabled"
     static let audioDelaySecondsKey = "AntennaHeadAudioDelaySeconds"
+    static let audioDelayCountdownKey = "AntennaHeadAudioDelayCountdown"
 
     /// Largest delay the slider offers and `PCMDelay` is launched to accept:
     /// 10 minutes, enough for a chain of uplinks, downlinks and internet hops.
@@ -245,6 +246,12 @@ final class SDRController {
     /// Whether the delay stage is switched on in Configuration.
     var audioDelayEnabled: Bool {
         ((try? sqliteController.appSettingsValue(forKey: Self.audioDelayEnabledKey)) ?? nil) == "1"
+    }
+
+    /// Whether the delay's leading silence carries a countdown (a beep per
+    /// second plus a spoken countdown). On unless switched off in Configuration.
+    var audioDelayCountdownEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.audioDelayCountdownKey)) ?? nil) != "0"
     }
 
     /// Current delay in seconds, live-adjustable from the Configuration slider
@@ -823,8 +830,8 @@ final class SDRController {
 
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
-        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -876,8 +883,8 @@ final class SDRController {
                                                holdInput: true)
 
         radioTaskPipelineManager.add(player)
-        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -964,8 +971,8 @@ final class SDRController {
                                                holdInput: false)
 
         radioTaskPipelineManager.add(receiver)
-        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -1098,8 +1105,8 @@ final class SDRController {
         let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
-        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -2489,8 +2496,8 @@ final class SDRController {
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
-        addAudioDelayStageIfEnabled()
         if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
@@ -2792,16 +2799,22 @@ final class SDRController {
     }
 
     /// Adds the optional `PCMDelay` stage as early as the stream is in the
-    /// normalized 48 kHz / 2 ch form — right after the source/resample/de-
-    /// emphasis stages and *before* the announcement, transcriber and spatial
-    /// stages. That way the transcriber's captions are cut from the same
-    /// delayed audio the listener hears (so they stay aligned with it), and
-    /// the spoken station announcement plays at tuning time instead of after
-    /// the delay's leading silence. No-op unless enabled in Configuration and
-    /// the helper binary is present. Launched with the current
-    /// `audioDelaySeconds` (which it plays as leading silence) and this
-    /// controller's fixed `audioDelayControlPort`, so a later slider drag
-    /// reaches this exact running instance without restarting the pipeline.
+    /// normalized 48 kHz / 2 ch form and any spoken station announcement has
+    /// been added — i.e. immediately *before* the transcriber and spatial
+    /// stages. The transcriber therefore cuts its captions from the same
+    /// delayed audio the listener hears, so they stay aligned with it.
+    ///
+    /// It goes *after* the announcement stage on purpose: that stage discards
+    /// upstream audio while its clip plays (in `drop` mode), which would eat
+    /// the first seconds of the delay's countdown if the delay sat ahead of
+    /// it. This way the countdown fills the silence, then the announcement
+    /// plays (delayed along with everything else), then the delayed radio.
+    ///
+    /// No-op unless enabled in Configuration and the helper binary is
+    /// present. Launched with the current `audioDelaySeconds` (which it plays
+    /// as leading silence, optionally with a countdown) and this controller's
+    /// fixed `audioDelayControlPort`, so a later slider drag reaches this exact
+    /// running instance without restarting the pipeline.
     ///
     /// The delay is counted in samples, so it relies on every source that
     /// feeds these pipelines already being real-time paced (rtl_fm, the
@@ -2822,12 +2835,19 @@ final class SDRController {
         item.addArgument("--channels"); item.addArgument(Self.outputChannels)
         item.addArgument("--delay"); item.addArgument("\(audioDelaySeconds)")
         item.addArgument("--max-delay"); item.addArgument("\(Self.maxAudioDelaySeconds)")
+        if audioDelayCountdownEnabled {
+            item.addArgument("--countdown"); item.addArgument("both")
+            // Same voice as the station announcement, when one is chosen.
+            if let voice = validatedAnnouncementVoiceIdentifier() {
+                item.addArgument("--countdown-voice"); item.addArgument(voice)
+            }
+        }
         item.addArgument("--control-port"); item.addArgument(Int(audioDelayControlPort))
         item.addArgument("--exit-with-parent")
         radioTaskPipelineManager.add(item)
 
         LogStore.shared.log(.info, source: "SDRController",
-                            "audio delay on (\(audioDelaySeconds) s) — control udp:\(audioDelayControlPort)")
+                            "audio delay on (\(audioDelaySeconds) s\(audioDelayCountdownEnabled ? ", with countdown" : "")) — control udp:\(audioDelayControlPort)")
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`

@@ -29,6 +29,7 @@ struct ConfigurationView: View {
     @State private var transcriptionSavesTranscript = false
     @State private var spatialAudioEnabled = false
     @State private var audioDelayEnabled = false
+    @State private var audioDelayCountdown = true
     @State private var fillerEnabled = true
     @State private var fillerFadeEnabled = true
     @State private var fillerFadeMs = 700
@@ -190,11 +191,13 @@ struct ConfigurationView: View {
                         )
                         .labelsHidden()
                     }
+                    Toggle("Count down the silent wait (beeps and spoken countdown)", isOn: $audioDelayCountdown)
+                        .onChange(of: audioDelayCountdown) { _, _ in saveAudioDelaySettings() }
                 }
             } header: {
                 Text("Audio Delay")
             } footer: {
-                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the audio back by up to \(Int(SDRController.maxAudioDelaySeconds) / 60) minutes, so a radio play-by-play can be lined up with a TV picture that runs behind it. The stage sits right after the source, ahead of the speech-to-text and spatial stages, so captions stay in step with the delayed audio; the spoken station announcement is not delayed. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence. Memory is committed only as the delay fills \u{2014} about 11 MB per minute of delay actually buffered, up to roughly 115 MB at 10 minutes. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
+                Text("Adds a \u{201C}PCMDelay\u{201D} stage that holds the audio back by up to \(Int(SDRController.maxAudioDelaySeconds) / 60) minutes, so a radio play-by-play can be lined up with a TV picture that runs behind it. The stage sits ahead of the speech-to-text and spatial stages, so captions stay in step with the delayed audio; the spoken station announcement is delayed along with everything else. Turning the switch on or off applies from the next tuning; the slider moves the delay live, with a short pause when it grows and a short skip ahead when it shrinks. Each new tuning starts with the current delay as silence; with the countdown on, that silence \u{2014} ending just before the announcement and the audio \u{2014} carries a beep every second and a spoken countdown (every 30 seconds above a minute, every 5 seconds from a minute down to 15, then every second for the last 10), in the station announcement\u{2019}s voice if one is chosen. Memory is committed only as the delay fills \u{2014} about 11 MB per minute of delay actually buffered, up to roughly 115 MB at 10 minutes. Control messages go to UDP port \(Int(sdrController.audioDelayControlPort)) on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -497,6 +500,8 @@ struct ConfigurationView: View {
         spatialAudioEnabled = spatialEnabled == "1"
         let delayEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.audioDelayEnabledKey)) ?? nil
         audioDelayEnabled = delayEnabled == "1"
+        let delayCountdown = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.audioDelayCountdownKey)) ?? nil
+        audioDelayCountdown = delayCountdown != "0"
         var ttsResolvedFromBookmark = false
         if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.textToSpeechFolderBookmarkKey)) ?? nil,
            let data = Data(base64Encoded: base64) {
@@ -593,6 +598,8 @@ struct ConfigurationView: View {
     private func saveAudioDelaySettings() {
         try? SQLiteController.shared.storeAppSettingsValue(
             audioDelayEnabled ? "1" : "0", forKey: SDRController.audioDelayEnabledKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            audioDelayCountdown ? "1" : "0", forKey: SDRController.audioDelayCountdownKey)
     }
 
     private func saveFillerSettings() {
