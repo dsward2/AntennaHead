@@ -2360,17 +2360,16 @@ final class AntennaHeadHTTPServer {
         return """
         <div id="audio-delay-controls" style="margin-top: 24px;">
           <h4>Audio Delay</h4>
-          <label for="audio-delay">Extra delay: <span id="audio-delay-value">\(Self.formatDelay(seconds: value))</span></label><br>
+          <label for="audio-delay">Extra delay: <span id="audio-delay-value">\(Self.formatDelay(seconds: value))</span></label>
+          <label id="audio-delay-latency" data-builtin="\(builtIn)">Estimated total from live: <span id="audio-delay-total">\(Self.formatDelay(seconds: value + builtIn))</span></label><br>
           <input type="range" id="audio-delay" min="0" max="\(max)" step="1" value="\(value)"
                  style="width: 100%;" oninput="audioDelaySliderChanged(false)" onchange="audioDelaySliderChanged(true)">
           <div style="margin-top: 8px;">
             <input class="button" type="button" value="Delay 1 Second" onclick="audioDelayAdjust(1)">
             <input class="button" type="button" value="Skip 1 Second" onclick="audioDelayAdjust(-1)">
           </div>
-          <p id="audio-delay-latency" data-builtin="\(builtIn)" style="margin-top: 8px; font-size: 0.85em;">
-          The streaming server itself adds about \(builtIn) s to the HLS stream (about 0.1 s for the MP3 and AAC streams),
-          before any buffering in your player. Estimated total from live:
-          <strong id="audio-delay-total">\(Self.formatDelay(seconds: value + builtIn))</strong>.</p>
+          <p style="margin-top: 8px; font-size: 0.85em;">The streaming server itself adds about \(builtIn) s to the HLS stream
+          (about 0.1 s for the MP3 and AAC streams), before any buffering in your player.</p>
           <p style="margin-top: 8px; font-size: 0.85em;">A short chirp is mixed into the audio when each change takes effect.
           Raising the delay pauses briefly; lowering it skips ahead.</p>
         </div>
