@@ -28,15 +28,15 @@ import SharedLogging
 ///   'RecP'  stop recording         no parameters
 ///   'CBQt'  notify quitting        no parameters, no reply expected — sent
 ///                                  from ControlBooth's `applicationWillTerminate`.
-///                                  Purely informational: `ControlBoothClient
-///                                  .isControlBoothRunning`'s own
-///                                  `NSRunningApplication` check is what
-///                                  actually drives the ControlBooth Remote
-///                                  Control web page's status, so this
-///                                  handler only logs — it exists so
-///                                  ControlBooth quitting is visible in
-///                                  AntennaHead's log right away rather than
-///                                  only inferable from the next poll.
+///                                  If ControlBooth is the active source, its
+///                                  pipeline is about to die, so AntennaHead tears
+///                                  down the receiver bridge and starts the filler
+///                                  rather than streaming silence. (The Remote
+///                                  Control page's "Not running" status comes from
+///                                  `ControlBoothClient.isControlBoothRunning`'s own
+///                                  `NSRunningApplication` check.) A workspace
+///                                  termination observer covers a crash or force-quit,
+///                                  which never sends this notice.
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
 /// zero or one name, and 'Stop' naming anything other than the active source
@@ -45,6 +45,8 @@ import SharedLogging
 final class ControlBoothEventReceiver: NSObject {
     private let sdrController: SDRController
     private let lasManager: LiveAudioServerProcessManager
+    /// Held for the app's lifetime; see `controlBoothWentAway`.
+    private var terminationObserver: NSObjectProtocol?
 
     @MainActor
     init(sdrController: SDRController, lasManager: LiveAudioServerProcessManager) {
@@ -79,6 +81,41 @@ final class ControlBoothEventReceiver: NSObject {
                                 andEventID: Self.fourCC("CBQt"))
         LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
             "registered all 6 AE handlers (Strt/Stop/Runs/RecS/RecP/CBQt) — PID \(ProcessInfo.processInfo.processIdentifier)")
+
+        // ControlBooth crashing or being force-quit sends no 'CBQt'; the
+        // workspace notification catches those (and is a second signal for a
+        // normal quit, which the idempotent teardown below absorbs).
+        terminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier == ControlBoothClient.bundleIdentifier else { return }
+            MainActor.assumeIsolated {
+                // Another ControlBooth instance still running (a quick relaunch,
+                // or a second copy) may own the pipeline now; leave it be.
+                let others = NSRunningApplication.runningApplications(
+                    withBundleIdentifier: ControlBoothClient.bundleIdentifier)
+                    .filter { $0.processIdentifier != app.processIdentifier && !$0.isTerminated }
+                guard others.isEmpty else { return }
+                self?.controlBoothWentAway(reason: "ControlBooth terminated")
+            }
+        }
+    }
+
+    /// ControlBooth quit or died. Whatever pipeline it was feeding is gone, and
+    /// the receiver bridge would just stream silence with the status still
+    /// reading "ControlBooth: <name>", so tear it down and let the filler take
+    /// over. Only acts when ControlBooth is the active source (a station, Gqrx
+    /// or a recording in progress is left alone), and is idempotent — the quit
+    /// notice and the termination notification both land here. Nothing is
+    /// remembered for later: pressing Play in a relaunched ControlBooth starts
+    /// listening again.
+    @MainActor
+    private func controlBoothWentAway(reason: String) {
+        guard let name = sdrController.activeControlBoothPipelineName else { return }
+        LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+            "\(reason) while listening to '\(name)'; tearing down the bridge and starting the filler")
+        sdrController.terminateTasks()   // enterIdle: true → starts the filler
     }
 
     // NSAppleEventManager delivers on the main thread; the @objc entry points
@@ -213,6 +250,7 @@ final class ControlBoothEventReceiver: NSObject {
         MainActor.assumeIsolated {
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
                 "ControlBooth is quitting")
+            controlBoothWentAway(reason: "ControlBooth is quitting")
         }
     }
 
