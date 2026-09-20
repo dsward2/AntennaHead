@@ -2527,7 +2527,9 @@ final class AntennaHeadHTTPServer {
             dict["usb_device_display"] = activeDeviceLabel(stored: sdr.activeDeviceSerial)
             dict["channels_display"] = channelsLabel(sdr.activeChannelCount)
         } else {
-            dict["station_name"] = sdrController?.statusFunction ?? "Not Playing"
+            // `nowPlayingDisplayName` is `statusFunction`, except for Gqrx, where
+            // it appends the bookmark name or frequency ("Gqrx — KUAR 89.1").
+            dict["station_name"] = sdrController?.nowPlayingDisplayName ?? "Not Playing"
             dict["short_frequency"] = ""
         }
         if sdrController?.isFillerPlaying == true {

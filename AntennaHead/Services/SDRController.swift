@@ -677,6 +677,44 @@ final class SDRController {
     private(set) var gqrxModeList: [String] = []
     /// Bookmarks downloaded from Gqrx (PR #1464); empty when unsupported.
     private(set) var gqrxBookmarks: [GqrxBookmark] = []
+    /// True once this Gqrx session has reported (or been told) a tuned
+    /// frequency, so `gqrxFrequencyHz` is real rather than left over from an
+    /// earlier session. Reset by `teardownGqrxRemote()`.
+    private(set) var gqrxHasLiveFrequency = false
+    /// Set by `startGqrxListening` when a spoken "Now playing …" should be
+    /// deferred until Gqrx has reported what it is tuned to (and is playing),
+    /// so the announcement can name the station instead of just saying "Gqrx".
+    @ObservationIgnored private var gqrxAnnouncePending = false
+    @ObservationIgnored private var gqrxAnnounceFallbackTask: Task<Void, Never>?
+
+    /// The bookmark name for a tuned frequency: an exact match, else the nearest
+    /// bookmark within 500 Hz (a typed-in frequency can differ from the saved
+    /// one by a rounding step). `nil` when nothing matches or the name is blank.
+    func gqrxBookmarkName(forFrequencyHz hz: Int64) -> String? {
+        let candidates = gqrxBookmarks.filter { abs($0.frequencyHz - hz) <= 500 }
+        guard let best = candidates.min(by: { abs($0.frequencyHz - hz) < abs($1.frequencyHz - hz) }) else {
+            return nil
+        }
+        let name = best.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    /// What "Now Playing: …" shows while Gqrx is the source: plain "Gqrx" until
+    /// Gqrx reports a frequency, then "Gqrx — <bookmark name>" or, for a
+    /// frequency with no bookmark, "Gqrx — 162.4750 MHz". Follows every tuning
+    /// change because it's computed from the mirrored frequency and bookmarks.
+    /// (`statusFunction` itself stays "Gqrx": it is the mode key many guards test.)
+    var gqrxNowPlayingName: String {
+        guard gqrxHasLiveFrequency, gqrxFrequencyHz > 0 else { return "Gqrx" }
+        let detail = gqrxBookmarkName(forFrequencyHz: gqrxFrequencyHz)
+            ?? String(format: "%.4f MHz", Double(gqrxFrequencyHz) / 1_000_000.0)
+        return "Gqrx \u{2014} \(detail)"
+    }
+
+    /// The name shown by the status API and the "Now Playing" nav item.
+    var nowPlayingDisplayName: String {
+        statusFunction == "Gqrx" ? gqrxNowPlayingName : statusFunction
+    }
     /// True when this Gqrx carries the device-control commands (PR #1446).
     private(set) var gqrxHasDeviceControl = false
     private(set) var gqrxInputDevices: [String] = []   // labels
@@ -1104,10 +1142,20 @@ final class SDRController {
     /// yet; left off for the plain "Listen" button, which only attaches to
     /// whatever Gqrx is already doing.
     func startGqrxListening(channels: Int = 2, alsoStartReceiver: Bool = false) {
+        // With remote control on, hold the spoken announcement until Gqrx has
+        // reported its tuned frequency and is playing, so it can say the
+        // bookmark's name (see `announceGqrxIfReady`). Without it there is
+        // nothing to look up, so announce immediately as before.
+        let deferAnnouncement = announcementEnabled && Self.gqrxRemoteControlEnabled
         startGqrxRelay(channels: channels,
-                       announceText: announcementEnabled ? Self.announcementText(forGqrx: nil) : nil)
+                       announceText: (announcementEnabled && !deferAnnouncement)
+                           ? Self.announcementText(forGqrx: nil) : nil)
         if Self.gqrxRemoteControlEnabled {
             startGqrxRemote()
+            if deferAnnouncement {
+                gqrxAnnouncePending = true
+                scheduleGqrxAnnouncementFallback(afterLaunch: alsoStartReceiver)
+            }
             // `startGqrxRelay` above already flips `gqrxUDPAudioRunning` true,
             // which makes the "Start UDP Audio" checkbox render checked the
             // instant this page's panel appears — but until now nothing ever
@@ -1176,6 +1224,10 @@ final class SDRController {
               let sender = makeUDPSenderTaskItem() else { return }
         // `drop` mode: the live UDP relay keeps running while the clip plays.
         let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
+        if let announcement {
+            LogStore.shared.log(.info, source: "SDRController",
+                                "Gqrx announcement: \u{201C}\(announcement.pending.text)\u{201D}")
+        }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
         addAnnouncementAndDelayStages(announcement)
@@ -1195,6 +1247,52 @@ final class SDRController {
         preserveGqrxRemote = true
         defer { preserveGqrxRemote = false }
         startGqrxRelay(channels: gqrxRelayChannels, announceText: announceText)
+    }
+
+    /// What the first announcement says: the bookmark for the tuned frequency, else
+    /// the frequency itself, else the generic line.
+    private func gqrxInitialAnnouncementText() -> String {
+        guard gqrxHasLiveFrequency, gqrxFrequencyHz > 0 else { return Self.announcementText(forGqrx: nil) }
+        if let name = gqrxBookmarkName(forFrequencyHz: gqrxFrequencyHz) {
+            return Self.announcementText(forGqrx: name)
+        }
+        return "Now playing Gqrx, \(Self.spokenMegahertz(hz: gqrxFrequencyHz)) megahertz."
+    }
+
+    /// Speaks the deferred "Now playing …" once Gqrx is reachable, has reported
+    /// a frequency, and is actually playing (a paused Gqrx has nothing to
+    /// announce yet — it speaks when playback starts). Called after every
+    /// snapshot; does nothing unless an announcement is pending.
+    private func announceGqrxIfReady() {
+        guard gqrxAnnouncePending, gqrxAvailable, gqrxHasLiveFrequency, gqrxDSPRunning,
+              !gqrxPausedToFiller else { return }
+        cancelPendingGqrxAnnouncement()
+        relaunchGqrxRelay(announceText: gqrxInitialAnnouncementText())
+    }
+
+    private func cancelPendingGqrxAnnouncement() {
+        gqrxAnnouncePending = false
+        gqrxAnnounceFallbackTask?.cancel()
+        gqrxAnnounceFallbackTask = nil
+    }
+
+    /// If Gqrx never becomes reachable, don't leave the source unannounced
+    /// forever. Attaching to an already-running Gqrx whose remote control is off:
+    /// say the generic line after a few seconds. A fresh "Launch Gqrx" has to
+    /// boot first, so wait much longer and then give up silently — the
+    /// announcement is for when it starts playing. A Gqrx that IS reachable but
+    /// paused keeps the announcement pending until it plays.
+    private func scheduleGqrxAnnouncementFallback(afterLaunch: Bool) {
+        gqrxAnnounceFallbackTask?.cancel()
+        let seconds: UInt64 = afterLaunch ? 25 : 4
+        gqrxAnnounceFallbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.gqrxAnnouncePending, !self.gqrxAvailable else { return }
+            self.cancelPendingGqrxAnnouncement()
+            if !afterLaunch {
+                self.relaunchGqrxRelay(announceText: Self.announcementText(forGqrx: nil))
+            }
+        }
     }
 
     /// Master switch for the Gqrx **remote‑control** panel (frequency / mode /
@@ -1243,7 +1341,10 @@ final class SDRController {
             }
             return
         }
-        if let v = s.frequencyHz { gqrxFrequencyHz = v }
+        if let v = s.frequencyHz {
+            gqrxFrequencyHz = v
+            gqrxHasLiveFrequency = true
+        }
         if let v = s.mode { gqrxMode = v }
         if let v = s.passbandHz { gqrxPassbandHz = v }
         if let v = s.filterShape { gqrxFilterShape = v }
@@ -1300,6 +1401,7 @@ final class SDRController {
             gqrxNeedsDSPStart = false
             gqrxResumeReceiver()
         }
+        announceGqrxIfReady()
     }
 
     private func teardownGqrxRemote() {
@@ -1308,6 +1410,8 @@ final class SDRController {
         gqrxRemote = nil
         gqrxAvailable = false
         gqrxBookmarks = []
+        gqrxHasLiveFrequency = false
+        cancelPendingGqrxAnnouncement()
         gqrxModeList = []
         gqrxHasFilterShape = false
         gqrxRFGainName = ""
@@ -1338,6 +1442,7 @@ final class SDRController {
 
     func gqrxSetFrequency(_ hz: Int64) {
         gqrxFrequencyHz = hz
+        gqrxHasLiveFrequency = true
         gqrxRemote?.setFrequency(hz)
         gqrxEnsureDSPRunning()
     }
@@ -1485,6 +1590,11 @@ final class SDRController {
     }
 
     func gqrxApplyBookmark(_ frequencyHz: Int64) {
+        // This Tune speaks the bookmark's own name below, so a still-pending
+        // first announcement would only talk over it.
+        cancelPendingGqrxAnnouncement()
+        gqrxFrequencyHz = frequencyHz
+        gqrxHasLiveFrequency = true
         gqrxRemote?.applyBookmarkFrequency(frequencyHz)
         gqrxEnsureDSPRunning()
         // Speak the bookmark's program name over the relay, same as tuning a
@@ -2648,7 +2758,12 @@ final class SDRController {
 
     /// "89.1", "162.4", "1010" — trailing zeros trimmed, spoken as a number.
     private static func spokenFrequencyNumber(_ f: Frequency) -> String {
-        let mhz = Double(f.frequency) / 1_000_000.0
+        spokenMegahertz(hz: f.frequency)
+    }
+
+    /// `hz` in MHz, spoken as a number: "89.1", "162.475", "1010".
+    private static func spokenMegahertz<T: BinaryInteger>(hz: T) -> String {
+        let mhz = Double(hz) / 1_000_000.0
         var s = String(format: "%.3f", mhz)
         while s.hasSuffix("0") { s.removeLast() }
         if s.hasSuffix(".") { s.removeLast() }
