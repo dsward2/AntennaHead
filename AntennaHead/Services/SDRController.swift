@@ -3037,14 +3037,41 @@ final class SDRController {
     /// so it is neither delayed by minutes (which made it easy to mistake for
     /// the audio you're trying to sync) nor able to swallow countdown cues, and
     /// it is skipped by the helper when the delay is too short to fit it.
+    ///
+    /// `PCMDelay` only plays the announcement when the initial silence can hold
+    /// it, so a short delay — including the default 0 s — would silently drop it
+    /// (its log says "announcement: skipped"), and every source would start
+    /// without its "Now playing …" line. In that case the announcement goes
+    /// through the plain `PCMPrefix` stage placed after the delay stage instead,
+    /// exactly as with the delay off, and `PCMDelay` is not given the clip so it
+    /// can't announce twice.
     private func addAnnouncementAndDelayStages(_ announcement: PreparedAnnouncement?) {
+        let delayCanPlayIt = announcement.map {
+            Self.delayFitsAnnouncement(text: $0.pending.text, delaySeconds: audioDelaySeconds)
+        } ?? false
+
         // Preference order for PCMDelay: the longer clip that states the delay,
         // then the plain one — it plays the first that fits the silent period.
-        let clips = [announcement?.pending.extendedClipURL, announcement?.pending.clipURL].compactMap { $0 }
+        let clips = delayCanPlayIt
+            ? [announcement?.pending.extendedClipURL, announcement?.pending.clipURL].compactMap { $0 }
+            : []
         let delayAdded = addAudioDelayStageIfEnabled(announcementClipURLs: clips)
-        if !delayAdded, let announcement {
+        if let announcement, !(delayAdded && delayCanPlayIt) {
             radioTaskPipelineManager.add(announcement.stage)
         }
+    }
+
+    /// Whether `PCMDelay` will have room to play the announcement `text` in a
+    /// `delaySeconds` initial delay. Mirrors `PCMDelay`'s own rule — the clip, a
+    /// 0.5 s gap and 3 s of countdown must fit (`announcementGapSeconds` and
+    /// `minCountdownAfterAnnouncement` in its main.swift) — but the clip has not
+    /// been rendered yet when the pipeline is built, so its length is estimated
+    /// from the text (speech runs at roughly 13 characters a second) with a
+    /// second of slack on top. Erring toward "doesn't fit" is safe: the
+    /// announcement then plays through `PCMPrefix`.
+    static func delayFitsAnnouncement(text: String, delaySeconds: Double) -> Bool {
+        let estimatedClipSeconds = Double(text.count) / 13.0 + 1.0
+        return delaySeconds >= estimatedClipSeconds + 0.5 + 3.0 + 1.0
     }
 
     /// Adds the optional `PCMDelay` stage immediately before the transcriber
