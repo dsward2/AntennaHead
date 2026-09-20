@@ -47,6 +47,7 @@ final class SDRController {
         case categoryHasNoFrequencies(Int64)
         case recordingNotFound(String)
         case notImplemented(String)
+        case pipelineFailed(String)
 
         var description: String {
             switch self {
@@ -55,6 +56,7 @@ final class SDRController {
             case .categoryHasNoFrequencies(let id): return "Category \(id) has no frequencies to scan."
             case .recordingNotFound(let name): return "Recording '\(name)' was not found in the shared Recordings folder."
             case .notImplemented(let what): return "\(what) is not yet implemented."
+            case .pipelineFailed(let what): return what
             }
         }
     }
@@ -520,6 +522,32 @@ final class SDRController {
     /// deferred task (a fade ramp, a scheduled SIGTERM) can tell it has been
     /// superseded and bail.
     private var fillerGeneration = 0
+
+    // MARK: Filler supervision
+    //
+    // The filler is a chain of helpers (PCMFilePlayer → PCMMixer → … →
+    // PCMUDPSender) plus a separate announcement feeder. `TaskPipelineManager`
+    // notices when any stage dies and tears the chain down, but on its own
+    // that leaves the app in filler mode with nothing playing — the stream
+    // server keeps sending silence and the player says "Live Broadcast". These
+    // restart a dead filler with backoff and, if it keeps dying, say so.
+
+    /// Consecutive automatic restarts since the filler last ran stably.
+    private var fillerRestartAttempts = 0
+    /// When the current filler run launched, to tell a stable run from a crash loop.
+    private var fillerStartedAt: Date?
+    /// Whether the last explicit start kept the Gqrx status (so a restart does too).
+    private var fillerKeepGqrxStatus = false
+    /// A scheduled automatic restart, if any.
+    private var fillerRestartTask: Task<Void, Never>?
+    private var fillerRestartIsFullRebuild = false
+    private static let fillerMaxAutoRestarts = 5
+    /// A filler that ran at least this long before dying counts as healthy, so
+    /// the restart budget resets.
+    private static let fillerStableSeconds: TimeInterval = 30
+    /// How long to wait for the previous instance's helpers to release the
+    /// filler's fixed UDP ports before launching anyway.
+    private static let fillerPortWaitSeconds: TimeInterval = 6
     /// Filler helper processes detached by `stopFillerForNewSource()` during a
     /// fade-out: still running, ramping down, scheduled for SIGTERM. Consumed
     /// (once) by the next `launchCurrentPipeline` so the incoming pipeline
@@ -703,11 +731,13 @@ final class SDRController {
                 self.startFillerPipeline()
             }
         }
-        fillerPipelineManager.onLog = { source, message in
+        fillerPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            self?.fillerStageReported(message: message, isFeeder: false)
         }
-        fillerAnnouncementManager.onLog = { source, message in
+        fillerAnnouncementManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            self?.fillerStageReported(message: message, isFeeder: true)
         }
         startStatusListener()
         startCaptionListener()
@@ -1798,10 +1828,12 @@ final class SDRController {
     /// Loops the filler audio (built-in Monitor Beacon by default) through
     /// `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` on
     /// `fillerPipelineManager`. Safe to call when a filler is already running —
-    /// it is torn down first. No port-race wait is needed: the filler uses no
-    /// exclusive resource (no RTL-SDR USB, no Core Audio device, no bound
-    /// receive port), and `PCMUDPSender` only sends. A no-op when the feature
-    /// is disabled or the beacon is missing.
+    /// it is torn down first. The filler uses no RTL-SDR USB or Core Audio device,
+    /// but its `PCMDistanceGain` and `PCMMixer` stages bind fixed UDP control
+    /// ports, so the launch waits for those ports to be released when the
+    /// previous instance still holds them (see the preflight below), and a
+    /// stage that dies later is restarted (see "Filler supervision"). A no-op
+    /// when the feature is disabled or the beacon is missing.
     ///
     /// With fade on, a `PCMDistanceGain` stage starts attenuated and this
     /// method ramps it up to unity over `fillerFadeMs`.
@@ -1812,10 +1844,15 @@ final class SDRController {
     /// - `keepGqrxStatus`: leave `taskMode` / `statusFunction` alone (the Gqrx
     ///   page pauses to filler but keeps showing its control panel) instead of
     ///   switching to the normal Filler status.
-    func startFillerPipeline(announcePrefix: String? = nil, keepGqrxStatus: Bool = false) {
+    func startFillerPipeline(announcePrefix: String? = nil, keepGqrxStatus: Bool = false,
+                             isAutoRestart: Bool = false) {
         fillerPipelineManager.terminate()
         fillerAnnouncementManager.terminate()
         fillerGeneration &+= 1
+        fillerRestartTask?.cancel()
+        fillerRestartTask = nil
+        if !isAutoRestart { fillerRestartAttempts = 0 }
+        fillerKeepGqrxStatus = keepGqrxStatus
         guard fillerEnabled else { return }
 
         let tracks = fillerTrackList()
@@ -1857,6 +1894,7 @@ final class SDRController {
             do {
                 try self.fillerPipelineManager.start()
                 self.lastError = nil
+                self.fillerStartedAt = Date()
                 LogStore.shared.log(.info, source: "SDRController",
                                     "filler started — \(tracks.count) track(s) → udp:\(self.udpInputPort)"
                                     + (fade ? ", fading in \(self.fillerFadeMs) ms" : "")
@@ -1871,14 +1909,100 @@ final class SDRController {
             }
         }
 
-        if let prefix {
-            Task { @MainActor in
-                await Self.renderAnnouncementClip(prefix.pending)
+        // The filler's helpers bind fixed UDP ports (gain control, mixer input
+        // and control). If the previous instance — or the filler we just
+        // terminated above — still holds one, the new helper's bind() fails and
+        // the whole chain collapses, so wait for release first. No delay in the
+        // common case where the ports are already free.
+        var fillerPorts: [UInt16] = []
+        if fade { fillerPorts.append(fillerControlPort) }
+        if mixer != nil { fillerPorts.append(contentsOf: [fillerAnnouncePCMPort, fillerMixerControlPort]) }
+        let portsBusy = fillerPorts.contains { !HelperProcessPreflight.isUDPPortFree($0) }
+
+        if prefix != nil || portsBusy {
+            Task { @MainActor [weak self] in
+                if let prefix { await Self.renderAnnouncementClip(prefix.pending) }
+                if portsBusy {
+                    LogStore.shared.log(.info, source: "SDRController",
+                                        "filler: waiting for UDP ports \(fillerPorts) to be released")
+                    await HelperProcessPreflight.waitForUDPPortsFree(fillerPorts, timeout: Self.fillerPortWaitSeconds)
+                }
+                guard self != nil else { return }
                 launch()
             }
         } else {
             launch()
         }
+    }
+
+    /// Called for every line either filler manager relays. Only the manager's
+    /// own "failed task detected" report matters here — it fires when a stage
+    /// exits on its own; deliberate teardowns cancel the manager's monitor
+    /// first and never report. Runs on the main actor (the monitor is).
+    private func fillerStageReported(message: String, isFeeder: Bool) {
+        guard message.contains("failed task detected"), fillerEnabled else { return }
+
+        // A rebuild is already scheduled — it relaunches the feeder too.
+        // A bed failure arriving while only a feeder restart is pending upgrades
+        // it to a rebuild; that is the same incident (the feeder normally dies
+        // *because* the bed did), so it must not use up another attempt.
+        var isUpgrade = false
+        if fillerRestartTask != nil {
+            if isFeeder || fillerRestartIsFullRebuild { return }
+            fillerRestartTask?.cancel()
+            isUpgrade = true
+        }
+
+        if !isUpgrade {
+            if let started = fillerStartedAt, Date().timeIntervalSince(started) > Self.fillerStableSeconds {
+                fillerRestartAttempts = 0
+            }
+            guard fillerRestartAttempts < Self.fillerMaxAutoRestarts else {
+                giveUpOnFiller()
+                return
+            }
+            fillerRestartAttempts += 1
+        }
+        let delay = min(pow(2.0, Double(fillerRestartAttempts - 1)), 8.0)
+        LogStore.shared.log(.warning, source: "SDRController",
+                            "filler \(isFeeder ? "announcement feeder" : "pipeline") died; restarting in \(Int(delay)) s "
+                            + "(attempt \(fillerRestartAttempts) of \(Self.fillerMaxAutoRestarts))")
+
+        let generation = fillerGeneration
+        fillerRestartIsFullRebuild = !isFeeder
+        fillerRestartTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.fillerGeneration == generation else { return }
+            self.fillerRestartTask = nil
+            if isFeeder {
+                self.startFillerAnnouncementFeeder(generation: generation)
+            } else {
+                self.startFillerPipeline(announcePrefix: nil, keepGqrxStatus: self.fillerKeepGqrxStatus,
+                                         isAutoRestart: true)
+            }
+        }
+    }
+
+    /// The filler died repeatedly. Stop pretending: tear it down, drop out of
+    /// filler mode and record why, so Now Playing no longer claims "Filler".
+    private func giveUpOnFiller() {
+        fillerRestartTask?.cancel()
+        fillerRestartTask = nil
+        let failure = fillerPipelineManager.lastFailure ?? fillerAnnouncementManager.lastFailure
+        if fillerKeepGqrxStatus {
+            // The filler is riding along with an active Gqrx session: stop only
+            // the filler and leave the Gqrx status alone.
+            fillerGeneration &+= 1
+            fillerAnnouncementManager.terminate()
+            fillerPipelineManager.terminate()
+        } else {
+            terminateTasks(enterIdle: false)   // full stop: mode .stopped, status text reset
+            stationName = ""
+        }
+        let detail = failure.map { " (\($0.functionName) exited with status \($0.terminationStatus))" } ?? ""
+        lastError = SDRError.pipelineFailed("The filler audio failed \(Self.fillerMaxAutoRestarts) times in a row and was stopped\(detail).")
+        LogStore.shared.log(.error, source: "SDRController",
+                            "filler died \(Self.fillerMaxAutoRestarts) times in a row; giving up\(detail)")
     }
 
     /// Re-evaluates the filler after a Configuration change: (re)build it if it
