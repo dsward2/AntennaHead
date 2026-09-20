@@ -1037,6 +1037,24 @@ final class SDRController {
         await waitForControlBoothReceiverReady()
     }
 
+    /// The ControlBooth pipeline AntennaHead is currently listening to (the
+    /// name shown as the station while ControlBooth is the source), or `nil`.
+    /// Reported by the status API and the Remote Control page so they can show
+    /// which pipeline is playing.
+    var activeControlBoothPipelineName: String? {
+        guard taskMode == .customTask, statusFunction.hasPrefix("ControlBooth: "),
+              !stationName.isEmpty else { return nil }
+        return stationName
+    }
+
+    /// Whether the bridge for `name` is already up — so a repeated 'start
+    /// listening' for the same pipeline (ControlBooth echoing back a start
+    /// AntennaHead itself requested) can be ignored instead of tearing down and
+    /// rebuilding a receiver that is already bound.
+    func isListeningToControlBooth(named name: String) -> Bool {
+        activeControlBoothPipelineName == name && radioTaskPipelineManager.status == .running
+    }
+
     /// Suspends until the ControlBooth bridge's PCMUDPReceiver stage reports
     /// (via `radioTaskPipelineManager.onLog`, wired up in `init`) that it has
     /// bound its port, or `timeout` elapses — whichever comes first. A timeout

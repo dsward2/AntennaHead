@@ -1730,7 +1730,10 @@ var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 // no push channel from server to browser here — so if this page is open
 // when ControlBooth quits, it's this poll noticing isRunning no longer
 // matches what was rendered that reloads the fragment (same call the
-// Refresh button makes) to show "Not running". No-op until the fragment
+// Refresh button makes) to show "Not running". It also reloads when the
+// active pipeline (data-active) changes — ControlBooth's Play/Stop buttons
+// tell AntennaHead over AppleEvents, and this is how the page notices.
+// No-op until the fragment
 // (and its data-running marker) is in the DOM, same as aacRecorderPoll.
 function controlBoothPoll()
 {
@@ -1743,7 +1746,9 @@ function controlBoothPoll()
             try {
                 var data = JSON.parse(this.responseText);
                 var renderedRunning = (statusEl.getAttribute("data-running") == "true");
-                if (!!data.isRunning !== renderedRunning)
+                var renderedActive = statusEl.getAttribute("data-active") || "";
+                var currentActive = data.activePipelineName || "";
+                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive)
                 {
                     loadContent("controlbooth.html");
                 }

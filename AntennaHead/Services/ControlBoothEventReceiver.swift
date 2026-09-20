@@ -6,7 +6,12 @@ import SharedLogging
 /// ControlBooth's `AntennaHeadClient` sends raw events of class 'AntH':
 ///
 ///   'Strt'  start listening task   direct parameter: source name (shown as the
-///                                  station name while ControlBooth is the source)
+///                                  station name while ControlBooth is the source,
+///                                  and as the active pipeline on the Remote Control
+///                                  page). Sent by ControlBooth's Play button before
+///                                  it starts the pipeline: the reply is held until
+///                                  the UDP receiver is bound, and a repeat for the
+///                                  pipeline already being listened to is ignored.
 ///   'Stop'  stop listening task    direct parameter: source name
 ///   'Runs'  listening task names   reply: list of the listening tasks' names
 ///   'RecS'  start recording        direct parameter: filename to create.
@@ -91,13 +96,26 @@ final class ControlBoothEventReceiver: NSObject {
             // over UDP; this just switches AntennaHead's status/mode to show
             // ControlBooth as the active source. (Custom-task pipelines were
             // removed from AntennaHead — build them in ControlBooth instead.)
-            // startControlBoothListening now waits for its receiver to report
-            // ready before returning; this handler doesn't need that guarantee
-            // itself (no reply value depends on it), so it's fire-and-forget
-            // here rather than holding up the AE reply — same pattern as
-            // handleStartRecording below.
             let controller = sdrController
-            Task { @MainActor in await controller.startControlBoothListening(name: name) }
+
+            // Already listening to this pipeline — e.g. AntennaHead's own Listen
+            // started it and ControlBooth is echoing the start back. Nothing to
+            // do, and rebuilding the bridge would cut the audio.
+            if controller.isListeningToControlBooth(named: name) { return }
+
+            // Hold the AE reply until the receiver has bound its port.
+            // ControlBooth's Play button sends this *before* it starts the
+            // pipeline and waits for the reply, so its PCMUDPSender's first
+            // send() never lands on an unbound port (which makes the sender
+            // exit and collapses the pipeline). Suspending the event frees the
+            // main thread while startControlBoothListening waits; the reply
+            // goes out on resume.
+            let manager = NSAppleEventManager.shared()
+            let suspension = manager.suspendCurrentAppleEvent()   // nil if there is no current event
+            Task { @MainActor in
+                await controller.startControlBoothListening(name: name)
+                if let suspension { manager.resume(withSuspensionID: suspension) }
+            }
         }
     }
 

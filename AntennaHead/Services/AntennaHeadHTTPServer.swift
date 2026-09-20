@@ -1176,7 +1176,8 @@ final class AntennaHeadHTTPServer {
     @MainActor private func apiControlBoothStatusResponse() -> HTTPResponse {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let pipelines = isRunning ? ((try? ControlBoothClient.pipelines()) ?? []) : []
-        return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines))
+        return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines,
+                                            activePipelineName: sdrController?.activeControlBoothPipelineName))
     }
 
     /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
@@ -1222,7 +1223,14 @@ final class AntennaHeadHTTPServer {
         // so it can tell when this fragment's rendered status has gone
         // stale — e.g. ControlBooth quit after this page loaded — and
         // reload it, without any push channel from the server.
-        s += "<p id='controlbooth_status' data-running='\(isRunning)'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        // data-active is read by controlBoothPoll() too, so a pipeline started
+        // or stopped from ControlBooth's own Play/Stop buttons refreshes this
+        // fragment to show the new pipeline name.
+        let activePipeline = sdrController?.activeControlBoothPipelineName
+        s += "<p id='controlbooth_status' data-running='\(isRunning)' data-active='\(htmlAttribute(activePipeline ?? ""))'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        if let activePipeline {
+            s += "<p id='controlbooth_active'>Now playing: <strong>\(htmlText(activePipeline))</strong></p>"
+        }
         if isRunning {
             let pipelines = (try? ControlBoothClient.pipelines()) ?? []
             if pipelines.isEmpty {
@@ -1232,7 +1240,8 @@ final class AntennaHeadHTTPServer {
                 s += "<label for='pipeline_select'>Select Pipeline:</label>"
                 s += "<select name='pipeline_select' class='twelve columns value-prop' title='Select a ControlBooth pipeline to listen to.'>"
                 for p in pipelines {
-                    s += "<option value='\(htmlAttribute(p))'>\(htmlText(p))</option>"
+                    let selected = (p == activePipeline) ? " selected" : ""
+                    s += "<option value='\(htmlAttribute(p))'\(selected)>\(htmlText(p))</option>"
                 }
                 s += "</select>"
                 s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
