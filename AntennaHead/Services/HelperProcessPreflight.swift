@@ -61,6 +61,29 @@ enum HelperProcessPreflight {
         }
     }
 
+    /// Polls until every UDP port in `ports` is available to bind, up to
+    /// `timeout` seconds in total. Returns the ports that were still in use at
+    /// the deadline (empty on success) so the caller can log and carry on.
+    ///
+    /// Used before launching a helper chain that binds several fixed ports: a
+    /// helper's parent-death watchdog (or a just-sent SIGTERM) can leave the
+    /// previous instance holding a port for a few seconds, and a bind failure
+    /// in one stage (e.g. `PCMMixer`) collapses the whole chain via SIGPIPE.
+    @discardableResult
+    static func waitForUDPPortsFree(_ ports: [UInt16], timeout: TimeInterval) async -> [UInt16] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var busy = ports.filter { !isUDPPortFree($0) }
+        while !busy.isEmpty && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            busy = busy.filter { !isUDPPortFree($0) }
+        }
+        if !busy.isEmpty {
+            await LogStore.shared.log(.warning, source: "HelperProcessPreflight",
+                "UDP port(s) \(busy) still in use after \(timeout)s; proceeding anyway")
+        }
+        return busy
+    }
+
     /// Polls until the TCP port is available to bind, up to `timeout` seconds.
     /// Used to confirm a previous helper has fully released a port before a
     /// replacement is launched. No-op if the port is already free.
@@ -114,7 +137,7 @@ enum HelperProcessPreflight {
         kill(pid, 0) == 0 || errno == EPERM
     }
 
-    private static func isUDPPortFree(_ port: UInt16) -> Bool {
+    static func isUDPPortFree(_ port: UInt16) -> Bool {
         let sock = socket(AF_INET, SOCK_DGRAM, 0)
         guard sock >= 0 else { return true }
         defer { close(sock) }

@@ -809,8 +809,12 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "nowplaying.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["NOW_PLAYING_NAME": htmlText(page.name),
                                       "NOW_PLAYING_DETAILS": page.details,
+                                      "AUDIO_DELAY_CONTROLS": audioDelayControlsHTML(),
                                       "SPATIAL_AUDIO_CONTROLS": spatialAudioControlsHTML(),
                                       "OPEN_AUDIO_PLAYER_PAGE_BUTTON": Self.openAudioPlayerButtonHTML])
+
+        case "/api/audio-delay/update":
+            return updateAudioDelay(fromBody: request.body)
 
         case "/api/spatial-audio/update":
             updateSpatialAudio(fromBody: request.body)
@@ -1172,7 +1176,8 @@ final class AntennaHeadHTTPServer {
     @MainActor private func apiControlBoothStatusResponse() -> HTTPResponse {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let pipelines = isRunning ? ((try? ControlBoothClient.pipelines()) ?? []) : []
-        return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines))
+        return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines,
+                                            activePipelineName: sdrController?.activeControlBoothPipelineName))
     }
 
     /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
@@ -1218,7 +1223,14 @@ final class AntennaHeadHTTPServer {
         // so it can tell when this fragment's rendered status has gone
         // stale — e.g. ControlBooth quit after this page loaded — and
         // reload it, without any push channel from the server.
-        s += "<p id='controlbooth_status' data-running='\(isRunning)'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        // data-active is read by controlBoothPoll() too, so a pipeline started
+        // or stopped from ControlBooth's own Play/Stop buttons refreshes this
+        // fragment to show the new pipeline name.
+        let activePipeline = sdrController?.activeControlBoothPipelineName
+        s += "<p id='controlbooth_status' data-running='\(isRunning)' data-active='\(htmlAttribute(activePipeline ?? ""))'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        if let activePipeline {
+            s += "<p id='controlbooth_active'>Now playing: <strong>\(htmlText(activePipeline))</strong></p>"
+        }
         if isRunning {
             let pipelines = (try? ControlBoothClient.pipelines()) ?? []
             if pipelines.isEmpty {
@@ -1228,7 +1240,8 @@ final class AntennaHeadHTTPServer {
                 s += "<label for='pipeline_select'>Select Pipeline:</label>"
                 s += "<select name='pipeline_select' class='twelve columns value-prop' title='Select a ControlBooth pipeline to listen to.'>"
                 for p in pipelines {
-                    s += "<option value='\(htmlAttribute(p))'>\(htmlText(p))</option>"
+                    let selected = (p == activePipeline) ? " selected" : ""
+                    s += "<option value='\(htmlAttribute(p))'\(selected)>\(htmlText(p))</option>"
                 }
                 s += "</select>"
                 s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
@@ -2336,6 +2349,68 @@ final class AntennaHeadHTTPServer {
                        String(format: "%.2f", sdr.spatialDistance))
         html += "</div>"
         return html
+    }
+
+    /// The Now Playing page's audio-delay controls: a slider (0 to the stage's
+    /// maximum, 1 s steps) plus "Delay 1 Second" / "Skip 1 Second" fine-tune
+    /// buttons, all driving `PCMDelay` live through `sdrController`. Shown
+    /// whenever the delay is switched on in Configuration — even with nothing
+    /// tuned, so it can be preset before tuning (the value is persisted).
+    ///
+    /// Same constraints as `spatialAudioControlsHTML()`: rendered once per
+    /// page load, outside `#now-playing-details`, and wired with inline
+    /// `oninput`/`onclick` handlers that live in antennahead.js because this
+    /// fragment is injected via `innerHTML`.
+    @MainActor private func audioDelayControlsHTML() -> String {
+        guard let sdr = sdrController, sdr.audioDelayEnabled else { return "" }
+        let max = Int(SDRController.maxAudioDelaySeconds)
+        let value = Int(sdr.audioDelaySeconds.rounded())
+        let builtIn = Int(SDRController.estimatedHLSLatencySeconds.rounded())
+        return """
+        <div id="audio-delay-controls" style="margin-top: 24px;">
+          <h4>Audio Delay</h4>
+          <label for="audio-delay">Extra delay: <span id="audio-delay-value">\(Self.formatDelay(seconds: value))</span></label>
+          <label id="audio-delay-latency" data-builtin="\(builtIn)">Estimated total from live: <span id="audio-delay-total">\(Self.formatDelay(seconds: value + builtIn))</span></label><br>
+          <input type="range" id="audio-delay" min="0" max="\(max)" step="1" value="\(value)"
+                 style="width: 100%;" oninput="audioDelaySliderChanged(false)" onchange="audioDelaySliderChanged(true)">
+          <div style="margin-top: 8px;">
+            <input class="button" type="button" value="Delay 1 Second" onclick="audioDelayAdjust(1)">
+            <input class="button" type="button" value="Skip 1 Second" onclick="audioDelayAdjust(-1)">
+          </div>
+          <p style="margin-top: 8px; font-size: 0.85em;">The streaming server itself adds about \(builtIn) s to the HLS stream
+          (about 0.1 s for the MP3 and AAC streams), before any buffering in your player.</p>
+          <p style="margin-top: 8px; font-size: 0.85em;">A short chirp is mixed into the audio when each change takes effect.
+          Raising the delay pauses briefly; lowering it skips ahead.</p>
+        </div>
+        """
+    }
+
+    /// `m:ss` for the delay readout (a bare seconds count is unreadable at 300+).
+    nonisolated private static func formatDelay(seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    /// Handles `/api/audio-delay/update`'s JSON body: `{"seconds": n}` sets the
+    /// delay, `{"adjust": ±n}` nudges it, and `"persist": true` also saves it
+    /// (sent once when a slider drag ends, and by the buttons, so a drag doesn't
+    /// write to SQLite on every input event). Responds with `{"seconds": n}` —
+    /// the value actually in force after clamping — so the page can show it.
+    @MainActor private func updateAudioDelay(fromBody body: Data) -> HTTPResponse {
+        guard let sdr = sdrController, sdr.audioDelayEnabled else {
+            return jsonErrorResponse("audio delay is not enabled", status: 409)
+        }
+        let o = jsonObject(fromBody: body)
+        let persist = (o["persist"] as? Bool) ?? false
+        var result = sdr.audioDelaySeconds
+        if let adjust = (o["adjust"] as? NSNumber)?.doubleValue {
+            result = sdr.adjustAudioDelay(by: adjust)
+            if persist { sdr.persistAudioDelay() }
+        } else if let seconds = (o["seconds"] as? NSNumber)?.doubleValue {
+            result = sdr.setAudioDelay(seconds, persist: persist)
+        }
+        let json = (try? JSONSerialization.data(withJSONObject: ["seconds": result])) ?? Data("{}".utf8)
+        return HTTPResponse(status: 200, reason: "OK",
+                            headers: ["Content-Type": "application/json"], body: json)
     }
 
     /// Handles `/api/spatial-audio/update`'s JSON body (`{"azimuth":…,

@@ -115,7 +115,7 @@ struct TLSSettingsView: View {
             }
 
             Section("HTTP Authentication") {
-                Text("These credentials protect the AntennaHead web UI and are forwarded to the LiveAudioServer subprocess. Browsers cache credentials per port, so you may be prompted again the first time you visit each server; subsequent visits will be silent.")
+                Text("These credentials protect access to AntennaHead from a web browser and are forwarded to the LiveAudioServer subprocess. Browsers cache credentials per port, so you may be prompted again the first time you visit each server; subsequent visits will be silent.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 

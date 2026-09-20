@@ -1454,6 +1454,82 @@ function spatialAudioSliderChanged(id)
 }
 
 
+// Audio-delay controls on the Now Playing page (see audioDelayControlsHTML in
+// AntennaHeadHTTPServer.swift). The slider sends live updates as it moves
+// (persist = false) and one persisting update when the drag ends; the
+// "Delay 1 Second" / "Skip 1 Second" buttons send a relative adjustment that
+// the server applies and clamps, and the response says what is now in force.
+function formatAudioDelay(seconds)
+{
+    var total = Math.round(seconds);
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+// "Estimated total from live" = the delay stage's setting plus the streaming
+// server's own built-in latency (data-builtin, set by the server).
+function updateAudioDelayTotal(seconds)
+{
+    var latency = document.getElementById("audio-delay-latency");
+    var total = document.getElementById("audio-delay-total");
+    if (latency == null || total == null) { return; }
+    var builtIn = parseFloat(latency.getAttribute("data-builtin"));
+    if (isNaN(builtIn)) { builtIn = 0; }
+    total.innerText = formatAudioDelay(seconds + builtIn);
+}
+
+function showAudioDelay(seconds)
+{
+    var slider = document.getElementById("audio-delay");
+    var valueSpan = document.getElementById("audio-delay-value");
+    if (slider != null) { slider.value = seconds; }
+    if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+    updateAudioDelayTotal(seconds);
+}
+
+function postAudioDelay(payload, applyResponse)
+{
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (applyResponse && xhttp.readyState === 4 && xhttp.status === 200)
+        {
+            try
+            {
+                var response = JSON.parse(xhttp.responseText);
+                if (typeof response.seconds === "number") { showAudioDelay(response.seconds); }
+            }
+            catch (e) { }
+        }
+    };
+    xhttp.open("POST", baseUrl + "api/audio-delay/update", true);
+    xhttp.send(JSON.stringify(payload));
+}
+
+function audioDelaySliderChanged(persist)
+{
+    var slider = document.getElementById("audio-delay");
+    if (slider == null) { return; }
+    var seconds = parseFloat(slider.value);
+
+    // Update the readout immediately; only the persisting (drag-ended) call
+    // takes the server's answer back, so a live drag is never yanked around.
+    var valueSpan = document.getElementById("audio-delay-value");
+    if (valueSpan != null) { valueSpan.innerText = formatAudioDelay(seconds); }
+    updateAudioDelayTotal(seconds);
+
+    postAudioDelay({ seconds: seconds, persist: persist }, persist);
+}
+
+function audioDelayAdjust(deltaSeconds)
+{
+    postAudioDelay({ adjust: deltaSeconds, persist: true }, true);
+}
+
+
 function applyAACSettings(form)
 {
   //console.log("frequencyListenButtonClicked");
@@ -1654,7 +1730,10 @@ var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 // no push channel from server to browser here — so if this page is open
 // when ControlBooth quits, it's this poll noticing isRunning no longer
 // matches what was rendered that reloads the fragment (same call the
-// Refresh button makes) to show "Not running". No-op until the fragment
+// Refresh button makes) to show "Not running". It also reloads when the
+// active pipeline (data-active) changes — ControlBooth's Play/Stop buttons
+// tell AntennaHead over AppleEvents, and this is how the page notices.
+// No-op until the fragment
 // (and its data-running marker) is in the DOM, same as aacRecorderPoll.
 function controlBoothPoll()
 {
@@ -1667,7 +1746,9 @@ function controlBoothPoll()
             try {
                 var data = JSON.parse(this.responseText);
                 var renderedRunning = (statusEl.getAttribute("data-running") == "true");
-                if (!!data.isRunning !== renderedRunning)
+                var renderedActive = statusEl.getAttribute("data-active") || "";
+                var currentActive = data.activePipelineName || "";
+                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive)
                 {
                     loadContent("controlbooth.html");
                 }

@@ -47,6 +47,7 @@ final class SDRController {
         case categoryHasNoFrequencies(Int64)
         case recordingNotFound(String)
         case notImplemented(String)
+        case pipelineFailed(String)
 
         var description: String {
             switch self {
@@ -55,6 +56,7 @@ final class SDRController {
             case .categoryHasNoFrequencies(let id): return "Category \(id) has no frequencies to scan."
             case .recordingNotFound(let name): return "Recording '\(name)' was not found in the shared Recordings folder."
             case .notImplemented(let what): return "\(what) is not yet implemented."
+            case .pipelineFailed(let what): return what
             }
         }
     }
@@ -234,15 +236,24 @@ final class SDRController {
     /// the next tuning); the delay itself is live — see `audioDelaySeconds`.
     static let audioDelayEnabledKey = "AntennaHeadAudioDelayEnabled"
     static let audioDelaySecondsKey = "AntennaHeadAudioDelaySeconds"
+    static let audioDelayCountdownKey = "AntennaHeadAudioDelayCountdown"
 
-    /// Largest delay the slider offers and `PCMDelay` is launched to accept.
-    /// Sizes the stage's ring buffer up front (~188 KiB per second at
-    /// 48 kHz / 2 ch S16LE, so ~11.5 MB at 60 s).
-    static let maxAudioDelaySeconds = 60.0
+    /// Largest delay the slider offers and `PCMDelay` is launched to accept:
+    /// 10 minutes, enough for a chain of uplinks, downlinks and internet hops.
+    /// The stage's ring buffer costs ~188 KiB per second at 48 kHz / 2 ch S16LE
+    /// (~115 MB when completely full), but PCMDelay commits that memory lazily
+    /// as audio fills it, so a shorter setting or a young stream costs less.
+    static let maxAudioDelaySeconds = 600.0
 
     /// Whether the delay stage is switched on in Configuration.
     var audioDelayEnabled: Bool {
         ((try? sqliteController.appSettingsValue(forKey: Self.audioDelayEnabledKey)) ?? nil) == "1"
+    }
+
+    /// Whether the delay's leading silence carries a countdown (a beep per
+    /// second plus a spoken countdown). On unless switched off in Configuration.
+    var audioDelayCountdownEnabled: Bool {
+        ((try? sqliteController.appSettingsValue(forKey: Self.audioDelayCountdownKey)) ?? nil) != "0"
     }
 
     /// Current delay in seconds, live-adjustable from the Configuration slider
@@ -260,6 +271,25 @@ final class SDRController {
     func persistAudioDelay() {
         try? sqliteController.storeAppSettingsValue(
             "\(audioDelaySeconds)", forKey: Self.audioDelaySecondsKey)
+    }
+
+    /// Nudges the delay by `seconds` (negative shortens), clamped to
+    /// 0…`maxAudioDelaySeconds`, and returns the resulting value. Backs the web
+    /// UI's "Delay 1 Second" / "Skip 1 Second" buttons.
+    @discardableResult
+    func adjustAudioDelay(by seconds: Double) -> Double {
+        audioDelaySeconds = min(max(audioDelaySeconds + seconds, 0), Self.maxAudioDelaySeconds)
+        return audioDelaySeconds
+    }
+
+    /// Sets the delay (clamped), optionally persisting it — the web slider
+    /// sends live updates without persisting and one persisting update when the
+    /// drag ends. Returns the resulting value.
+    @discardableResult
+    func setAudioDelay(_ seconds: Double, persist: Bool) -> Double {
+        audioDelaySeconds = min(max(seconds, 0), Self.maxAudioDelaySeconds)
+        if persist { persistAudioDelay() }
+        return audioDelaySeconds
     }
 
     private func loadPersistedAudioDelay() {
@@ -290,7 +320,8 @@ final class SDRController {
 
     /// App-settings keys for the optional voice that says "Now playing …" before
     /// a tuning starts. Read fresh each time a pipeline is built, and edited in
-    /// the Configuration view.
+    /// the Configuration view. `announcementVoiceKey` is an *override*: empty
+    /// means "same as the default voice" (see `SpeechVoicePreference`).
     static let announcementEnabledKey = "AntennaHeadAnnouncementEnabled"
     static let announcementVoiceKey = "AntennaHeadAnnouncementVoiceIdentifier"
 
@@ -302,6 +333,8 @@ final class SDRController {
     /// The announcement clip rendered for the current pipeline, if any. Deleted
     /// when the next pipeline starts or all tasks are stopped.
     private var announcementClipURL: URL?
+    /// The extended (states-the-delay) variant's clip; same lifetime.
+    private var announcementExtendedClipURL: URL?
 
     /// PCMSpeechSynth renders the announcement at this rate/format; PCMPrefix
     /// plays it (up-mixing mono → stereo) with no resampling, so it must match
@@ -315,6 +348,12 @@ final class SDRController {
         let text: String
         let voiceIdentifier: String?
         let clipURL: URL
+        /// A longer version of the announcement that also states the audio
+        /// delay ("… with audio delay of 28 seconds"), rendered to its own
+        /// clip when the delay is on. PCMDelay plays it in preference to
+        /// `clipURL` if it fits in the silent period, else falls back.
+        var extendedText: String?
+        var extendedClipURL: URL?
     }
 
     // MARK: Filler pipeline
@@ -435,12 +474,12 @@ final class SDRController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stored.isEmpty ? Self.defaultFillerAnnounceText : stored
     }
-    /// The configured announcement voice, but only if still installed —
-    /// `PCMSpeechSynth` aborts on an unknown identifier. `nil` ⇒ system default.
+    /// The voice for the filler announcement: its own override, else the default
+    /// voice, else Automatic (see `SpeechVoicePreference`). Always an installed
+    /// voice when any better-than-built-in voice exists.
     var fillerAnnounceVoiceIdentifier: String? {
-        guard let id = ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceVoiceKey)) ?? nil),
-              !id.isEmpty else { return nil }
-        return AVSpeechSynthesisVoice(identifier: id) != nil ? id : nil
+        SpeechVoicePreference.resolvedIdentifier(overrideKey: Self.fillerAnnounceVoiceKey,
+                                                 sqlite: sqliteController)
     }
     /// Announcement interval in seconds. Clamped 15…600, default 60.
     var fillerAnnouncePeriodSeconds: Int {
@@ -483,6 +522,32 @@ final class SDRController {
     /// deferred task (a fade ramp, a scheduled SIGTERM) can tell it has been
     /// superseded and bail.
     private var fillerGeneration = 0
+
+    // MARK: Filler supervision
+    //
+    // The filler is a chain of helpers (PCMFilePlayer → PCMMixer → … →
+    // PCMUDPSender) plus a separate announcement feeder. `TaskPipelineManager`
+    // notices when any stage dies and tears the chain down, but on its own
+    // that leaves the app in filler mode with nothing playing — the stream
+    // server keeps sending silence and the player says "Live Broadcast". These
+    // restart a dead filler with backoff and, if it keeps dying, say so.
+
+    /// Consecutive automatic restarts since the filler last ran stably.
+    private var fillerRestartAttempts = 0
+    /// When the current filler run launched, to tell a stable run from a crash loop.
+    private var fillerStartedAt: Date?
+    /// Whether the last explicit start kept the Gqrx status (so a restart does too).
+    private var fillerKeepGqrxStatus = false
+    /// A scheduled automatic restart, if any.
+    private var fillerRestartTask: Task<Void, Never>?
+    private var fillerRestartIsFullRebuild = false
+    private static let fillerMaxAutoRestarts = 5
+    /// A filler that ran at least this long before dying counts as healthy, so
+    /// the restart budget resets.
+    private static let fillerStableSeconds: TimeInterval = 30
+    /// How long to wait for the previous instance's helpers to release the
+    /// filler's fixed UDP ports before launching anyway.
+    private static let fillerPortWaitSeconds: TimeInterval = 6
     /// Filler helper processes detached by `stopFillerForNewSource()` during a
     /// fade-out: still running, ramping down, scheduled for SIGTERM. Consumed
     /// (once) by the next `launchCurrentPipeline` so the incoming pipeline
@@ -666,11 +731,13 @@ final class SDRController {
                 self.startFillerPipeline()
             }
         }
-        fillerPipelineManager.onLog = { source, message in
+        fillerPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            self?.fillerStageReported(message: message, isFeeder: false)
         }
-        fillerAnnouncementManager.onLog = { source, message in
+        fillerAnnouncementManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
+            self?.fillerStageReported(message: message, isFeeder: true)
         }
         startStatusListener()
         startCaptionListener()
@@ -821,11 +888,10 @@ final class SDRController {
 
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -874,11 +940,10 @@ final class SDRController {
                                                holdInput: true)
 
         radioTaskPipelineManager.add(player)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -962,15 +1027,32 @@ final class SDRController {
                                                holdInput: false)
 
         radioTaskPipelineManager.add(receiver)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: false,
                               announcement: announcement?.pending)
         await waitForControlBoothReceiverReady()
+    }
+
+    /// The ControlBooth pipeline AntennaHead is currently listening to (the
+    /// name shown as the station while ControlBooth is the source), or `nil`.
+    /// Reported by the status API and the Remote Control page so they can show
+    /// which pipeline is playing.
+    var activeControlBoothPipelineName: String? {
+        guard taskMode == .customTask, statusFunction.hasPrefix("ControlBooth: "),
+              !stationName.isEmpty else { return nil }
+        return stationName
+    }
+
+    /// Whether the bridge for `name` is already up — so a repeated 'start
+    /// listening' for the same pipeline (ControlBooth echoing back a start
+    /// AntennaHead itself requested) can be ignored instead of tearing down and
+    /// rebuilding a receiver that is already bound.
+    func isListeningToControlBooth(named name: String) -> Bool {
+        activeControlBoothPipelineName == name && radioTaskPipelineManager.status == .running
     }
 
     /// Suspends until the ControlBooth bridge's PCMUDPReceiver stage reports
@@ -1096,11 +1178,10 @@ final class SDRController {
         let announcement = announceText.flatMap { prepareAnnouncement(text: $0, holdInput: false) }
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying, waitForDyingProcesses: true,
                               announcement: announcement?.pending)
@@ -1504,10 +1585,10 @@ final class SDRController {
         }
         radioTaskPipelineManager.add(synth)
         radioTaskPipelineManager.add(resample)
+        addAudioDelayStageIfEnabled()
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(sender)
         launchCurrentPipeline(dying: dying)
     }
@@ -1522,6 +1603,12 @@ final class SDRController {
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMSpeechSynth")
         item.addArgument("--input"); item.addArgument("file:\(textFileURL.path)")
         item.addArgument("--rate"); item.addArgument(Self.speechSynthSampleRate)
+        // Without --voice the helper would use the built-in default (compact
+        // Samantha) and ignore the Speech settings entirely.
+        if let voice = SpeechVoicePreference.resolvedIdentifier(
+            overrideKey: SpeechVoicePreference.textToSpeechVoiceKey, sqlite: sqliteController) {
+            item.addArgument("--voice"); item.addArgument(voice)
+        }
         if repeatForever {
             item.addArgument("--repeat")
             item.addArgument("--gap"); item.addArgument(2)
@@ -1563,11 +1650,46 @@ final class SDRController {
             return nil
         }
         announcementClipURL = clipURL
-        return PreparedAnnouncement(
-            stage: stage,
-            pending: PendingAnnouncement(text: trimmed,
-                                         voiceIdentifier: validatedAnnouncementVoiceIdentifier(),
-                                         clipURL: clipURL))
+
+        var pending = PendingAnnouncement(text: trimmed,
+                                          voiceIdentifier: validatedAnnouncementVoiceIdentifier(),
+                                          clipURL: clipURL)
+        if audioDelayEnabled {
+            let extendedURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("AntennaHead-announce-\(UUID().uuidString)-delay.raw")
+            announcementExtendedClipURL = extendedURL
+            pending.extendedText = Self.announcementText(trimmed, withDelaySeconds: audioDelaySeconds)
+            pending.extendedClipURL = extendedURL
+        }
+        return PreparedAnnouncement(stage: stage, pending: pending)
+    }
+
+    /// Estimated latency the streaming server itself adds to the HLS stream,
+    /// before any buffering in the listener's player, in seconds: an HLS client
+    /// starts about three segments behind the newest one, and the newest is
+    /// only listed once complete (half a segment on average). Coupled to
+    /// LiveAudioServer's default `hlsSegmentDuration` (2.0 s), which
+    /// AntennaHead doesn't override — update this if that changes. The
+    /// progressive MP3/AAC streams add only ~0.1 s (chunk + encoder frame).
+    /// Shared by the Now Playing page's latency line and the spoken announcement.
+    static let estimatedHLSLatencySeconds = 3 * 2.0 + 2.0 / 2
+
+    /// `text` with the total delay a listener will experience appended:
+    /// "Now playing KUAR." → "Now playing KUAR, with audio delay of 28 seconds."
+    /// The total is the delay stage's setting plus the server's built-in HLS
+    /// latency (see `estimatedHLSLatencySeconds`).
+    static func announcementText(_ text: String, withDelaySeconds delay: Double) -> String {
+        let core = text.trimmingCharacters(in: CharacterSet(charactersIn: ".!? \n"))
+        let total = Int((delay + estimatedHLSLatencySeconds).rounded())
+        return "\(core), with audio delay of \(spokenDuration(seconds: total))."
+    }
+
+    /// "28 seconds", "1 minute", "4 minutes 8 seconds".
+    static func spokenDuration(seconds: Int) -> String {
+        func unit(_ n: Int, _ name: String) -> String { "\(n) \(name)" + (n == 1 ? "" : "s") }
+        if seconds < 60 { return unit(seconds, "second") }
+        let minutes = seconds / 60, rest = seconds % 60
+        return rest == 0 ? unit(minutes, "minute") : "\(unit(minutes, "minute")) \(unit(rest, "second"))"
     }
 
     /// PCMPrefix stage: plays the announcement clip, then passes the live audio
@@ -1591,16 +1713,13 @@ final class SDRController {
         return item
     }
 
-    /// The configured announcement voice, but only if the system still has it —
-    /// PCMSpeechSynth aborts on an unknown identifier, so an uninstalled voice
-    /// falls back to the system default (nil).
+    /// The voice for the "Now playing" announcement (and the audio-delay
+    /// countdown, which speaks in the same voice): its own override, else the
+    /// default voice, else Automatic (see `SpeechVoicePreference`). An
+    /// uninstalled saved voice falls through rather than aborting PCMSpeechSynth.
     private func validatedAnnouncementVoiceIdentifier() -> String? {
-        guard let id = (try? sqliteController.appSettingsValue(forKey: Self.announcementVoiceKey)) ?? nil,
-              !id.isEmpty else { return nil }
-        if AVSpeechSynthesisVoice(identifier: id) != nil { return id }
-        LogStore.shared.log(.info, source: "SDRController",
-                            "announcement: saved voice '\(id)' is unavailable; using the system default")
-        return nil
+        SpeechVoicePreference.resolvedIdentifier(overrideKey: Self.announcementVoiceKey,
+                                                 sqlite: sqliteController)
     }
 
     private func cleanUpAnnouncementClip() {
@@ -1608,13 +1727,25 @@ final class SDRController {
             try? FileManager.default.removeItem(at: url)
             announcementClipURL = nil
         }
+        if let url = announcementExtendedClipURL {
+            try? FileManager.default.removeItem(at: url)
+            announcementExtendedClipURL = nil
+        }
     }
 
     /// Renders `announcement.text` to a raw S16LE mono clip at
     /// `announcementRenderRate` by running PCMSpeechSynth once (not through the
     /// pipeline manager). Best-effort: on any failure the clip file is left
     /// missing/empty and PCMPrefix simply plays nothing.
+    /// Renders just the plain clip of `announcement` (callers that have no use
+    /// for the extended, states-the-delay variant).
     private static func renderAnnouncementClip(_ announcement: PendingAnnouncement) async {
+        await renderAnnouncementClip(text: announcement.text,
+                                     voiceIdentifier: announcement.voiceIdentifier,
+                                     clipURL: announcement.clipURL)
+    }
+
+    private static func renderAnnouncementClip(text: String, voiceIdentifier: String?, clipURL: URL) async {
         let synthPath = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/PCMSpeechSynth").path
         guard FileManager.default.isExecutableFile(atPath: synthPath) else {
@@ -1623,8 +1754,8 @@ final class SDRController {
             return
         }
 
-        FileManager.default.createFile(atPath: announcement.clipURL.path, contents: nil)
-        guard let outHandle = try? FileHandle(forWritingTo: announcement.clipURL) else {
+        FileManager.default.createFile(atPath: clipURL.path, contents: nil)
+        guard let outHandle = try? FileHandle(forWritingTo: clipURL) else {
             LogStore.shared.log(.error, source: "SDRController",
                                 "announcement: could not open clip file for writing")
             return
@@ -1632,10 +1763,10 @@ final class SDRController {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: synthPath)
-        var args = ["--text", announcement.text,
+        var args = ["--text", text,
                     "--rate", "\(announcementRenderRate)",
                     "--no-pace", "--exit-with-parent"]
-        if let voice = announcement.voiceIdentifier, !voice.isEmpty {
+        if let voice = voiceIdentifier, !voice.isEmpty {
             args.append(contentsOf: ["--voice", voice])
         }
         process.arguments = args
@@ -1715,10 +1846,12 @@ final class SDRController {
     /// Loops the filler audio (built-in Monitor Beacon by default) through
     /// `PCMFilePlayer → [PCMDistanceGain] → PCMUDPSender` on
     /// `fillerPipelineManager`. Safe to call when a filler is already running —
-    /// it is torn down first. No port-race wait is needed: the filler uses no
-    /// exclusive resource (no RTL-SDR USB, no Core Audio device, no bound
-    /// receive port), and `PCMUDPSender` only sends. A no-op when the feature
-    /// is disabled or the beacon is missing.
+    /// it is torn down first. The filler uses no RTL-SDR USB or Core Audio device,
+    /// but its `PCMDistanceGain` and `PCMMixer` stages bind fixed UDP control
+    /// ports, so the launch waits for those ports to be released when the
+    /// previous instance still holds them (see the preflight below), and a
+    /// stage that dies later is restarted (see "Filler supervision"). A no-op
+    /// when the feature is disabled or the beacon is missing.
     ///
     /// With fade on, a `PCMDistanceGain` stage starts attenuated and this
     /// method ramps it up to unity over `fillerFadeMs`.
@@ -1729,10 +1862,15 @@ final class SDRController {
     /// - `keepGqrxStatus`: leave `taskMode` / `statusFunction` alone (the Gqrx
     ///   page pauses to filler but keeps showing its control panel) instead of
     ///   switching to the normal Filler status.
-    func startFillerPipeline(announcePrefix: String? = nil, keepGqrxStatus: Bool = false) {
+    func startFillerPipeline(announcePrefix: String? = nil, keepGqrxStatus: Bool = false,
+                             isAutoRestart: Bool = false) {
         fillerPipelineManager.terminate()
         fillerAnnouncementManager.terminate()
         fillerGeneration &+= 1
+        fillerRestartTask?.cancel()
+        fillerRestartTask = nil
+        if !isAutoRestart { fillerRestartAttempts = 0 }
+        fillerKeepGqrxStatus = keepGqrxStatus
         guard fillerEnabled else { return }
 
         let tracks = fillerTrackList()
@@ -1774,6 +1912,7 @@ final class SDRController {
             do {
                 try self.fillerPipelineManager.start()
                 self.lastError = nil
+                self.fillerStartedAt = Date()
                 LogStore.shared.log(.info, source: "SDRController",
                                     "filler started — \(tracks.count) track(s) → udp:\(self.udpInputPort)"
                                     + (fade ? ", fading in \(self.fillerFadeMs) ms" : "")
@@ -1788,14 +1927,100 @@ final class SDRController {
             }
         }
 
-        if let prefix {
-            Task { @MainActor in
-                await Self.renderAnnouncementClip(prefix.pending)
+        // The filler's helpers bind fixed UDP ports (gain control, mixer input
+        // and control). If the previous instance — or the filler we just
+        // terminated above — still holds one, the new helper's bind() fails and
+        // the whole chain collapses, so wait for release first. No delay in the
+        // common case where the ports are already free.
+        var fillerPorts: [UInt16] = []
+        if fade { fillerPorts.append(fillerControlPort) }
+        if mixer != nil { fillerPorts.append(contentsOf: [fillerAnnouncePCMPort, fillerMixerControlPort]) }
+        let portsBusy = fillerPorts.contains { !HelperProcessPreflight.isUDPPortFree($0) }
+
+        if prefix != nil || portsBusy {
+            Task { @MainActor [weak self] in
+                if let prefix { await Self.renderAnnouncementClip(prefix.pending) }
+                if portsBusy {
+                    LogStore.shared.log(.info, source: "SDRController",
+                                        "filler: waiting for UDP ports \(fillerPorts) to be released")
+                    await HelperProcessPreflight.waitForUDPPortsFree(fillerPorts, timeout: Self.fillerPortWaitSeconds)
+                }
+                guard self != nil else { return }
                 launch()
             }
         } else {
             launch()
         }
+    }
+
+    /// Called for every line either filler manager relays. Only the manager's
+    /// own "failed task detected" report matters here — it fires when a stage
+    /// exits on its own; deliberate teardowns cancel the manager's monitor
+    /// first and never report. Runs on the main actor (the monitor is).
+    private func fillerStageReported(message: String, isFeeder: Bool) {
+        guard message.contains("failed task detected"), fillerEnabled else { return }
+
+        // A rebuild is already scheduled — it relaunches the feeder too.
+        // A bed failure arriving while only a feeder restart is pending upgrades
+        // it to a rebuild; that is the same incident (the feeder normally dies
+        // *because* the bed did), so it must not use up another attempt.
+        var isUpgrade = false
+        if fillerRestartTask != nil {
+            if isFeeder || fillerRestartIsFullRebuild { return }
+            fillerRestartTask?.cancel()
+            isUpgrade = true
+        }
+
+        if !isUpgrade {
+            if let started = fillerStartedAt, Date().timeIntervalSince(started) > Self.fillerStableSeconds {
+                fillerRestartAttempts = 0
+            }
+            guard fillerRestartAttempts < Self.fillerMaxAutoRestarts else {
+                giveUpOnFiller()
+                return
+            }
+            fillerRestartAttempts += 1
+        }
+        let delay = min(pow(2.0, Double(fillerRestartAttempts - 1)), 8.0)
+        LogStore.shared.log(.warning, source: "SDRController",
+                            "filler \(isFeeder ? "announcement feeder" : "pipeline") died; restarting in \(Int(delay)) s "
+                            + "(attempt \(fillerRestartAttempts) of \(Self.fillerMaxAutoRestarts))")
+
+        let generation = fillerGeneration
+        fillerRestartIsFullRebuild = !isFeeder
+        fillerRestartTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.fillerGeneration == generation else { return }
+            self.fillerRestartTask = nil
+            if isFeeder {
+                self.startFillerAnnouncementFeeder(generation: generation)
+            } else {
+                self.startFillerPipeline(announcePrefix: nil, keepGqrxStatus: self.fillerKeepGqrxStatus,
+                                         isAutoRestart: true)
+            }
+        }
+    }
+
+    /// The filler died repeatedly. Stop pretending: tear it down, drop out of
+    /// filler mode and record why, so Now Playing no longer claims "Filler".
+    private func giveUpOnFiller() {
+        fillerRestartTask?.cancel()
+        fillerRestartTask = nil
+        let failure = fillerPipelineManager.lastFailure ?? fillerAnnouncementManager.lastFailure
+        if fillerKeepGqrxStatus {
+            // The filler is riding along with an active Gqrx session: stop only
+            // the filler and leave the Gqrx status alone.
+            fillerGeneration &+= 1
+            fillerAnnouncementManager.terminate()
+            fillerPipelineManager.terminate()
+        } else {
+            terminateTasks(enterIdle: false)   // full stop: mode .stopped, status text reset
+            stationName = ""
+        }
+        let detail = failure.map { " (\($0.functionName) exited with status \($0.terminationStatus))" } ?? ""
+        lastError = SDRError.pipelineFailed("The filler audio failed \(Self.fillerMaxAutoRestarts) times in a row and was stopped\(detail).")
+        LogStore.shared.log(.error, source: "SDRController",
+                            "filler died \(Self.fillerMaxAutoRestarts) times in a row; giving up\(detail)")
     }
 
     /// Re-evaluates the filler after a Configuration change: (re)build it if it
@@ -2225,7 +2450,22 @@ final class SDRController {
             }
             if let announcement {
                 // Render the "Now playing …" clip the PCMPrefix stage will read.
-                await Self.renderAnnouncementClip(announcement)
+                // The plain clip and (when the delay is on) the longer
+                // states-the-delay clip render in parallel.
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        await Self.renderAnnouncementClip(text: announcement.text,
+                                                          voiceIdentifier: announcement.voiceIdentifier,
+                                                          clipURL: announcement.clipURL)
+                    }
+                    if let text = announcement.extendedText, let url = announcement.extendedClipURL {
+                        group.addTask {
+                            await Self.renderAnnouncementClip(text: text,
+                                                              voiceIdentifier: announcement.voiceIdentifier,
+                                                              clipURL: url)
+                        }
+                    }
+                }
                 guard !Task.isCancelled else { return }
             }
             do {
@@ -2487,11 +2727,10 @@ final class SDRController {
         if let stereoDemux { radioTaskPipelineManager.add(stereoDemux) }
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
-        if let announcement { radioTaskPipelineManager.add(announcement.stage) }
+        addAnnouncementAndDelayStages(announcement)
         addTranscriberStageIfEnabled()
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
-        addAudioDelayStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
         launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
@@ -2789,26 +3028,50 @@ final class SDRController {
                             "binaural panner on (azimuth \(azimuth)°, elevation \(elevation)°, distance \(spatialDistance)) — control udp:\(binauralControlPort)")
     }
 
-    /// Adds the optional `PCMDelay` stage as the last stage before the terminal
-    /// `PCMUDPSender`, after the spatial stages — the whole processed signal is
-    /// delayed, and nothing downstream is left to get ahead of it. No-op unless
-    /// enabled in Configuration and the helper binary is present. Launched with
-    /// the current `audioDelaySeconds` (which it plays as leading silence) and
-    /// this controller's fixed `audioDelayControlPort`, so a later slider drag
-    /// reaches this exact running instance without restarting the pipeline.
+    /// Adds the stages that follow the source: either the delay stage (which
+    /// then also carries the "now playing" announcement) or, with the delay
+    /// off, the plain `PCMPrefix` announcement stage.
+    ///
+    /// With the delay on, the announcement is played by `PCMDelay` itself at
+    /// the very start of the silent period, and the countdown waits for it —
+    /// so it is neither delayed by minutes (which made it easy to mistake for
+    /// the audio you're trying to sync) nor able to swallow countdown cues, and
+    /// it is skipped by the helper when the delay is too short to fit it.
+    private func addAnnouncementAndDelayStages(_ announcement: PreparedAnnouncement?) {
+        // Preference order for PCMDelay: the longer clip that states the delay,
+        // then the plain one — it plays the first that fits the silent period.
+        let clips = [announcement?.pending.extendedClipURL, announcement?.pending.clipURL].compactMap { $0 }
+        let delayAdded = addAudioDelayStageIfEnabled(announcementClipURLs: clips)
+        if !delayAdded, let announcement {
+            radioTaskPipelineManager.add(announcement.stage)
+        }
+    }
+
+    /// Adds the optional `PCMDelay` stage immediately before the transcriber
+    /// and spatial stages, so the transcriber cuts its captions from the same
+    /// delayed audio the listener hears and they stay aligned with it.
+    /// Returns whether the stage was added.
+    ///
+    /// No-op (returns false) unless enabled in Configuration and the helper
+    /// binary is present. Launched with the current `audioDelaySeconds` (which
+    /// it plays as leading silence, optionally with a countdown) and this
+    /// controller's fixed `audioDelayControlPort`, so a later slider drag or
+    /// button press reaches this exact running instance without restarting the
+    /// pipeline. `--adjust-beep` makes it chirp when a live change takes effect.
     ///
     /// The delay is counted in samples, so it relies on every source that
     /// feeds these pipelines already being real-time paced (rtl_fm, the
     /// capture device, the ControlBooth/Gqrx UDP relays, PCMFilePlayer and
     /// PCMSpeechSynth all are).
-    private func addAudioDelayStageIfEnabled() {
-        guard audioDelayEnabled else { return }
+    @discardableResult
+    private func addAudioDelayStageIfEnabled(announcementClipURLs: [URL] = []) -> Bool {
+        guard audioDelayEnabled else { return false }
 
         let path = helperPath("PCMDelay")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             LogStore.shared.log(.error, source: "SDRController",
                                 "PCMDelay helper missing at \(path) — audio delay disabled for this tuning")
-            return
+            return false
         }
 
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMDelay")
@@ -2816,12 +3079,26 @@ final class SDRController {
         item.addArgument("--channels"); item.addArgument(Self.outputChannels)
         item.addArgument("--delay"); item.addArgument("\(audioDelaySeconds)")
         item.addArgument("--max-delay"); item.addArgument("\(Self.maxAudioDelaySeconds)")
+        if audioDelayCountdownEnabled {
+            item.addArgument("--countdown"); item.addArgument("both")
+            // Same voice as the station announcement (override → default → Automatic).
+            if let voice = validatedAnnouncementVoiceIdentifier() {
+                item.addArgument("--countdown-voice"); item.addArgument(voice)
+            }
+        }
+        item.addArgument("--adjust-beep")
+        // The clip is rendered before the pipeline starts (see
+        // `launchCurrentPipeline`), so the file exists by the time PCMDelay reads it.
+        for clip in announcementClipURLs {
+            item.addArgument("--announce-file"); item.addArgument(clip.path)
+        }
         item.addArgument("--control-port"); item.addArgument(Int(audioDelayControlPort))
         item.addArgument("--exit-with-parent")
         radioTaskPipelineManager.add(item)
 
         LogStore.shared.log(.info, source: "SDRController",
-                            "audio delay on (\(audioDelaySeconds) s) — control udp:\(audioDelayControlPort)")
+                            "audio delay on (\(audioDelaySeconds) s\(audioDelayCountdownEnabled ? ", with countdown" : "")) — control udp:\(audioDelayControlPort)")
+        return true
     }
 
     /// Destination for the optional SRT transcript: `<station> <timestamp>.srt`

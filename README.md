@@ -1,6 +1,6 @@
 # AntennaHead
 
-A macOS app for software-defined radio (SDR) streaming. It tunes an RTL-SDR USB device, demodulates FM/AM/HD Radio signals, and streams audio to a web browser via a built-in HTTP/HTTPS server powered by [LiveAudioServer](https://github.com/dsward2/LiveAudioServer). The web UI (based on LocalRadio) runs on any device on the local network.
+A macOS app for software-defined radio (SDR) streaming. It tunes an RTL-SDR USB device, demodulates FM/AM/HD Radio signals, and streams audio to a web browser via a built-in HTTP/HTTPS server powered by [LiveAudioServer](https://github.com/dsward2/LiveAudioServer). The same interface shown in the app's AntennaHead tab (based on LocalRadio) is available in a browser on any device on the local network.
 
 **Project site & interactive web-UI demo:** <https://antennahead-app.github.io>
 
@@ -53,8 +53,8 @@ SPM dependencies are fetched automatically on first build. No `brew` or manual t
 
 | Service | Protocol | Default Port |
 |---|---|---|
-| AntennaHead web UI | HTTP | 8090 |
-| AntennaHead web UI | HTTPS | 8094 |
+| AntennaHead interface (browser access) | HTTP | 8090 |
+| AntennaHead interface (browser access) | HTTPS | 8094 |
 | LiveAudioServer stream | HTTP | 8080 |
 | LiveAudioServer stream | HTTPS | 8443 |
 | RTL-SDR status feed | UDP | 6021 |
@@ -69,7 +69,7 @@ Most ports are configurable from the **Configuration** tab → **Change Configur
 
 ## Features
 
-- **Web UI** — Full-featured LocalRadio-compatible web interface accessible from any browser on the LAN. Supports favorites, categories, frequency tuner, audio devices, and custom pipeline tasks.
+- **AntennaHead tab and browser access** — Full-featured LocalRadio-compatible interface, shown in the app's AntennaHead tab and also accessible from any browser on the LAN. Supports favorites, categories, frequency tuner, audio devices, and custom pipeline tasks.
 - **FM / AM / HD Radio** — Demodulates signals via `rtl_fm` and optional stereo demux helper.
 - **Audio devices** — Stream from any Core Audio input device as an audio source.
 - **Custom tasks** — Define arbitrary shell pipelines (via PipelineHelpers) as audio sources.
