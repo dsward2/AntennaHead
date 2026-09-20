@@ -23,6 +23,8 @@ struct ConfigurationView: View {
     @State private var gqrxAppPath = "/Applications/Gqrx.app"
     @State private var announcementEnabled = false
     @State private var announcementVoiceID = ""
+    @State private var speechDefaultVoiceID = ""
+    @State private var textToSpeechVoiceID = ""
     @State private var previewSynth = AVSpeechSynthesizer()
     @State private var transcriptionEnabled = false
     @State private var transcriptionLocale = "en-US"
@@ -49,6 +51,18 @@ struct ConfigurationView: View {
     /// picker. Only installed voices are returned, so the menu is self-limiting.
     private let installedVoices: [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices()
         .sorted { ($0.language, $0.name) < ($1.language, $1.name) }
+
+    /// "Automatic" menu label, naming the voice it would pick right now.
+    private var automaticVoiceLabel: String {
+        SpeechVoicePreference.automaticVoice().map { "Automatic \u{2014} \(voiceLabel($0))" }
+            ?? "Automatic \u{2014} built-in voice"
+    }
+
+    /// The voice a feature set to "Same as default voice" will actually use.
+    private var defaultVoiceName: String {
+        SpeechVoicePreference.effectiveVoice(overrideID: "", defaultID: speechDefaultVoiceID)
+            .map { voiceLabel($0) } ?? "built-in voice"
+    }
 
     private static let controlBoothEnabledKey = "AntennaHeadControlBoothEnabled"
     static let controlBoothPathKey = "AntennaHeadControlBoothAppPath"
@@ -86,10 +100,30 @@ struct ConfigurationView: View {
             }
 
             Section {
+                Picker("Default voice", selection: $speechDefaultVoiceID) {
+                    Text(automaticVoiceLabel).tag("")
+                    ForEach(installedVoices, id: \.identifier) { voice in
+                        Text(voiceLabel(voice)).tag(voice.identifier)
+                    }
+                }
+                .onChange(of: speechDefaultVoiceID) { _, _ in saveSpeechSettings() }
+                HStack {
+                    Button("Preview Voice") { previewDefaultVoice() }
+                    Spacer()
+                }
+            } header: {
+                Text("Speech")
+            } footer: {
+                Text("The voice AntennaHead speaks with. It is used by the \u{201C}Now playing\u{201D} announcement (and the spoken audio-delay countdown), the filler announcement, and the Text to Speech page \u{2014} unless one of those sections below chooses its own voice. \u{201C}Automatic\u{201D} picks the best voice installed for your language (Premium, then Enhanced). Premium and Enhanced voices are free downloads in System Settings \u{203A} Accessibility \u{203A} Spoken Content \u{203A} System Voice. A voice named inside the text itself, such as an SSML \u{201C}<voice name=\u{2026}>\u{201D} tag, overrides these settings; the modern voices read classic \u{201C}[[\u{2026}]]\u{201D} embedded commands aloud instead of obeying them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Announce the station before playback", isOn: $announcementEnabled)
                     .onChange(of: announcementEnabled) { _, _ in saveAnnouncementSettings() }
-                Picker("Voice", selection: $announcementVoiceID) {
-                    Text("System Default").tag("")
+                Picker("Announcement voice", selection: $announcementVoiceID) {
+                    Text("Same as default voice (\(defaultVoiceName))").tag("")
                     ForEach(installedVoices, id: \.identifier) { voice in
                         Text(voiceLabel(voice)).tag(voice.identifier)
                     }
@@ -104,7 +138,7 @@ struct ConfigurationView: View {
             } header: {
                 Text("Announcements")
             } footer: {
-                Text("When enabled, a synthesized voice says \u{201C}Now playing \u{2026}\u{201D} \u{2014} the station name, plus the frequency and band for a fixed tuning \u{2014} before a Favorite or category scan starts. Only voices installed on this Mac are listed; add more in System Settings \u{203A} Accessibility \u{203A} Spoken Content \u{203A} System Voice.")
+                Text("When enabled, a synthesized voice says \u{201C}Now playing \u{2026}\u{201D} \u{2014} the station name, plus the frequency and band for a fixed tuning \u{2014} before a Favorite or category scan starts. The same voice speaks the audio-delay countdown. Uses the default voice from the Speech section unless you choose one here.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -140,10 +174,21 @@ struct ConfigurationView: View {
                         Button("Choose Folder\u{2026}") { chooseTextToSpeechFolder() }
                     }
                 }
+                Picker("Voice", selection: $textToSpeechVoiceID) {
+                    Text("Same as default voice (\(defaultVoiceName))").tag("")
+                    ForEach(installedVoices, id: \.identifier) { voice in
+                        Text(voiceLabel(voice)).tag(voice.identifier)
+                    }
+                }
+                .onChange(of: textToSpeechVoiceID) { _, _ in saveSpeechSettings() }
+                HStack {
+                    Button("Preview Voice") { previewTextToSpeechVoice() }
+                    Spacer()
+                }
             } header: {
                 Text("Text to Speech")
             } footer: {
-                Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the AntennaHead tab (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac.")
+                Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the AntennaHead tab (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac. The files are read as plain text in the voice chosen here (default: the Speech section\u{2019}s voice); markup in them is spoken aloud, not interpreted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -251,8 +296,8 @@ struct ConfigurationView: View {
                 Toggle("Text is SSML markup (\u{201C}<speak>\u{2026}</speak>\u{201D})", isOn: $fillerAnnounceSSML)
                     .onChange(of: fillerAnnounceSSML) { _, _ in saveFillerAnnounceSettings() }
                     .disabled(!fillerAnnounceEnabled)
-                Picker("Voice", selection: $fillerAnnounceVoiceID) {
-                    Text("System Default").tag("")
+                Picker("Filler voice", selection: $fillerAnnounceVoiceID) {
+                    Text("Same as default voice (\(defaultVoiceName))").tag("")
                     ForEach(installedVoices, id: \.identifier) { voice in
                         Text(voiceLabel(voice)).tag(voice.identifier)
                     }
@@ -281,7 +326,7 @@ struct ConfigurationView: View {
             } header: {
                 Text("Filler Announcements")
             } footer: {
-                Text("While the filler is playing, a synthesized voice repeats this text, mixed over the filler with the bed ducked underneath it (\u{201C}PCMMixer\u{201D} on UDP port \(Int(sdrController.fillerMixerControlPort)); the spoken audio arrives on port \(Int(sdrController.fillerAnnouncePCMPort))). The interval is measured from the end of each spoken pass, so it drifts a second or two. No effect while a station, device, or other source is playing. Enable SSML to write \u{201C}<speak>\u{2026}</speak>\u{201D} prosody tags \u{2014} only the modern voices honor them; a classic voice reads the tags aloud.")
+                Text("While the filler is playing, a synthesized voice repeats this text, mixed over the filler with the bed ducked underneath it (\u{201C}PCMMixer\u{201D} on UDP port \(Int(sdrController.fillerMixerControlPort)); the spoken audio arrives on port \(Int(sdrController.fillerAnnouncePCMPort))). The interval is measured from the end of each spoken pass, so it drifts a second or two. No effect while a station, device, or other source is playing. Enable SSML to write \u{201C}<speak>\u{2026}</speak>\u{201D} prosody tags \u{2014} only the modern voices honor them; a classic voice reads the tags aloud. A \u{201C}<voice name=\u{2026}>\u{201D} tag inside the SSML overrides the voice chosen here.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -461,6 +506,8 @@ struct ConfigurationView: View {
         } else {
             announcementVoiceID = ""
         }
+        speechDefaultVoiceID = installedStoredVoice(forKey: SpeechVoicePreference.defaultVoiceKey)
+        textToSpeechVoiceID = installedStoredVoice(forKey: SpeechVoicePreference.textToSpeechVoiceKey)
         let transcribeEnabled = (try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionEnabledKey)) ?? nil
         transcriptionEnabled = transcribeEnabled == "1"
         let storedLocale = ((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.transcriptionLocaleKey)) ?? nil) ?? ""
@@ -544,6 +591,37 @@ struct ConfigurationView: View {
             announcementVoiceID, forKey: SDRController.announcementVoiceKey)
     }
 
+    /// A saved voice identifier, or "" (picker value for "same as default" /
+    /// Automatic) when none is saved or it is no longer installed.
+    private func installedStoredVoice(forKey key: String) -> String {
+        let stored = ((try? SQLiteController.shared.appSettingsValue(forKey: key)) ?? nil) ?? ""
+        return SpeechVoicePreference.installedVoice(stored) != nil ? stored : ""
+    }
+
+    private func saveSpeechSettings() {
+        try? SQLiteController.shared.storeAppSettingsValue(
+            speechDefaultVoiceID, forKey: SpeechVoicePreference.defaultVoiceKey)
+        try? SQLiteController.shared.storeAppSettingsValue(
+            textToSpeechVoiceID, forKey: SpeechVoicePreference.textToSpeechVoiceKey)
+    }
+
+    /// Speaks `text` in the voice a feature would use given its picker value.
+    private func previewSpeech(_ text: String, overrideID: String) {
+        previewSynth.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = SpeechVoicePreference.effectiveVoice(overrideID: overrideID,
+                                                               defaultID: speechDefaultVoiceID)
+        previewSynth.speak(utterance)
+    }
+
+    private func previewDefaultVoice() {
+        previewSpeech("Welcome to AntennaHead. Software defined radio.", overrideID: "")
+    }
+
+    private func previewTextToSpeechVoice() {
+        previewSpeech("This is how the Text to Speech page will sound.", overrideID: textToSpeechVoiceID)
+    }
+
     private func saveTranscriptionSettings() {
         let locale = transcriptionLocale.trimmingCharacters(in: .whitespaces)
         if locale.isEmpty { transcriptionLocale = "en-US" }
@@ -601,9 +679,8 @@ struct ConfigurationView: View {
         } else {
             utterance = AVSpeechUtterance(string: text)
         }
-        if !fillerAnnounceVoiceID.isEmpty {
-            utterance.voice = AVSpeechSynthesisVoice(identifier: fillerAnnounceVoiceID)
-        }
+        utterance.voice = SpeechVoicePreference.effectiveVoice(overrideID: fillerAnnounceVoiceID,
+                                                               defaultID: speechDefaultVoiceID)
         utterance.rate = Float(fillerAnnounceSpeechRate)
         previewSynth.speak(utterance)
     }
@@ -619,12 +696,7 @@ struct ConfigurationView: View {
     }
 
     private func previewAnnouncementVoice() {
-        previewSynth.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: "Now playing K U A R. 89.1 F M.")
-        if !announcementVoiceID.isEmpty {
-            utterance.voice = AVSpeechSynthesisVoice(identifier: announcementVoiceID)
-        }
-        previewSynth.speak(utterance)
+        previewSpeech("Now playing K U A R. 89.1 F M.", overrideID: announcementVoiceID)
     }
 
     private func chooseControlBoothApp() {

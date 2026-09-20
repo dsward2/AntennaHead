@@ -318,7 +318,8 @@ final class SDRController {
 
     /// App-settings keys for the optional voice that says "Now playing …" before
     /// a tuning starts. Read fresh each time a pipeline is built, and edited in
-    /// the Configuration view.
+    /// the Configuration view. `announcementVoiceKey` is an *override*: empty
+    /// means "same as the default voice" (see `SpeechVoicePreference`).
     static let announcementEnabledKey = "AntennaHeadAnnouncementEnabled"
     static let announcementVoiceKey = "AntennaHeadAnnouncementVoiceIdentifier"
 
@@ -471,12 +472,12 @@ final class SDRController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stored.isEmpty ? Self.defaultFillerAnnounceText : stored
     }
-    /// The configured announcement voice, but only if still installed —
-    /// `PCMSpeechSynth` aborts on an unknown identifier. `nil` ⇒ system default.
+    /// The voice for the filler announcement: its own override, else the default
+    /// voice, else Automatic (see `SpeechVoicePreference`). Always an installed
+    /// voice when any better-than-built-in voice exists.
     var fillerAnnounceVoiceIdentifier: String? {
-        guard let id = ((try? sqliteController.appSettingsValue(forKey: Self.fillerAnnounceVoiceKey)) ?? nil),
-              !id.isEmpty else { return nil }
-        return AVSpeechSynthesisVoice(identifier: id) != nil ? id : nil
+        SpeechVoicePreference.resolvedIdentifier(overrideKey: Self.fillerAnnounceVoiceKey,
+                                                 sqlite: sqliteController)
     }
     /// Announcement interval in seconds. Clamped 15…600, default 60.
     var fillerAnnouncePeriodSeconds: Int {
@@ -1554,6 +1555,12 @@ final class SDRController {
         let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMSpeechSynth")
         item.addArgument("--input"); item.addArgument("file:\(textFileURL.path)")
         item.addArgument("--rate"); item.addArgument(Self.speechSynthSampleRate)
+        // Without --voice the helper would use the built-in default (compact
+        // Samantha) and ignore the Speech settings entirely.
+        if let voice = SpeechVoicePreference.resolvedIdentifier(
+            overrideKey: SpeechVoicePreference.textToSpeechVoiceKey, sqlite: sqliteController) {
+            item.addArgument("--voice"); item.addArgument(voice)
+        }
         if repeatForever {
             item.addArgument("--repeat")
             item.addArgument("--gap"); item.addArgument(2)
@@ -1658,16 +1665,13 @@ final class SDRController {
         return item
     }
 
-    /// The configured announcement voice, but only if the system still has it —
-    /// PCMSpeechSynth aborts on an unknown identifier, so an uninstalled voice
-    /// falls back to the system default (nil).
+    /// The voice for the "Now playing" announcement (and the audio-delay
+    /// countdown, which speaks in the same voice): its own override, else the
+    /// default voice, else Automatic (see `SpeechVoicePreference`). An
+    /// uninstalled saved voice falls through rather than aborting PCMSpeechSynth.
     private func validatedAnnouncementVoiceIdentifier() -> String? {
-        guard let id = (try? sqliteController.appSettingsValue(forKey: Self.announcementVoiceKey)) ?? nil,
-              !id.isEmpty else { return nil }
-        if AVSpeechSynthesisVoice(identifier: id) != nil { return id }
-        LogStore.shared.log(.info, source: "SDRController",
-                            "announcement: saved voice '\(id)' is unavailable; using the system default")
-        return nil
+        SpeechVoicePreference.resolvedIdentifier(overrideKey: Self.announcementVoiceKey,
+                                                 sqlite: sqliteController)
     }
 
     private func cleanUpAnnouncementClip() {
@@ -2935,7 +2939,7 @@ final class SDRController {
         item.addArgument("--max-delay"); item.addArgument("\(Self.maxAudioDelaySeconds)")
         if audioDelayCountdownEnabled {
             item.addArgument("--countdown"); item.addArgument("both")
-            // Same voice as the station announcement, when one is chosen.
+            // Same voice as the station announcement (override → default → Automatic).
             if let voice = validatedAnnouncementVoiceIdentifier() {
                 item.addArgument("--countdown-voice"); item.addArgument(voice)
             }
