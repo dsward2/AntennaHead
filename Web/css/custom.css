@@ -974,6 +974,16 @@ svg.lr-animation {
     padding: 10px;
     box-sizing: border-box;
 }
+/* Dark mode: invert the whole scene (line art and title text go white, the white card goes
+   black; hue-rotate keeps the blue links/clefs blue), and give the five embedded photos a
+   second inversion so they come out in their original colours. Same trick as the project
+   site. The url(#ah-invert) filter is defined in info.html. */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) svg.lr-animation { filter: invert(1) hue-rotate(180deg); }
+    :root:not([data-theme="light"]) svg.lr-animation image { filter: url(#ah-invert); }
+}
+:root[data-theme="dark"] svg.lr-animation { filter: invert(1) hue-rotate(180deg); }
+:root[data-theme="dark"] svg.lr-animation image { filter: url(#ah-invert); }
 
 /* ---- Live Captions page (captions.html) -----------------------------------
    Fed by /captions.json (SDRController.TranscriptionCaptionListener, which

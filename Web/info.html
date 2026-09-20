@@ -6,6 +6,10 @@
         <section class="header">
             <h3 class="title">AntennaHead Info</h3>
             
+            <!-- Native SVG filter (== CSS invert(1) hue-rotate(180deg)) used by custom.css to
+                 give the animation's embedded photos a second inversion in dark mode. A CSS
+                 filter *function* on SVG children is ignored by WebKit; url(#...) is not. -->
+            <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="ah-invert" color-interpolation-filters="sRGB" x="0" y="0" width="100%" height="100%"><feColorMatrix type="matrix" values="0.574 -1.43 -0.144 0 1 -0.426 -0.43 -0.144 0 1 -0.426 -1.43 0.856 0 1 0 0 0 1 0"/></filter></svg>
             %%LOCALRADIO_ANIMATION%%
             <br><br>
             
