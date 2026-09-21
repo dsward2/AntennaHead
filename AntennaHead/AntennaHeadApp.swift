@@ -46,6 +46,10 @@ struct AntennaHeadApp: App {
                 AboutWindowCommand()
             }
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .importExport) {
+                ShareImportWindowCommand()
+                ShareExportWindowCommand()
+            }
             // The main window has a close button but no ⌘N; without this the
             // window can't be brought back once closed.
             CommandGroup(after: .windowList) {
@@ -78,6 +82,16 @@ struct AntennaHeadApp: App {
             LogViewerView()
         }
         .defaultSize(width: 800, height: 500)
+
+        Window("Export Tuning Data", id: "share-export") {
+            ShareExportView()
+        }
+        .defaultSize(width: 760, height: 620)
+
+        Window("Import Tuning Data", id: "share-import") {
+            ShareImportView()
+        }
+        .defaultSize(width: 720, height: 620)
     }
 }
 
@@ -110,6 +124,26 @@ struct FCCSearchWindowCommand: View {
             openWindow(id: "fcc-search")
         }
         .keyboardShortcut("f", modifiers: [.command, .shift])
+    }
+}
+
+struct ShareImportWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Import Tuning Data…") {
+            openWindow(id: "share-import")
+        }
+    }
+}
+
+struct ShareExportWindowCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Export Tuning Data…") {
+            openWindow(id: "share-export")
+        }
     }
 }
 
