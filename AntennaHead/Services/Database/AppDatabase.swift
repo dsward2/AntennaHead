@@ -42,6 +42,17 @@ final class AppDatabase {
                 }
             }
         }
+        m.registerMigration("v4_add_rss_feed_table") { db in
+            if try !db.tableExists("rss_feed") {
+                try db.create(table: "rss_feed") { t in
+                    t.autoIncrementedPrimaryKey("id")
+                    t.column("name", .text).notNull().defaults(to: "")
+                    t.column("feed_url", .text).notNull().defaults(to: "")
+                    t.column("voice_identifier", .text).notNull().defaults(to: "")
+                    t.column("read_mode", .text).notNull().defaults(to: RSSFeed.ReadMode.titleOnly)
+                }
+            }
+        }
         return m
     }
 

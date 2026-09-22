@@ -2042,6 +2042,146 @@ function playAudioFilesListenButtonClicked(form)
 }
 
 
+// ---- Speak RSS Headlines (Audio Devices page) ---------------------------
+//
+// Feed subscriptions are managed right on this page (add/edit/delete/import),
+// not in Configuration — a subscription list is structured data, not a
+// Mac-only folder choice. rssFeedsTableHTML() (server-side) renders one
+// checkbox per feed, checked by default, each linking to editrssfeed.html.
+// Listen sends the checked feed ids plus the reading options; the server
+// fetches those feeds live, renders each headline to its own speech clip,
+// and plays them in order.
+
+function storeRSSFeedRecord(form)
+{
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var storeUrl = baseUrl + "storerssfeed.html";
+
+  sendHTTPPostRequest("rss_feed", storeUrl, jsonData, 1, false, true);
+
+  return false;
+}
+
+function deleteRSSFeedRecord(form)
+{
+  var formArray = $(form).serializeArray();
+  var jsonData = JSON.stringify(formArray);
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var deleteUrl = baseUrl + "deleterssfeed.html";
+
+  var feedName = form.name.value;
+  var r = confirm("Delete \"" + feedName + "\" feed?");
+  if (r != true) return;
+
+  sendHTTPPostRequest("rss_feed", deleteUrl, jsonData, 3, false, false);
+
+  window.topButtonClicked(self);
+}
+
+function addRSSFeedRecord(form)
+{
+  var newFeedURL = form.feed_url.value;
+
+  if (newFeedURL > "")
+  {
+    var formArray = $(form).serializeArray();
+    var jsonData = JSON.stringify(formArray);
+
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var addUrl = baseUrl + "addrssfeed.html";
+
+    sendHTTPPostRequest("rss_feed", addUrl, jsonData, 1, false, true);
+  }
+  else
+  {
+    alert("Feed URL is required.");
+  }
+
+  return false;
+}
+
+// "Import OPML…" triggers the hidden file input; this fires on its change
+// event. Reads the file client-side (FileReader), so this works from any
+// browser hitting AntennaHead, not just the host Mac — unlike the Text to
+// Speech/Play Audio Files folder, an OPML file is just bytes to hand over,
+// not a Mac-local path.
+function importOPMLFeeds(fileInput)
+{
+  var file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var importUrl = baseUrl + "importopmlfeeds.html";
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        var result = JSON.parse(this.responseText);
+        alert(result.imported + " feed(s) imported.");
+        window.topButtonClicked(self);
+      }
+    };
+    xhttp.open("POST", importUrl, true);
+    xhttp.setRequestHeader("Content-Type", "application/json");
+    xhttp.send(JSON.stringify({opml: e.target.result}));
+  };
+  reader.readAsText(file);
+}
+
+// Shows/hides the two co-anchor voice pickers based on the Voice <select>.
+function rssVoiceModeChanged(select)
+{
+  var wrapper = document.getElementById("rss_alternate_voices");
+  if (wrapper) wrapper.style.display = (select.value == "alternate") ? "block" : "none";
+}
+
+function speakRSSHeadlinesListenButtonClicked(form)
+{
+  var feedCheckboxes = form.querySelectorAll(".rss-feed-checkbox:checked");
+  var feedIDs = Array.prototype.map.call(feedCheckboxes, function(checkbox) {
+    return checkbox.value;
+  });
+  var payload = {
+    feeds: feedIDs,
+    items_per_feed: form.querySelector("#rss_items_per_feed").value,
+    voice_mode: form.querySelector("#rss_voice_mode").value,
+    voice_a: form.querySelector("#rss_voice_a").value,
+    voice_b: form.querySelector("#rss_voice_b").value,
+    repeat: (form.querySelector("#rss_repeat").checked) ? "1" : "0"
+  };
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "speakrssheadlineslistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        // response received ok
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.setRequestHeader("Content-Type", "application/json");
+  xhttp.send(JSON.stringify(payload));
+
+  // handle the audio tag with the new source
+  showUpNextInNavBar();
+
+  window.top.postMessage("startaudio", "*");
+}
+
+
 /* ==================================================================
    Tap / click acknowledgement.
 

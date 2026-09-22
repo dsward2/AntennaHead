@@ -166,6 +166,40 @@ final class SQLiteController {
         try dbQueue.write { db in _ = try CustomTask.deleteOne(db, key: id) }
     }
 
+    // MARK: RSS Feed
+
+    func allRSSFeedRecords() throws -> [RSSFeed] {
+        try dbQueue.read { db in
+            try RSSFeed.order(Column("id")).fetchAll(db)
+        }
+    }
+
+    func rssFeedRecord(forID id: Int64) throws -> RSSFeed? {
+        try dbQueue.read { db in try RSSFeed.fetchOne(db, key: id) }
+    }
+
+    func rssFeedRecord(forURL url: String) throws -> RSSFeed? {
+        try dbQueue.read { db in
+            try RSSFeed.filter(Column("feed_url") == url).fetchOne(db)
+        }
+    }
+
+    @discardableResult
+    func insertRSSFeedRecord(_ record: inout RSSFeed) throws -> Int64 {
+        try dbQueue.write { db in
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
+        }
+    }
+
+    func updateRSSFeedRecord(_ record: RSSFeed) throws {
+        try dbQueue.write { db in try record.update(db) }
+    }
+
+    func deleteRSSFeedRecord(forID id: Int64) throws {
+        try dbQueue.write { db in _ = try RSSFeed.deleteOne(db, key: id) }
+    }
+
     // MARK: App config (app_config)
 
     func appSettingsValue(forKey key: String) throws -> String? {

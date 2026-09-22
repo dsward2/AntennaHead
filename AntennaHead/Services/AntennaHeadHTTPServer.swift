@@ -595,6 +595,41 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "deviceplayaudiofiles.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["PLAY_AUDIO_FILES_FORM": playAudioFilesFormHTML()])
 
+        case "/devicespeakrssheadlines.html":
+            return renderHTML(relativePath: "devicespeakrssheadlines.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["SPEAK_RSS_HEADLINES_FORM": speakRSSHeadlinesFormHTML()])
+
+        case "/editrssfeed.html":
+            var name = ""
+            var item = "Error: missing feed id"
+            if let idString = queryValue("id", in: request.path), let id = Int64(idString) {
+                (name, item) = editRSSFeed(id: id)
+            }
+            return renderHTML(relativePath: "editrssfeed.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["EDIT_RSS_FEED_NAME": htmlText(name), "EDIT_RSS_FEED": item])
+
+        case "/addrssfeedform.html":
+            return renderHTML(relativePath: "addrssfeedform.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["ADD_RSS_FEED_FORM": addRSSFeedFormHTML()])
+
+        case "/addrssfeed.html":
+            insertNewRSSFeed(fromBody: request.body)
+            return okResponse()
+
+        case "/storerssfeed.html":
+            saveRSSFeed(fromBody: request.body)
+            return okResponse()
+
+        case "/deleterssfeed.html":
+            deleteRSSFeed(fromBody: request.body)
+            return okResponse()
+
+        case "/importopmlfeeds.html":
+            let count = importOPMLFeeds(fromBody: request.body)
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json"],
+                                body: Data("{\"imported\":\(count)}".utf8))
+
         case "/devicelistenbuttonclicked.html":
             // Buttons are wired; the Core Audio device-input pipeline is deferred
             // (needs a capture helper), so this currently logs .notImplemented.
@@ -707,6 +742,40 @@ final class AntennaHeadHTTPServer {
                 let paSelectedNames = po.stringArray("files").map(Set.init)
                 sdrController?.startPlayAudioFiles(files: playAudioFilesFolderFiles(selectedNames: paSelectedNames),
                                                   sequence: paSequence, repeatForever: paRepeatForever)
+            }
+            return okResponse()
+
+        case "/speakrssheadlineslistenbuttonclicked.html":
+            // Body: {feeds:[id,…], items_per_feed, voice_mode:"per_feed"|"alternate",
+            // voice_a, voice_b, repeat}. Unlike Text to Speech/Play Audio Files,
+            // there's live network + rendering work before anything can play,
+            // so this route is async: fetch each checked feed, take its newest
+            // `items_per_feed` items (see `speakRSSHeadlinesClips`), render each
+            // headline to its own speech clip (see `SDRController.renderSpeechClips`),
+            // then hand the ordered clips to the same `startPlayAudioFiles`
+            // pipeline Play Audio Files uses.
+            let ro = jsonObject(fromBody: request.body)
+            let feedIDs = (ro.stringArray("feeds") ?? []).compactMap { Int64($0) }
+            let itemsPerFeed = max(1, Int(ro.string("items_per_feed")) ?? 5)
+            let alternateVoices = ro.string("voice_mode") == "alternate"
+            let voiceA = ro.string("voice_a")
+            let voiceB = ro.string("voice_b")
+            let rssRepeatForever = (ro["repeat"] as? String) == "1"
+            let clips = await speakRSSHeadlinesClips(feedIDs: feedIDs, itemsPerFeed: itemsPerFeed,
+                                                     alternate: alternateVoices, voiceA: voiceA, voiceB: voiceB)
+            let renderedFiles = await sdrController?.renderSpeechClips(clips) ?? []
+            // Only start (and thereby stop whatever's currently playing) once
+            // there's actually something to play. This route is async — a
+            // feed fetch can be slow or fail well after the user has moved on
+            // to something else — so an empty result here must be a no-op,
+            // not a call to `startPlayAudioFiles` that would silently
+            // terminate an unrelated, since-started pipeline out from under
+            // the user (Play Audio Files/Text to Speech never hit this case
+            // since their own routes resolve synchronously in direct
+            // response to the click that produced them).
+            if !renderedFiles.isEmpty {
+                sdrController?.startPlayAudioFiles(files: renderedFiles, sequence: .asListed, repeatForever: rssRepeatForever,
+                                                  statusLabel: "Speak RSS Headlines")
             }
             return okResponse()
 
@@ -2123,6 +2192,266 @@ final class AntennaHeadHTTPServer {
         return files
     }
 
+    // MARK: Speak RSS Headlines
+
+    /// `%%SPEAK_RSS_HEADLINES_FORM%%` — one combined block, same shape as
+    /// `playAudioFilesFormHTML()`: a checkbox list (here, of subscribed
+    /// feeds, via `rssFeedsTableHTML()`) plus Add/Import buttons, then the
+    /// Listen controls (items per feed, voice mode, repeat), then Listen
+    /// itself. Feed management (add/edit/delete/import) lives on this page —
+    /// not Configuration — since a subscription list is structured data, not
+    /// a Mac-only folder choice.
+    @MainActor private func speakRSSHeadlinesFormHTML() -> String {
+        var s = "<form class='speak_rss_headlines_form' id='speakRSSHeadlinesForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label>Speak RSS Headlines</label>"
+        s += "<p>Read the latest headlines from your subscribed feeds through the live audio pipeline "
+        s += "(<code>PCMSpeechSynth</code> renders each headline, <code>PCMFilePlayer</code> plays them in turn).</p>"
+        s += rssFeedsTableHTML()
+        s += "<label for='rss_items_per_feed' title='How many of each checked feed\u{2019}s newest items to read.'>Items per feed</label>"
+        s += "<input class='u-full-width' type='number' id='rss_items_per_feed' name='rss_items_per_feed' value='5' min='1' max='20'>"
+        s += "<label for='rss_voice_mode'>Voice</label>"
+        s += "<select id='rss_voice_mode' name='rss_voice_mode' class='u-full-width' onchange='rssVoiceModeChanged(this);' "
+        s += "title='Per feed uses each feed\u{2019}s own assigned voice (Configuration default when unset). Alternate switches between two voices item by item, like a pair of co-anchors.'>"
+        s += "<option value='per_feed'>Use each feed's own voice</option>"
+        s += "<option value='alternate'>Alternate between two voices (co-anchors)</option>"
+        s += "</select>"
+        s += "<div id='rss_alternate_voices' style='display:none;'>"
+        s += "<label for='rss_voice_a'>Voice A</label>"
+        s += installedVoicesSelectOptionsHTML(selectID: "rss_voice_a")
+        s += "<label for='rss_voice_b'>Voice B</label>"
+        s += installedVoicesSelectOptionsHTML(selectID: "rss_voice_b")
+        s += "</div>"
+        s += "<label for='rss_repeat' title='Loop through the same batch of headlines continuously until you play something else.'>"
+        s += "<input type='checkbox' id='rss_repeat' name='rss_repeat' value='1'> Repeat indefinitely</label>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"speakRSSHeadlinesListenButtonClicked(getElementById('speakRSSHeadlinesForm'));\" "
+        s += "title='Fetch the checked feeds and read their newest headlines through the live audio pipeline.'>"
+        s += "</form><br>&nbsp;<br>"
+        return s
+    }
+
+    /// Subscribed feeds, one checkbox row each (checked by default — same
+    /// convention as Play Audio Files' file list, no separate persistent
+    /// "enabled" flag), each name linking to `editrssfeed.html?id=N`, plus
+    /// Add New Feed and Import OPML buttons.
+    @MainActor private func rssFeedsTableHTML() -> String {
+        let feeds = (try? sqlite?.allRSSFeedRecords()) ?? []
+        var rows = ""
+        for feed in feeds {
+            guard let id = feed.id else { continue }
+            rows += "<tr><td><input type='checkbox' class='rss-feed-checkbox' id='rss-feed-\(id)' value='\(id)' checked></td>"
+            rows += "<td><label for='rss-feed-\(id)'>"
+            rows += "<a onclick=\"loadContent('editrssfeed.html?id=\(id)');\">\(htmlText(feed.name))</a></label></td>"
+            rows += "<td>\(htmlText(feed.feedURL))</td></tr>"
+        }
+        var s = "<div class='scrolling-file-list'>"
+        s += "<table class='u-full-width'>"
+        s += "<thead><tr><th></th><th>Name</th><th>Feed URL</th></tr></thead>"
+        s += feeds.isEmpty
+            ? "<tbody><tr><td colspan='3'>No feeds yet — add one, or import an OPML subscription list.</td></tr></tbody>"
+            : "<tbody>\(rows)</tbody>"
+        s += "</table></div>"
+        s += "<div class='tts-select-actions'>"
+        s += "<input class='button' type='button' value='Add New Feed' onclick=\"loadContent('addrssfeedform.html');\">"
+        s += "<input class='button' type='button' value='Import OPML\u{2026}' onclick=\"getElementById('rss_opml_file').click();\">"
+        s += "<input type='file' id='rss_opml_file' accept='.opml,.xml,text/xml' style='display:none;' onchange='importOPMLFeeds(this);'>"
+        s += "</div><br>&nbsp;<br>"
+        return s
+    }
+
+    /// `<select>` of installed system voices — mirrors `ConfigurationView`'s
+    /// `voiceLabel()` formatting (`"name — language (quality)"`). Used for
+    /// both the per-feed voice picker (`editRSSFeed`) and the two co-anchor
+    /// voice pickers on the Listen form. `""` always means "use the default
+    /// voice" (resolved via `SpeechVoicePreference`, same as an unset
+    /// per-feature override elsewhere in this app).
+    @MainActor private func installedVoicesSelectOptionsHTML(selectID: String, selectedIdentifier: String = "") -> String {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+            .sorted { ($0.language, $0.name) < ($1.language, $1.name) }
+        var s = "<select id='\(selectID)' name='\(selectID)' class='u-full-width'>"
+        s += "<option value=''\(selectedIdentifier.isEmpty ? " selected" : "")>Default voice</option>"
+        for voice in voices {
+            let quality: String
+            switch voice.quality {
+            case .enhanced: quality = " (Enhanced)"
+            case .premium: quality = " (Premium)"
+            default: quality = ""
+            }
+            let selected = voice.identifier == selectedIdentifier ? " selected" : ""
+            s += "<option value='\(htmlAttribute(voice.identifier))'\(selected)>\(htmlText("\(voice.name) — \(voice.language)\(quality)"))</option>"
+        }
+        s += "</select>"
+        return s
+    }
+
+    /// `%%EDIT_RSS_FEED_NAME%%` + `%%EDIT_RSS_FEED%%` — mirrors `editFavorite`'s
+    /// shape. Save posts to `storerssfeed.html`, Delete to `deleterssfeed.html`.
+    @MainActor private func editRSSFeed(id: Int64) -> (name: String, item: String) {
+        guard let feed = (try? sqlite?.rssFeedRecord(forID: id)) ?? nil else {
+            return ("", "Error getting feed id = \(id)")
+        }
+
+        func text(_ label: String, _ name: String, _ value: String) -> String {
+            "<label>\(label)<input class='u-full-width' type='text' \(Self.verbatimInputAttributes) "
+                + "name='\(name)' value='\(htmlAttribute(value))'></label>"
+        }
+        func select(_ label: String, _ name: String, _ current: String, _ options: [(value: String, label: String)]) -> String {
+            var s = "<label>\(label)<select class='u-full-width' name='\(name)'>"
+            for opt in options {
+                let selected = opt.value == current ? " selected" : ""
+                s += "<option value='\(htmlAttribute(opt.value))'\(selected)>\(htmlText(opt.label))</option>"
+            }
+            s += "</select></label>"
+            return s
+        }
+
+        var s = "<form id='editRSSFeedForm' onsubmit=\"event.preventDefault(); return storeRSSFeedRecord(this);\" method='POST'>"
+        s += "<input type='hidden' name='id' value='\(id)'>"
+        s += text("Name", "name", feed.name)
+        s += text("Feed URL", "feed_url", feed.feedURL)
+        s += "<label>Voice\(installedVoicesSelectOptionsHTML(selectID: "voice_identifier", selectedIdentifier: feed.voiceIdentifier))</label>"
+        s += select("Read Mode", "read_mode", feed.readMode,
+                    [(RSSFeed.ReadMode.titleOnly, "Title only"), (RSSFeed.ReadMode.titleAndSummary, "Title + summary")])
+        s += "<br><br>"
+        s += "<input class='button button-primary' type='submit' value='Save'>"
+        s += " <input class='button' type='button' value='Delete' onclick='deleteRSSFeedRecord(this.form);'>"
+        s += "</form>"
+        return (feed.name, s)
+    }
+
+    /// `%%ADD_RSS_FEED_FORM%%` — minimal add form (name + URL only, like
+    /// `addcategoryform.html`); voice and read mode default and can be set
+    /// afterward via Edit.
+    @MainActor private func addRSSFeedFormHTML() -> String {
+        var s = "<form id='addRSSFeedForm' onsubmit=\"event.preventDefault(); return addRSSFeedRecord(this);\" method='POST'>"
+        s += "<label for='rss_new_name'>Name<input class='u-full-width' type='text' id='rss_new_name' name='name' value='' placeholder='Feed name'></label>"
+        s += "<label for='rss_new_url'>Feed URL<input class='u-full-width' type='text' id='rss_new_url' name='feed_url' value='' placeholder='https://\u{2026}/rss'></label>"
+        s += "<input class='twelve columns button button-primary' type='submit' value='Add New Feed'>"
+        s += "</form>"
+        return s
+    }
+
+    /// Applies a posted add form (see `addRSSFeedFormHTML`) as a new
+    /// `rss_feed` record. Blank name/URL falls back to the record's own
+    /// defaults (`RSSFeed.prototype()`), same as `insertNewFrequency`.
+    @MainActor private func insertNewRSSFeed(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        var feed = RSSFeed.prototype()
+        if let v = fields["name"], !v.isEmpty { feed.name = v }
+        if let v = fields["feed_url"] { feed.feedURL = v }
+        try? sqlite?.insertRSSFeedRecord(&feed)
+    }
+
+    /// Applies a posted edit form (see `editRSSFeed`) to the matching
+    /// `rss_feed` record.
+    @MainActor private func saveRSSFeed(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        guard let idString = fields["id"], let id = Int64(idString),
+              var record = (try? sqlite?.rssFeedRecord(forID: id)) ?? nil else { return }
+
+        if let v = fields["name"] { record.name = v }
+        if let v = fields["feed_url"] { record.feedURL = v }
+        if let v = fields["voice_identifier"] { record.voiceIdentifier = v }
+        if let v = fields["read_mode"] { record.readMode = v }
+
+        try? sqlite?.updateRSSFeedRecord(record)
+    }
+
+    /// Deletes the `rss_feed` record identified by the posted form's `id`.
+    @MainActor private func deleteRSSFeed(fromBody body: Data) {
+        let fields = formFields(fromBody: body)
+        if let idString = fields["id"], let id = Int64(idString) {
+            try? sqlite?.deleteRSSFeedRecord(forID: id)
+        }
+    }
+
+    /// `/importopmlfeeds.html` — body is `{opml: "<xml text>"}` (the OPML
+    /// file's contents, read client-side via `FileReader` in
+    /// `importOPMLFeeds()` so this works from any browser hitting
+    /// AntennaHead, not just the host Mac). Inserts a new feed for every
+    /// `<outline xmlUrl=…>` whose URL isn't already subscribed; returns the
+    /// number actually inserted.
+    @MainActor private func importOPMLFeeds(fromBody body: Data) -> Int {
+        let o = jsonObject(fromBody: body)
+        let opmlText = o.string("opml")
+        guard !opmlText.isEmpty, let data = opmlText.data(using: .utf8) else { return 0 }
+        var imported = 0
+        for entry in RSSFeedService.parseOPML(data) {
+            guard !entry.url.isEmpty,
+                  ((try? sqlite?.rssFeedRecord(forURL: entry.url)) ?? nil) == nil else { continue }
+            var feed = RSSFeed.prototype(name: entry.name)
+            feed.feedURL = entry.url
+            if (try? sqlite?.insertRSSFeedRecord(&feed)) != nil { imported += 1 }
+        }
+        return imported
+    }
+
+    /// The identifier to pass `PCMSpeechSynth --voice` for a stored per-feed
+    /// (or co-anchor) voice value: the value itself when non-empty and still
+    /// installed, otherwise the app's default/Automatic voice via
+    /// `SpeechVoicePreference` (same fallback chain every other spoken
+    /// feature in this app uses).
+    @MainActor private func resolvedFeedVoice(_ stored: String) -> String? {
+        if !stored.isEmpty, SpeechVoicePreference.installedVoice(stored) != nil { return stored }
+        guard let sqlite else { return SpeechVoicePreference.automaticVoice()?.identifier }
+        return SpeechVoicePreference.resolvedIdentifier(overrideKey: nil, sqlite: sqlite)
+    }
+
+    /// Fetches each checked feed live and builds the ordered `(text, voice)`
+    /// list `SDRController.renderSpeechClips` turns into speech clips:
+    /// grouped by feed in the order `feedIDs` lists them, newest items first
+    /// within a feed (`RSSFeedService.fetchItems` already sorts that way). A
+    /// short "From {feed name}." lead-in is spoken whenever a feed's items
+    /// start, but only when more than one feed is selected — with just one
+    /// feed there's nothing to disambiguate. In alternating mode every clip
+    /// (lead-ins included) alternates Voice A/Voice B by its position in this
+    /// list; otherwise each clip uses its feed's own assigned voice.
+    @MainActor private func speakRSSHeadlinesClips(
+        feedIDs: [Int64], itemsPerFeed: Int, alternate: Bool, voiceA: String, voiceB: String
+    ) async -> [(text: String, voiceIdentifier: String?)] {
+        let feeds = feedIDs.compactMap { id in (try? sqlite?.rssFeedRecord(forID: id)) ?? nil }
+        guard !feeds.isEmpty else { return [] }
+
+        let resolvedA = resolvedFeedVoice(voiceA)
+        let resolvedB = resolvedFeedVoice(voiceB)
+        let multipleFeeds = feeds.count > 1
+
+        var clips: [(text: String, voiceIdentifier: String?)] = []
+        func nextVoice(perFeed: String) -> String? {
+            alternate ? (clips.count % 2 == 0 ? resolvedA : resolvedB) : resolvedFeedVoice(perFeed)
+        }
+
+        for feed in feeds {
+            let items: [RSSItem]
+            do {
+                items = try await RSSFeedService.fetchItems(feedURL: feed.feedURL)
+            } catch {
+                LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                    "Speak RSS Headlines: could not fetch \(feed.name): \(error)")
+                continue
+            }
+            guard !items.isEmpty else {
+                LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+                                    "Speak RSS Headlines: \(feed.name) has no items")
+                continue
+            }
+            if multipleFeeds {
+                clips.append((text: "From \(feed.name).", voiceIdentifier: nextVoice(perFeed: feed.voiceIdentifier)))
+            }
+            for item in items.prefix(itemsPerFeed) {
+                var text = item.title
+                if feed.readMode == RSSFeed.ReadMode.titleAndSummary, !item.summary.isEmpty {
+                    text += ". " + item.summary
+                }
+                clips.append((text: text, voiceIdentifier: nextVoice(perFeed: feed.voiceIdentifier)))
+            }
+        }
+        if clips.isEmpty {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "Speak RSS Headlines: nothing to read")
+        }
+        return clips
+    }
+
     // MARK: Shared HTML helpers
 
     /// Fragment returned for pages that have no `%%…%%` template file. Loaded
@@ -3216,6 +3545,7 @@ final class AntennaHeadHTTPServer {
             dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "audioinput")
             dict["PLAY_AUDIO_FILES_ICON"] = loadSVG(named: "playaudiofiles")
             dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
+            dict["SPEAK_RSS_HEADLINES_ICON"] = loadSVG(named: "rss")
             // The ControlBooth remote-control page is reached from a tile on the
             // Devices page (it used to be a top-level hub item). The tile only
             // appears when ControlBooth integration is enabled in Configuration,

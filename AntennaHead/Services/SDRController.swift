@@ -1809,7 +1809,12 @@ final class SDRController {
     /// between passes) — when it's `false`, PCMFilePlayer exits on its own
     /// once done, and the `radioTaskPipelineManager.onLog` handler (see
     /// `init`) starts the filler pipeline so the stream isn't left silent.
-    func startPlayAudioFiles(files: [PlayableAudioFile], sequence: PlayAudioFilesSequence, repeatForever: Bool) {
+    /// `statusLabel` is what "Now Playing" shows — Speak RSS Headlines
+    /// reuses this whole pipeline (its headlines are just pre-rendered WAV
+    /// clips by the time they get here) but shouldn't be reported as "Play
+    /// Audio Files".
+    func startPlayAudioFiles(files: [PlayableAudioFile], sequence: PlayAudioFilesSequence, repeatForever: Bool,
+                             statusLabel: String = "Play Audio Files") {
         let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
         Self.sweepOrphanedHelpers()
         stopFillerForNewSource()
@@ -1827,15 +1832,15 @@ final class SDRController {
         }
 
         guard !ordered.isEmpty else {
-            lastError = SDRError.notImplemented("Play Audio Files — no files to play (choose a folder of audio files first)")
-            LogStore.shared.log(.error, source: "SDRController", "Play Audio Files: nothing to play")
+            lastError = SDRError.notImplemented("\(statusLabel) — no files to play (choose a folder of audio files first)")
+            LogStore.shared.log(.error, source: "SDRController", "\(statusLabel): nothing to play")
             return
         }
 
         taskMode = .customTask
         activeFrequencyID = nil
-        statusFunction = "Play Audio Files" + (repeatForever ? " (repeating)" : "")
-        stationName = "Play Audio Files"
+        statusFunction = statusLabel + (repeatForever ? " (repeating)" : "")
+        stationName = statusLabel
         modulation = ""
         frequencyDisplay = ""
         sampleRate = Self.outputSampleRate
@@ -2009,26 +2014,37 @@ final class SDRController {
     }
 
     private static func renderAnnouncementClip(text: String, voiceIdentifier: String?, clipURL: URL) async {
+        _ = await runSpeechSynth(text: text, voiceIdentifier: voiceIdentifier, rate: announcementRenderRate,
+                                 noPace: true, outputURL: clipURL, logPrefix: "announcement")
+    }
+
+    /// Runs `PCMSpeechSynth` once, writing its raw S16LE PCM stdout straight
+    /// to `outputURL` — the render-to-file pattern shared by the "Now
+    /// playing" announcement clip above and `renderSpeechClips` (Speak RSS
+    /// Headlines) below. Best-effort: returns `false` on any failure (helper
+    /// missing, couldn't launch, timed out, non-zero exit), having logged
+    /// with `logPrefix`; the output file may be left missing or empty.
+    private static func runSpeechSynth(text: String, voiceIdentifier: String?, rate: Int, noPace: Bool,
+                                       outputURL: URL, logPrefix: String) async -> Bool {
         let synthPath = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/PCMSpeechSynth").path
         guard FileManager.default.isExecutableFile(atPath: synthPath) else {
             LogStore.shared.log(.error, source: "SDRController",
-                                "announcement: PCMSpeechSynth helper missing at \(synthPath)")
-            return
+                                "\(logPrefix): PCMSpeechSynth helper missing at \(synthPath)")
+            return false
         }
 
-        FileManager.default.createFile(atPath: clipURL.path, contents: nil)
-        guard let outHandle = try? FileHandle(forWritingTo: clipURL) else {
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        guard let outHandle = try? FileHandle(forWritingTo: outputURL) else {
             LogStore.shared.log(.error, source: "SDRController",
-                                "announcement: could not open clip file for writing")
-            return
+                                "\(logPrefix): could not open clip file for writing")
+            return false
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: synthPath)
-        var args = ["--text", text,
-                    "--rate", "\(announcementRenderRate)",
-                    "--no-pace", "--exit-with-parent"]
+        var args = ["--text", text, "--rate", "\(rate)", "--exit-with-parent"]
+        if noPace { args.append("--no-pace") }
         if let voice = voiceIdentifier, !voice.isEmpty {
             args.append(contentsOf: ["--voice", voice])
         }
@@ -2040,9 +2056,9 @@ final class SDRController {
             try process.run()
         } catch {
             LogStore.shared.log(.error, source: "SDRController",
-                                "announcement: could not start PCMSpeechSynth: \(error)")
+                                "\(logPrefix): could not start PCMSpeechSynth: \(error)")
             try? outHandle.close()
-            return
+            return false
         }
 
         await withTaskCancellationHandler {
@@ -2054,11 +2070,91 @@ final class SDRController {
 
         if process.isRunning {
             process.terminate()
-            LogStore.shared.log(.error, source: "SDRController", "announcement: render timed out")
+            LogStore.shared.log(.error, source: "SDRController", "\(logPrefix): render timed out")
+            return false
         } else if process.terminationStatus != 0 {
             LogStore.shared.log(.error, source: "SDRController",
-                                "announcement: PCMSpeechSynth exited \(process.terminationStatus)")
+                                "\(logPrefix): PCMSpeechSynth exited \(process.terminationStatus)")
+            return false
         }
+        return true
+    }
+
+    /// Wraps headerless S16LE PCM (what `PCMSpeechSynth` writes) in a
+    /// canonical 44-byte WAV header. `PCMPrefix` (the "Now playing"
+    /// announcement's consumer) reads raw PCM directly, but `PCMFilePlayer`
+    /// decodes via `AVAudioFile`, which needs a real container — this is
+    /// what makes a rendered speech clip playable through
+    /// `startPlayAudioFiles`'s `PCMFilePlayer` stage.
+    nonisolated private static func wavData(fromRawPCM raw: Data, sampleRate: Int, channels: Int) -> Data {
+        let bitsPerSample: UInt16 = 16
+        let numChannels = UInt16(channels)
+        let sampleRateU32 = UInt32(sampleRate)
+        let blockAlign = numChannels * (bitsPerSample / 8)
+        let byteRate = sampleRateU32 * UInt32(blockAlign)
+        let dataSize = UInt32(raw.count)
+
+        var header = Data()
+        func append(_ s: String) { header.append(s.data(using: .ascii)!) }
+        func append(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { header.append(contentsOf: $0) } }
+        func append(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { header.append(contentsOf: $0) } }
+
+        append("RIFF"); append(UInt32(36) &+ dataSize); append("WAVE")
+        append("fmt "); append(UInt32(16)); append(UInt16(1)); append(numChannels)
+        append(sampleRateU32); append(byteRate); append(blockAlign); append(bitsPerSample)
+        append("data"); append(dataSize)
+
+        return header + raw
+    }
+
+    /// Renders each `(text, voiceIdentifier)` pair to its own short WAV clip
+    /// — for the "Speak RSS Headlines" page, one clip per headline (and
+    /// optionally its summary), each in its assigned or co-anchor-alternated
+    /// voice. Renders concurrently, but the result preserves *input* order,
+    /// not completion order — that order is the reading sequence the caller
+    /// already worked out (grouped by feed, newest first) and must survive
+    /// into the `PlayableAudioFile` list handed to
+    /// `startPlayAudioFiles(sequence: .asListed)`. Staged the same way
+    /// `AntennaHeadHTTPServer.playAudioFilesFolderFiles` stages checked
+    /// files: a fresh temp directory `startPlayAudioFiles` picks up and
+    /// cleans up on its own (via `files.first?.fileURL.deletingLastPathComponent()`),
+    /// no extra wiring needed here. Items that fail to render are dropped
+    /// rather than aborting the whole batch.
+    func renderSpeechClips(_ items: [(text: String, voiceIdentifier: String?)]) async -> [PlayableAudioFile] {
+        guard !items.isEmpty else { return [] }
+        let stagingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntennaHead-RSSHeadlines-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)) != nil else {
+            LogStore.shared.log(.error, source: "SDRController", "Speak RSS Headlines: could not create staging folder")
+            return []
+        }
+
+        let rate = Self.speechSynthSampleRate
+        let indexed = await withTaskGroup(of: (Int, PlayableAudioFile?).self) { group in
+            for (index, item) in items.enumerated() {
+                group.addTask {
+                    let rawURL = stagingDirectory.appendingPathComponent("headline-\(index).raw")
+                    let wavURL = stagingDirectory.appendingPathComponent("headline-\(index).wav")
+                    let ok = await Self.runSpeechSynth(text: item.text, voiceIdentifier: item.voiceIdentifier,
+                                                       rate: rate, noPace: true, outputURL: rawURL,
+                                                       logPrefix: "Speak RSS Headlines")
+                    defer { try? FileManager.default.removeItem(at: rawURL) }
+                    guard ok, let raw = try? Data(contentsOf: rawURL), !raw.isEmpty else { return (index, nil) }
+                    let wav = Self.wavData(fromRawPCM: raw, sampleRate: rate, channels: 1)
+                    guard (try? wav.write(to: wavURL)) != nil else { return (index, nil) }
+                    return (index, PlayableAudioFile(name: "headline-\(index)", modified: Date(), fileURL: wavURL))
+                }
+            }
+            var collected: [(Int, PlayableAudioFile?)] = []
+            for await result in group { collected.append(result) }
+            return collected.sorted { $0.0 < $1.0 }
+        }
+
+        let files = indexed.compactMap { $0.1 }
+        if files.isEmpty {
+            LogStore.shared.log(.error, source: "SDRController", "Speak RSS Headlines: no clips rendered")
+        }
+        return files
     }
 
     private static func waitForProcessExit(_ process: Process, timeout: TimeInterval) async {
