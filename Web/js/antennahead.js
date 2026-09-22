@@ -1073,7 +1073,8 @@ function deviceListenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
-  showUpNextInNavBar();
+  var audioInputElem = form.elements['audio_input'];
+  showUpNextInNavBar(audioInputElem ? audioInputElem.value : undefined);
 
   window.top.postMessage("startaudio", "*");
 
@@ -1256,7 +1257,8 @@ function controlBoothListenButtonClicked(form)
   xhttp.open("POST", listenButtonClickedUrl, true);
   xhttp.send(jsonData);
 
-  showUpNextInNavBar();
+  var pipelineSelectElem = form.elements['pipeline_select'];
+  showUpNextInNavBar(pipelineSelectElem ? pipelineSelectElem.value : undefined);
 
   window.top.postMessage("startaudio", "*");
 }
