@@ -243,6 +243,28 @@ struct WebRadioView: NSViewRepresentable {
             }
         }
 
+        /// Handles `window.confirm()` calls — without this, WKWebView returns
+        /// `false` immediately with no dialog shown, which is how the web UI's
+        /// Delete buttons (favorites, categories, RSS feeds) used to silently
+        /// no-op inside the native app window.
+        func webView(_ webView: WKWebView,
+                     runJavaScriptConfirmPanelWithMessage message: String,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping (Bool) -> Void) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = message
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            if let window = webView.window {
+                alert.beginSheetModal(for: window) { response in
+                    completionHandler(response == .alertFirstButtonReturn)
+                }
+            } else {
+                completionHandler(alert.runModal() == .alertFirstButtonReturn)
+            }
+        }
+
         /// Handles `<input type="file">` activation (Speak RSS Headlines'
         /// "Import OPML…" picker) — without this, WKWebView on macOS shows
         /// nothing at all when a file input is clicked (no error, no panel),

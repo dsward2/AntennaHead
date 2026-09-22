@@ -805,6 +805,16 @@ final class SDRController {
                self.statusFunction == "Text to Speech" {
                 self.startFillerPipeline()
             }
+
+            // `startPlayAudioFiles` (Play Audio Files / Speak RSS Headlines)
+            // finished its one non-repeating pass through the list — same
+            // idea as the PCMSpeechSynth case above, PCMFilePlayer exits on
+            // its own once done, and `statusFunction` carries no "(repeating)"
+            // suffix in that case (see startPlayAudioFiles()).
+            if source == "PCMFilePlayer", message.contains("failed task detected"),
+               self.taskMode == .customTask, !self.statusFunction.hasSuffix("(repeating)") {
+                self.startFillerPipeline()
+            }
         }
         fillerPipelineManager.onLog = { [weak self] source, message in
             LogStore.shared.log(.info, source: source, message)
