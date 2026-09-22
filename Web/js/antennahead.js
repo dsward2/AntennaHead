@@ -1313,6 +1313,7 @@ function updateStatusDisplay(statusData)
     }
 
     gqrxUpdatePanel(statusObj.gqrx);
+    nowPlayingUpdatePipeline(statusObj.pipeline, statusObj.rtlsdr_task_mode);
 
     var rtlsdr_task_mode = statusObj.rtlsdr_task_mode;
     
@@ -1451,6 +1452,144 @@ function updateStatusDisplay(statusData)
 
     var nowPlayingNavBarLink = window.top.document.getElementById("nowPlayingNavBarLink");
     nowPlayingNavBarLink.innerText = "NOW PLAYING: " + station_name;
+}
+
+// Now Playing page's vertical pipeline diagram — a top-to-bottom version of
+// the native Status tab's SVG (StatusWebView.swift), fed by the "pipeline"
+// object in nowplayingstatus.html: {stages:[{name,detail,path,args,running,
+// link}], cli_text}. Status polls several times a second, so the SVG is only
+// rebuilt when the stages actually change.
+var nowPlayingPipelineStagesJSON = null;
+var nowPlayingPipelineCLIText = "";
+
+function nowPlayingEscapeHTML(s)
+{
+    return (s == null ? "" : String(s)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function nowPlayingUpdatePipeline(pipeline, taskMode)
+{
+    var container = document.getElementById("np-pipeline");
+    if (container == null) return;   // not on nowplaying.html
+
+    var stages = (pipeline && pipeline.stages) ? pipeline.stages : [];
+    nowPlayingPipelineCLIText = (pipeline && pipeline.cli_text) ? pipeline.cli_text : "";
+
+    var copyButton = document.getElementById("np-copy-pipeline");
+    if (copyButton != null) copyButton.disabled = (nowPlayingPipelineCLIText === "");
+    var stopButton = document.getElementById("np-stop-pipeline");
+    if (stopButton != null) stopButton.disabled = (!taskMode || taskMode == "stopped");
+
+    var stagesJSON = JSON.stringify(stages);
+    if (stagesJSON === nowPlayingPipelineStagesJSON && container.firstChild != null) return;
+    nowPlayingPipelineStagesJSON = stagesJSON;
+
+    if (stages.length == 0)
+    {
+        container.innerHTML = "<p class='np-idle'>Pipeline idle — no tasks running.</p>";
+        return;
+    }
+
+    var NW = 280, NH = 60, GAP = 40, PADX = 2, PADY = 2;
+    var W = PADX * 2 + NW;
+    var H = PADY * 2 + stages.length * NH + (stages.length - 1) * GAP;
+    var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'"
+        + " style='max-width: 100%; height: auto;' xmlns='http://www.w3.org/2000/svg'>";
+    svg += "<defs><marker id='np-ah' markerWidth='9' markerHeight='9' refX='7' refY='3' orient='auto'>"
+        + "<path d='M0,0 L7,3 L0,6 Z' class='np-arrowhead'/></marker></defs>";
+    for (var i = 0; i < stages.length; i++)
+    {
+        var s = stages[i];
+        var x = PADX;
+        var y = PADY + i * (NH + GAP);
+        var midX = x + NW / 2;
+        if (i > 0)
+        {
+            var y1 = y - GAP, y2 = y;
+            var udp = String(s.link || "").toUpperCase().indexOf("UDP") === 0;
+            svg += "<line x1='" + midX + "' y1='" + y1 + "' x2='" + midX + "' y2='" + (y2 - 3) + "'"
+                + " class='np-arrow" + (udp ? " udp" : "") + "' marker-end='url(#np-ah)'/>";
+            if (s.link)
+            {
+                svg += "<text x='" + (midX + 12) + "' y='" + ((y1 + y2) / 2 + 4) + "' class='np-link-label'>"
+                    + nowPlayingEscapeHTML(s.link) + "</text>";
+            }
+        }
+        // <title> gives a native hover tooltip with the full command line.
+        var tip = s.path + ((s.args && s.args.length) ? " " + s.args.join(" ") : "");
+        svg += "<g class='np-pnode'><title>" + nowPlayingEscapeHTML(tip) + "</title>";
+        svg += "<rect x='" + x + "' y='" + y + "' width='" + NW + "' height='" + NH + "' rx='12'"
+            + " class='np-node" + (s.running ? "" : " stopped") + "'/>";
+        svg += "<circle cx='" + (x + NW - 18) + "' cy='" + (y + 18) + "' r='5'"
+            + " class='" + (s.running ? "np-dot-run" : "np-dot-stop") + "'/>";
+        svg += "<text x='" + (x + 16) + "' y='" + (y + 26) + "' class='np-node-name'>" + nowPlayingEscapeHTML(s.name) + "</text>";
+        svg += "<text x='" + (x + 16) + "' y='" + (y + 45) + "' class='np-node-detail'>" + nowPlayingEscapeHTML(s.detail) + "</text>";
+        svg += "</g>";
+    }
+    svg += "</svg>";
+    container.innerHTML = svg;
+}
+
+// Hidden-textarea copy as the fallback: navigator.clipboard only exists in a
+// secure context, and most listeners reach this page over plain HTTP.
+function nowPlayingCopyPipeline()
+{
+    var text = nowPlayingPipelineCLIText;
+    if (!text) return;
+
+    var button = document.getElementById("np-copy-pipeline");
+    var copied = function ()
+    {
+        if (button == null) return;
+        button.value = "Copied";
+        setTimeout(function () { button.value = "Copy Pipeline"; }, 1500);
+    };
+
+    if (navigator.clipboard && window.isSecureContext)
+    {
+        navigator.clipboard.writeText(text).then(copied, function () { nowPlayingCopyPipelineFallback(text); copied(); });
+        return;
+    }
+    nowPlayingCopyPipelineFallback(text);
+    copied();
+}
+
+function nowPlayingCopyPipelineFallback(text)
+{
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+}
+
+// Mirrors the native Status tab's Stop Pipeline: tears down the pipeline on
+// the server, then pauses this page's <audio> element (in the top frame) so
+// playback actually stops rather than playing on into the filler.
+function nowPlayingStopPipeline()
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (this.readyState == 4)
+        {
+            periodicUpdate();
+        }
+    };
+    xhttp.open("POST", "nowplayingstoppipeline.html", true);
+    xhttp.send();
+
+    try
+    {
+        var audioPlayer = window.top.document.getElementById("audio_element");
+        if (audioPlayer != null) audioPlayer.pause();
+    }
+    catch (e) {}
 }
 
 var intervalID = setInterval(function(){periodicUpdate();}, 20000);     // for Now Playing periodic updates using setInterval()

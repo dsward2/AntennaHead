@@ -21,5 +21,19 @@
             <br>
             %%OPEN_AUDIO_PLAYER_PAGE_BUTTON%%
         </section>
+        <!-- Filled in by nowPlayingUpdatePipeline() (antennahead.js) from the
+             "pipeline" object in each nowplayingstatus.html poll. -->
+        <section class="np-pipeline-section">
+            <h5 class="title">Pipeline</h5>
+            <div id="np-pipeline" class="np-pipeline"><p class="np-idle">Pipeline idle — no tasks running.</p></div>
+            <div class="np-pipeline-buttons">
+                <input id="np-copy-pipeline" class="button" type="button" value="Copy Pipeline" disabled
+                       title="Copy the pipeline as |-joined CLI text — paste it into a ControlBooth pipeline's stage list."
+                       onclick="nowPlayingCopyPipeline();">
+                <input id="np-stop-pipeline" class="button" type="button" value="Stop Pipeline" disabled
+                       title="Halt and tear down the pipeline, and stop audio playback."
+                       onclick="nowPlayingStopPipeline();">
+            </div>
+        </section>
     </div>
 

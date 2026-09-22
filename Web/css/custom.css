@@ -689,6 +689,40 @@ html {
     margin-bottom: 4px;
 }
 
+/* Now Playing page's vertical pipeline diagram (nowPlayingUpdatePipeline in
+   antennahead.js) — a top-to-bottom version of the native Status tab's SVG. */
+.np-pipeline-section { margin-top: 24px; text-align: center; }
+.np-pipeline { padding: 4px 2px 8px; }
+.np-pipeline .np-idle {
+    color: var(--ah-muted, #6e6e73);
+    font-style: italic;
+    margin: 6px 2px;
+}
+.np-pipeline rect.np-node {
+    fill: var(--ah-node-fill, #f5f9ff);
+    stroke: var(--ah-node-stroke, #0a84ff);
+    stroke-width: 1.5;
+}
+.np-pipeline rect.np-node.stopped { stroke: #8e8e93; }
+.np-pipeline circle.np-dot-run { fill: #34c759; }
+.np-pipeline circle.np-dot-stop { fill: #ff453a; }
+.np-pipeline text.np-node-name {
+    fill: var(--ah-fg, #1c1c1e);
+    font-size: 13px;
+    font-weight: 600;
+}
+.np-pipeline text.np-node-detail { fill: var(--ah-muted, #6e6e73); font-size: 11px; }
+.np-pipeline line.np-arrow { stroke: #8e8e93; stroke-width: 1.5; }
+.np-pipeline line.np-arrow.udp { stroke: var(--ah-node-stroke, #0a84ff); stroke-dasharray: 4 3; }
+.np-pipeline path.np-arrowhead { fill: #8e8e93; }
+.np-pipeline text.np-link-label {
+    fill: var(--ah-muted, #6e6e73);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.np-pipeline-buttons .button { margin: 0 4px 10px; }
+
 /* AAC recorder toggle, shown next to the <audio> element in the bottom bar.
    flex-shrink:0 keeps it from being squeezed out when the row is tight (see
    #audiodiv in index.html, which lets the <audio> element shrink instead). */
