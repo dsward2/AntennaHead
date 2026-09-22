@@ -71,11 +71,10 @@ struct StatusView: View {
             options: sdrController.options
         )
         snap.devices = detectedDevices
-        snap.stages = pipelineStages()
+        snap.stages = StatusSnapshot.pipelineStages(sdrController: sdrController,
+                                                    liveAudioServerRunning: audioServer.isRunning)
         snap.pipelineText = sdrController.radioTaskPipelineManager.tasksInfoString() + lasProcess.taskInfoString()
-        snap.pipelineCLIText = CLIStageText.export(pipeline: sdrController.radioTaskPipelineManager.taskItems.map {
-            CLIStage(path: $0.path, arguments: $0.argsArray)
-        })
+        snap.pipelineCLIText = StatusSnapshot.pipelineCLIText(sdrController: sdrController)
         snap.signalLevel = normalizedSignal(sdrController.signalLevel)
         snap.pipelineLastStarted = Self.timeString(sdrController.radioTaskPipelineManager.lastStartedAt)
         snap.pipelineLastStopped = Self.timeString(sdrController.radioTaskPipelineManager.lastStoppedAt)
@@ -102,17 +101,22 @@ struct StatusView: View {
         let floorDB = -60.0
         return min(max((db - floorDB) / -floorDB, 0), 1)
     }
+}
 
+extension StatusSnapshot {
     /// Maps the live pipeline's task items into renderable stages, then appends
     /// the LiveAudioServer sink the terminal PCMUDPSender feeds over UDP.
-    private func pipelineStages() -> [StatusSnapshot.Stage] {
+    /// Shared with the web Now Playing page's vertical diagram
+    /// (`AntennaHeadHTTPServer.nowPlayingStatusJSON`), so both show the same stages.
+    @MainActor static func pipelineStages(sdrController: SDRController,
+                                          liveAudioServerRunning: Bool) -> [Stage] {
         let items = sdrController.radioTaskPipelineManager.taskItems
         guard !items.isEmpty else { return [] }
 
-        var stages: [StatusSnapshot.Stage] = items.enumerated().map { index, item in
+        var stages: [Stage] = items.enumerated().map { index, item in
             let pid = item.process?.processIdentifier ?? 0
             let running = item.process?.isRunning ?? false
-            return StatusSnapshot.Stage(
+            return Stage(
                 name: item.functionName,
                 detail: running ? "PID \(pid)" : "stopped",
                 path: item.path,
@@ -122,14 +126,21 @@ struct StatusView: View {
             )
         }
 
-        stages.append(StatusSnapshot.Stage(
+        stages.append(Stage(
             name: "LiveAudioServer",
-            detail: audioServer.isRunning ? "live" : "offline",
+            detail: liveAudioServerRunning ? "live" : "offline",
             path: "UDP PCM input → HTTP/AAC stream",
             args: [],
-            running: audioServer.isRunning,
+            running: liveAudioServerRunning,
             link: "UDP :\(sdrController.udpInputPort)"
         ))
         return stages
+    }
+
+    /// The live pipeline as `|`-joined CLI text — what "Copy Pipeline" copies.
+    @MainActor static func pipelineCLIText(sdrController: SDRController) -> String {
+        CLIStageText.export(pipeline: sdrController.radioTaskPipelineManager.taskItems.map {
+            CLIStage(path: $0.path, arguments: $0.argsArray)
+        })
     }
 }

@@ -931,6 +931,14 @@ final class AntennaHeadHTTPServer {
             updateSpatialAudio(fromBody: request.body)
             return okResponse()
 
+        case "/nowplayingstoppipeline.html":
+            // The Now Playing page's Stop Pipeline button — same as the native
+            // Status tab's (`StatusView.stopPipeline`): tear down the pipeline,
+            // falling back to the filler if it's enabled. The page's JS pauses
+            // its own <audio> element.
+            sdrController?.terminateTasks()
+            return okResponse()
+
         case "/nowplayingstatus.html":
             return HTTPResponse(status: 200, reason: "OK",
                                 headers: ["Content-Type": "application/json"],
@@ -3313,6 +3321,21 @@ final class AntennaHeadHTTPServer {
                 "input_device": sdr.gqrxInputDevice,
                 "output_devices": sdr.gqrxOutputDevices,
                 "output_device": sdr.gqrxOutputDevice,
+            ]
+        }
+        if let sdr = sdrController {
+            // Drives nowplaying.html's vertical pipeline diagram and its Copy
+            // Pipeline button — the same stages and CLI text as the native
+            // Status tab (see `StatusSnapshot.pipelineStages`).
+            let stages = StatusSnapshot.pipelineStages(
+                sdrController: sdr,
+                liveAudioServerRunning: liveAudioServerProcessManager?.isRunning ?? false)
+            dict["pipeline"] = [
+                "stages": stages.map { [
+                    "name": $0.name, "detail": $0.detail, "path": $0.path,
+                    "args": $0.args, "running": $0.running, "link": $0.link,
+                ] },
+                "cli_text": StatusSnapshot.pipelineCLIText(sdrController: sdr),
             ]
         }
         return (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
