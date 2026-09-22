@@ -1970,6 +1970,61 @@ function textToSpeechListenButtonClicked(form)
 }
 
 
+// ---- Play Audio Files (Audio Devices page) ------------------------------
+//
+// Same pattern as Text to Speech above: the folder is chosen in
+// AntennaHead's Configuration tab on the Mac running AntennaHead (a folder
+// chooser can't be shown to a remote browser), where it's saved as a
+// persistent setting (security-scoped bookmark). playAudioFilesListHTML()
+// (server-side) renders one checkbox per audio file, checked by default.
+// Listen sends the order, the repeat flag, and the names still checked —
+// the server resolves the saved folder, stages just those audio files, and
+// feeds them to the PCMFilePlayer pipeline stage.
+
+// Select All / Select None buttons above the file list — purely client-side,
+// no round trip.
+function pafSelectAllFiles(selected)
+{
+  var checkboxes = document.querySelectorAll(".paf-file-checkbox");
+  checkboxes.forEach(function(checkbox) { checkbox.checked = selected; });
+}
+
+function playAudioFilesListenButtonClicked(form)
+{
+  var sequenceSelect = form.querySelector("#paf_sequence");
+  var repeatCheckbox = form.querySelector("#paf_repeat");
+  var fileCheckboxes = form.querySelectorAll(".paf-file-checkbox:checked");
+  var selectedFiles = Array.prototype.map.call(fileCheckboxes, function(checkbox) {
+    return checkbox.value;
+  });
+  var payload = {
+    sequence: sequenceSelect ? sequenceSelect.value : "chronological",
+    repeat: (repeatCheckbox && repeatCheckbox.checked) ? "1" : "0",
+    files: selectedFiles
+  };
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var listenButtonClickedUrl = baseUrl + "playaudiofileslistenbuttonclicked.html";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        // response received ok
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", listenButtonClickedUrl, true);
+  xhttp.setRequestHeader("Content-Type", "application/json");
+  xhttp.send(JSON.stringify(payload));
+
+  // handle the audio tag with the new source
+  showUpNextInNavBar();
+
+  window.top.postMessage("startaudio", "*");
+}
+
+
 /* ==================================================================
    Tap / click acknowledgement.
 

@@ -46,6 +46,7 @@ struct ConfigurationView: View {
     @State private var fillerAnnounceSSML = false
     @State private var fillerAnnounceSpeechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
     @State private var textToSpeechFolderPath = ""
+    @State private var playAudioFilesFolderPath = ""
 
     /// System speech voices, sorted by language then name, for the announcement
     /// picker. Only installed voices are returned, so the menu is self-limiting.
@@ -189,6 +190,28 @@ struct ConfigurationView: View {
                 Text("Text to Speech")
             } footer: {
                 Text("The folder of \u{201C}.txt\u{201D} files spoken by the Text to Speech page under Devices in the AntennaHead tab (\u{201C}PCMSpeechSynth\u{201D} synthesizes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac. The files are read as plain text in the voice chosen here (default: the Speech section\u{2019}s voice); markup in them is spoken aloud, not interpreted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent("Folder") {
+                    HStack {
+                        Text(playAudioFilesFolderPath.isEmpty ? "No folder selected." : playAudioFilesFolderPath)
+                            .lineLimit(1).truncationMode(.head).foregroundStyle(.secondary)
+                        if !playAudioFilesFolderPath.isEmpty {
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting(
+                                    [URL(fileURLWithPath: playAudioFilesFolderPath)])
+                            }
+                        }
+                        Button("Choose Folder\u{2026}") { choosePlayAudioFilesFolder() }
+                    }
+                }
+            } header: {
+                Text("Play Audio Files")
+            } footer: {
+                Text("The folder of audio files played by the Play Audio Files page under Devices in the AntennaHead tab (\u{201C}PCMFilePlayer\u{201D} decodes each one in turn). Chosen here rather than on that page because a folder chooser can\u{2019}t be shown to a remote browser \u{2014} it always opens on this Mac. Accepts AAC/M4A, MP3, WAV, AIFF, CAF, and FLAC files.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -540,6 +563,26 @@ struct ConfigurationView: View {
             let storedPath = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.textToSpeechFolderPathKey)) ?? nil
             textToSpeechFolderPath = storedPath ?? ""
         }
+        var pafResolvedFromBookmark = false
+        if let base64 = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.playAudioFilesFolderBookmarkKey)) ?? nil,
+           let data = Data(base64Encoded: base64) {
+            var isStale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale) {
+                playAudioFilesFolderPath = url.path
+                pafResolvedFromBookmark = true
+                if isStale, let fresh = try? url.bookmarkData(options: .withSecurityScope,
+                                                               includingResourceValuesForKeys: nil,
+                                                               relativeTo: nil) {
+                    try? SQLiteController.shared.storeAppSettingsValue(
+                        fresh.base64EncodedString(), forKey: AntennaHeadHTTPServer.playAudioFilesFolderBookmarkKey)
+                }
+            }
+        }
+        if !pafResolvedFromBookmark {
+            let storedPath = (try? SQLiteController.shared.appSettingsValue(forKey: AntennaHeadHTTPServer.playAudioFilesFolderPathKey)) ?? nil
+            playAudioFilesFolderPath = storedPath ?? ""
+        }
         // Filler defaults ON: an absent key counts as enabled.
         fillerEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerEnabledKey)) ?? nil) ?? "1") != "0"
         fillerFadeEnabled = (((try? SQLiteController.shared.appSettingsValue(forKey: SDRController.fillerFadeEnabledKey)) ?? nil) ?? "1") != "0"
@@ -778,6 +821,30 @@ struct ConfigurationView: View {
         try? SQLiteController.shared.storeAppSettingsValue(
             url.path, forKey: AntennaHeadHTTPServer.textToSpeechFolderPathKey)
         textToSpeechFolderPath = url.path
+    }
+
+    /// Same pattern as `chooseTextToSpeechFolder()`, for the Play Audio Files
+    /// page's folder of audio files.
+    private func choosePlayAudioFilesFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select"
+        panel.message = "Choose the folder that holds the audio files to play"
+        if !playAudioFilesFolderPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: playAudioFilesFolderPath)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? SQLiteController.shared.storeAppSettingsValue(
+                data.base64EncodedString(), forKey: AntennaHeadHTTPServer.playAudioFilesFolderBookmarkKey)
+        }
+        try? SQLiteController.shared.storeAppSettingsValue(
+            url.path, forKey: AntennaHeadHTTPServer.playAudioFilesFolderPathKey)
+        playAudioFilesFolderPath = url.path
     }
 
     /// Opens the Application Support folder holding the database and exported

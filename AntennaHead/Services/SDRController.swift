@@ -132,6 +132,29 @@ final class SDRController {
     /// any. Deleted when the next pipeline starts or all tasks are stopped.
     private var speechSynthTextFileURL: URL?
 
+    /// One audio file picked in the "Play Audio Files" web UI, already copied
+    /// by `AntennaHeadHTTPServer.playAudioFilesFolderFiles` into a temp
+    /// directory inside this app's own sandbox container — `PCMFilePlayer`
+    /// decodes straight from `fileURL`, no text/synthesis step involved.
+    struct PlayableAudioFile {
+        let name: String
+        let modified: Date
+        let fileURL: URL
+    }
+
+    /// Playback order for `startPlayAudioFiles` — mirrors `TextToSpeechSequence`
+    /// (same three choices on the Play Audio Files page's "Sequence" <select>).
+    enum PlayAudioFilesSequence: String {
+        case chronological  // oldest file first, by modification date
+        case alphabetical   // by file name
+        case random
+    }
+
+    /// Staged-copy directory for the currently running Play Audio Files
+    /// pipeline, if any. Deleted when the next pipeline starts or all tasks
+    /// are stopped — same lifecycle as `speechSynthTextFileURL`.
+    private var playAudioFilesStagingDirectory: URL?
+
     // MARK: Speech-to-text tap
 
     /// App-settings keys for the optional `PCMTranscriber` stage that runs
@@ -1770,6 +1793,96 @@ final class SDRController {
         }
     }
 
+    /// Start a PCMFilePlayer → PCMUDPSender pipeline that plays the audio files
+    /// picked in the "Play Audio Files" web UI. `files` have already been
+    /// copied into a temp staging directory by
+    /// `AntennaHeadHTTPServer.playAudioFilesFolderFiles` (the sandboxed
+    /// PCMFilePlayer child can't follow the user-picked folder's own security
+    /// scope), so this just orders them per `sequence` and points
+    /// PCMFilePlayer at each in turn — like `startTasksForRecording`,
+    /// PCMFilePlayer decodes straight to the 48 kHz / 2 ch LiveAudioServer
+    /// contract, so no sox resample stage is needed. `repeatForever` maps to
+    /// the helper's `--repeat` (the whole ordered list loops, with a short gap
+    /// between passes) — when it's `false`, PCMFilePlayer exits on its own
+    /// once done, and the `radioTaskPipelineManager.onLog` handler (see
+    /// `init`) starts the filler pipeline so the stream isn't left silent.
+    func startPlayAudioFiles(files: [PlayableAudioFile], sequence: PlayAudioFilesSequence, repeatForever: Bool) {
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
+        radioTaskPipelineManager.terminate()
+
+        cleanUpPlayAudioFilesStaging()
+        playAudioFilesStagingDirectory = files.first?.fileURL.deletingLastPathComponent()
+
+        let ordered: [PlayableAudioFile]
+        switch sequence {
+        case .chronological: ordered = files.sorted { $0.modified < $1.modified }
+        case .alphabetical: ordered = files.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .random: ordered = files.shuffled()
+        }
+
+        guard !ordered.isEmpty else {
+            lastError = SDRError.notImplemented("Play Audio Files — no files to play (choose a folder of audio files first)")
+            LogStore.shared.log(.error, source: "SDRController", "Play Audio Files: nothing to play")
+            return
+        }
+
+        taskMode = .customTask
+        activeFrequencyID = nil
+        statusFunction = "Play Audio Files" + (repeatForever ? " (repeating)" : "")
+        stationName = "Play Audio Files"
+        modulation = ""
+        frequencyDisplay = ""
+        sampleRate = Self.outputSampleRate
+        tunerGain = 0
+        squelchLevel = 0
+        options = ""
+        audioOutputFilter = ""
+        tunerAGC = false
+        directSamplingQBranch = false
+        lastError = nil
+
+        guard let player = makePlayAudioFilesTaskItem(tracks: ordered.map { $0.fileURL }, repeatForever: repeatForever),
+              let sender = makeUDPSenderTaskItem() else {
+            taskMode = .stopped
+            return
+        }
+        radioTaskPipelineManager.add(player)
+        addAudioDelayStageIfEnabled()
+        addTranscriberStageIfEnabled()
+        addSpatialGainStageIfEnabled()
+        addBinauralPannerStageIfEnabled()
+        radioTaskPipelineManager.add(sender)
+        launchCurrentPipeline(dying: dying)
+    }
+
+    private func makePlayAudioFilesTaskItem(tracks: [URL], repeatForever: Bool) -> TaskItem? {
+        let path = helperPath("PCMFilePlayer")
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            lastError = SDRError.notImplemented("PCMFilePlayer helper missing at \(path)")
+            LogStore.shared.log(.error, source: "SDRController", "PCMFilePlayer helper missing at \(path)")
+            return nil
+        }
+        let item = radioTaskPipelineManager.makeTaskItem(pathToExecutable: path, functionName: "PCMFilePlayer")
+        for url in tracks { item.addArgument("--file"); item.addArgument(url.path) }
+        item.addArgument("--rate"); item.addArgument(Self.outputSampleRate)
+        item.addArgument("--channels"); item.addArgument(Self.outputChannels)
+        if repeatForever {
+            item.addArgument("--repeat")
+            item.addArgument("--gap"); item.addArgument(2)
+        }
+        item.addArgument("--exit-with-parent")
+        return item
+    }
+
+    private func cleanUpPlayAudioFilesStaging() {
+        if let url = playAudioFilesStagingDirectory {
+            try? FileManager.default.removeItem(at: url)
+            playAudioFilesStagingDirectory = nil
+        }
+    }
+
     // MARK: Announcement pipeline plumbing
 
     private struct PreparedAnnouncement {
@@ -1962,6 +2075,7 @@ final class SDRController {
         teardownGqrxRemote()
         radioTaskPipelineManager.terminate()
         cleanUpSpeechSynthTextFile()
+        cleanUpPlayAudioFilesStaging()
         cleanUpAnnouncementClip()
         // The SRT transcript itself is a user artifact — leave it on disk, just
         // drop the reference so the next pipeline's log line is accurate.

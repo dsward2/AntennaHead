@@ -84,6 +84,19 @@ final class AntennaHeadHTTPServer {
     private static let textToSpeechMaxFiles = 500
     private static let textToSpeechMaxTotalCharacters = 1_000_000
 
+    /// App-settings keys for the "Play Audio Files" folder — same pattern as
+    /// the Text to Speech folder above (chosen in `ConfigurationView` on the
+    /// host Mac, security-scoped bookmark plus a plain path for display).
+    static let playAudioFilesFolderBookmarkKey = "AntennaHeadPlayAudioFilesFolderBookmark"
+    static let playAudioFilesFolderPathKey = "AntennaHeadPlayAudioFilesFolderPath"
+    /// Guard rail when reading the folder — a playlist far larger than this is
+    /// almost certainly a mistaken folder choice.
+    private static let playAudioFilesMaxFiles = 500
+    /// Audio file types listed and played from the "Play Audio Files" folder —
+    /// same set `SDRController`'s custom filler accepts.
+    private static let playAudioFilesAudioExtensions: Set<String> =
+        ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
+
     /// The stored output bitrate (bits/sec), falling back to the default.
     @MainActor static func storedOutputBitrate(sqlite: SQLiteController?) -> Int {
         let stored = ((try? sqlite?.appSettingsValue(forKey: outputBitrateConfigKey)) ?? nil)
@@ -575,6 +588,10 @@ final class AntennaHeadHTTPServer {
             return renderHTML(relativePath: "devicetexttospeech.html", host: host, isSecure: isSecure, webConfig: webConfig,
                               extra: ["TEXT_TO_SPEECH_FORM": textToSpeechFormHTML()])
 
+        case "/deviceplayaudiofiles.html":
+            return renderHTML(relativePath: "deviceplayaudiofiles.html", host: host, isSecure: isSecure, webConfig: webConfig,
+                              extra: ["PLAY_AUDIO_FILES_FORM": playAudioFilesFormHTML()])
+
         case "/devicelistenbuttonclicked.html":
             // Buttons are wired; the Core Audio device-input pipeline is deferred
             // (needs a capture helper), so this currently logs .notImplemented.
@@ -666,6 +683,18 @@ final class AntennaHeadHTTPServer {
             let selectedNames = o.stringArray("files").map(Set.init)
             sdrController?.startTextToSpeech(files: textToSpeechFolderFiles(selectedNames: selectedNames),
                                             sequence: sequence, repeatForever: repeatForever)
+            return okResponse()
+
+        case "/playaudiofileslistenbuttonclicked.html":
+            // Same payload shape as Text to Speech: {sequence, repeat, files}.
+            // The folder is the saved setting — stage the checked audio files
+            // (see `playAudioFilesFolderFiles`) and hand them to SDRController.
+            let po = jsonObject(fromBody: request.body)
+            let paSequence = SDRController.PlayAudioFilesSequence(rawValue: po.string("sequence")) ?? .chronological
+            let paRepeatForever = (po["repeat"] as? String) == "1"
+            let paSelectedNames = po.stringArray("files").map(Set.init)
+            sdrController?.startPlayAudioFiles(files: playAudioFilesFolderFiles(selectedNames: paSelectedNames),
+                                              sequence: paSequence, repeatForever: paRepeatForever)
             return okResponse()
 
         case "/settings.html":
@@ -1802,6 +1831,181 @@ final class AntennaHeadHTTPServer {
         return files
     }
 
+    /// `%%PLAY_AUDIO_FILES_FORM%%` — nearly the same shape as
+    /// `textToSpeechFormHTML()`: the folder is a persistent setting chosen in
+    /// AntennaHead's Configuration tab on the host Mac (see `ConfigurationView`;
+    /// a folder chooser can't be shown to a remote browser), so this form just
+    /// lists what's in it, checkbox per file (`playAudioFilesListHTML()`),
+    /// plus the order and repeat toggle, then Listen. No voice picker here —
+    /// unlike Text to Speech there's no synthesis step to choose a voice for.
+    /// `/playaudiofileslistenbuttonclicked.html` resolves the saved
+    /// security-scoped bookmark, stages copies of only the checked audio
+    /// files, and hands them to `SDRController.startPlayAudioFiles` →
+    /// PCMFilePlayer → PCMUDPSender.
+    @MainActor private func playAudioFilesFormHTML() -> String {
+        var s = "<form class='play_audio_files_form' id='playAudioFilesForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label>Play Audio Files</label>"
+        s += "<p>Play the audio files from a folder through the live audio pipeline "
+        s += "(<code>PCMFilePlayer</code> decodes each one in turn).</p>"
+        s += playAudioFilesListHTML()
+        s += "<label for='paf_sequence'>Sequence</label>"
+        s += "<select id='paf_sequence' name='paf_sequence' class='u-full-width' "
+        s += "title='Chronological plays the oldest file first; Alphabetical sorts by file name; Random shuffles the order.'>"
+        s += "<option value='chronological'>Chronological (oldest file first)</option>"
+        s += "<option value='alphabetical'>Alphabetical (by file name)</option>"
+        s += "<option value='random'>Random</option>"
+        s += "</select>"
+        s += "<label for='paf_repeat' title='Loop through the folder continuously until you play something else.'>"
+        s += "<input type='checkbox' id='paf_repeat' name='paf_repeat' value='1'> Repeat indefinitely</label>"
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+        s += "onclick=\"playAudioFilesListenButtonClicked(getElementById('playAudioFilesForm'));\" "
+        s += "title='Play the selected folder&#39;s audio files through the live audio pipeline.'>"
+        s += "</form><br>&nbsp;<br>"
+        return s
+    }
+
+    /// Listing of the audio files in the configured Play Audio Files folder, in
+    /// the same name order Listen plays them chronologically — each with a
+    /// checkbox (checked by default) so the user can leave out specific files,
+    /// plus Select All / Select None buttons (`pafSelectAllFiles()` in
+    /// `antennahead.js`, client-side only). `playAudioFilesListenButtonClicked()`
+    /// collects the checked names into the Listen POST's `files` array; the
+    /// server filters by them in `playAudioFilesFolderFiles(selectedNames:)`.
+    /// Wrapped in the same `.scrolling-file-list` container Text to Speech uses.
+    @MainActor private func playAudioFilesListHTML() -> String {
+        guard let folderURL = resolvePlayAudioFilesFolder() else {
+            return "<p class='value-prop'>No folder selected — choose one in AntennaHead\u{2019}s Configuration tab on the Mac.</p>"
+        }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles])) ?? [])
+            .filter { Self.playAudioFilesAudioExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        guard !entries.isEmpty else {
+            return "<p class='value-prop'>No audio files in \(htmlText(folderURL.path)).</p>"
+        }
+
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        let byteFormatter = ByteCountFormatter()
+        byteFormatter.countStyle = .file
+        byteFormatter.allowedUnits = [.useKB, .useMB, .useGB]
+
+        var rows = ""
+        for (index, url) in entries.enumerated() {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            let sizeText = byteFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0))
+            let name = url.lastPathComponent
+            let rowID = "paf-file-\(index)"
+            rows += "<tr><td><input type='checkbox' class='paf-file-checkbox' id='\(rowID)' "
+            rows += "value='\(htmlAttribute(name))' checked></td>"
+            rows += "<td><label for='\(rowID)'>\(htmlText(name)) "
+            rows += "<span class='rec-size'>(\(htmlText(sizeText)))</span></label></td>"
+            rows += "<td>\(htmlText(df.string(from: modified)))</td></tr>"
+        }
+
+        var s = "<div class='tts-select-actions'>"
+        s += "<input class='button' type='button' value='Select All' onclick='pafSelectAllFiles(true);'>"
+        s += "<input class='button' type='button' value='Select None' onclick='pafSelectAllFiles(false);'>"
+        s += "</div>"
+        s += "<div class='scrolling-file-list'>"
+        s += "<table class='u-full-width'>"
+        s += "<thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>"
+        s += "<tbody>\(rows)</tbody>"
+        s += "</table></div>"
+        return s
+    }
+
+    /// Resolves the saved Play Audio Files folder bookmark (refreshing it if
+    /// stale). Shared by `playAudioFilesFolderFiles()` (Listen-time, needs to
+    /// copy the files) and `playAudioFilesListHTML()` (the read-only listing on
+    /// the web page) so the bookmark-resolution logic lives in one place.
+    /// Callers are responsible for `startAccessingSecurityScopedResource()`.
+    @MainActor private func resolvePlayAudioFilesFolder() -> URL? {
+        guard let base64 = (try? sqlite?.appSettingsValue(forKey: Self.playAudioFilesFolderBookmarkKey)) ?? nil,
+              let data = Data(base64Encoded: base64) else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: no folder selected — choose one in Configuration")
+            return nil
+        }
+        var isStale = false
+        guard let folderURL = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                       relativeTo: nil, bookmarkDataIsStale: &isStale) else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: saved folder bookmark could not be resolved — re-select the folder")
+            return nil
+        }
+        if isStale, let fresh = try? folderURL.bookmarkData(options: .withSecurityScope,
+                                                           includingResourceValuesForKeys: nil, relativeTo: nil) {
+            try? sqlite?.storeAppSettingsValue(fresh.base64EncodedString(),
+                                               forKey: Self.playAudioFilesFolderBookmarkKey)
+        }
+        return folderURL
+    }
+
+    /// Resolves the saved Play Audio Files folder bookmark and copies the
+    /// checked audio files into a fresh temp directory inside the app's own
+    /// sandbox container, while holding security-scoped access — the sandboxed
+    /// `PCMFilePlayer` child can't follow the user-picked folder's security
+    /// scope itself (same constraint `SDRController`'s custom filler cache
+    /// works around by copying into the app group container instead).
+    /// `selectedNames`, when non-`nil`, restricts the result to files whose
+    /// name is in the set — the checkboxes left checked on the web page; `nil`
+    /// means no filtering (every audio file), matching the pre-checkbox
+    /// Text to Speech behavior for any older client that omits the field.
+    @MainActor private func playAudioFilesFolderFiles(selectedNames: Set<String>? = nil) -> [SDRController.PlayableAudioFile] {
+        guard let folderURL = resolvePlayAudioFilesFolder() else { return [] }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let entries = ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles])) ?? [])
+            .filter { Self.playAudioFilesAudioExtensions.contains($0.pathExtension.lowercased()) }
+            .filter { selectedNames?.contains($0.lastPathComponent) ?? true }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        let stagingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntennaHead-PlayAudioFiles-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)) != nil else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: could not create staging folder")
+            return []
+        }
+
+        var files: [SDRController.PlayableAudioFile] = []
+        for url in entries {
+            guard files.count < Self.playAudioFilesMaxFiles else {
+                LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+                                    "Play Audio Files: folder has more than the \(Self.playAudioFilesMaxFiles)-file "
+                                    + "cap — playing the first part only")
+                break
+            }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let destination = stagingDirectory.appendingPathComponent(url.lastPathComponent)
+            do {
+                try FileManager.default.copyItem(at: url, to: destination)
+                files.append(SDRController.PlayableAudioFile(name: url.lastPathComponent, modified: modified, fileURL: destination))
+            } catch {
+                LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                    "Play Audio Files: could not copy \(url.lastPathComponent): \(error)")
+            }
+        }
+        if files.isEmpty {
+            let reason = (selectedNames?.isEmpty ?? false)
+                ? "no files were left checked" : "no readable audio files in \(folderURL.path)"
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "Play Audio Files: \(reason)")
+        }
+        return files
+    }
+
     // MARK: Shared HTML helpers
 
     /// Fragment returned for pages that have no `%%…%%` template file. Loaded
@@ -2893,6 +3097,7 @@ final class AntennaHeadHTTPServer {
             // `deviceaudioinput.html`. ("Listen to Gqrx" moved to the Radio page
             // — it's another way to listen, not an audio device.)
             dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "audioinput")
+            dict["PLAY_AUDIO_FILES_ICON"] = loadSVG(named: "playaudiofiles")
             dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
             // The ControlBooth remote-control page is reached from a tile on the
             // Devices page (it used to be a top-level hub item). The tile only
