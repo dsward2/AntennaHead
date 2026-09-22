@@ -1789,7 +1789,11 @@ var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 // matches what was rendered that reloads the fragment (same call the
 // Refresh button makes) to show "Not running". It also reloads when the
 // active pipeline (data-active) changes — ControlBooth's Play/Stop buttons
-// tell AntennaHead over AppleEvents, and this is how the page notices.
+// tell AntennaHead over AppleEvents, and this is how the page notices. Also
+// reloads on data-airplay-relay/data-airplay-receiving changes, so toggling
+// the AirPlay relay (from here, from ControlBooth's own Settings UI, or an
+// AirPlay client connecting/disconnecting) shows up within one poll tick —
+// no separate poll loop for it.
 // No-op until the fragment
 // (and its data-running marker) is in the DOM, same as aacRecorderPoll.
 function controlBoothPoll()
@@ -1805,7 +1809,11 @@ function controlBoothPoll()
                 var renderedRunning = (statusEl.getAttribute("data-running") == "true");
                 var renderedActive = statusEl.getAttribute("data-active") || "";
                 var currentActive = data.activePipelineName || "";
-                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive)
+                var renderedAirPlayRelay = (statusEl.getAttribute("data-airplay-relay") == "true");
+                var renderedAirPlayReceiving = (statusEl.getAttribute("data-airplay-receiving") == "true");
+                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive
+                    || !!data.airPlayRelayEnabled !== renderedAirPlayRelay
+                    || !!data.airPlayReceivingAudio !== renderedAirPlayReceiving)
                 {
                     loadContent("controlbooth.html");
                 }
@@ -1817,6 +1825,27 @@ function controlBoothPoll()
 }
 
 var controlBoothPollIntervalID = setInterval(controlBoothPoll, 3000);
+
+function controlBoothAirPlayListenButtonClicked()
+{
+    var getUrl = window.location;
+    var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+    var url = baseUrl + "controlboothairplaylisten.html";
+
+    // Mirrors controlBoothListenButtonClicked(): this route replies with a
+    // bare 200 (see AntennaHeadHTTPServer), so the fragment picks up the new
+    // AirPlay status on the next controlBoothPoll() tick rather than here.
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+        }
+    };
+    xhttp.open("POST", url, true);
+    xhttp.send();
+
+    window.top.postMessage("startaudio", "*");
+}
 
 
 // ---- Live Captions (captions.html) -------------------------------------

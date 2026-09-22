@@ -9,6 +9,10 @@ import AppKit
 ///   'StpA'  stop all pipelines
 ///   'List'  list pipelines       reply: list of text
 ///   'Runs'  running pipelines    reply: list of text
+///   'ApSt'  airplay status       reply: [enabled, relayEnabled, isReceivingAudio]
+///   'ApOn'  start airplay relay  turns the AirPlay receiver on if needed and
+///                                relays its audio to AntennaHead
+///   'ApOf'  stop airplay relay   stops relaying without turning the receiver off
 ///
 /// Every ControlBooth command is in the `com.dsward.ControlBooth.pipelines`
 /// access group, matched by this app's `com.apple.security.scripting-targets`
@@ -56,6 +60,22 @@ enum ControlBoothClient {
         try stringList(from: send(eventID: "Runs", directParameter: nil))
     }
 
+    /// (receiver enabled, relaying to AntennaHead, actively receiving audio) —
+    /// see `ScriptingCommands.AirPlayStatusCommand` for the order these are
+    /// packed in.
+    static func airPlayStatus() throws -> (enabled: Bool, relayEnabled: Bool, isReceivingAudio: Bool) {
+        let values = try boolList(from: send(eventID: "ApSt", directParameter: nil))
+        return (values.count > 0 && values[0], values.count > 1 && values[1], values.count > 2 && values[2])
+    }
+
+    static func startAirPlayRelay() throws {
+        _ = try send(eventID: "ApOn", directParameter: nil)
+    }
+
+    static func stopAirPlayRelay() throws {
+        _ = try send(eventID: "ApOf", directParameter: nil)
+    }
+
     private static func stringList(from reply: NSAppleEventDescriptor) -> [String] {
         guard let list = reply.paramDescriptor(forKeyword: keyDirectObject),
               list.numberOfItems > 0 else {
@@ -63,6 +83,15 @@ enum ControlBoothClient {
         }
         // AEDesc list indices are 1-based.
         return (1...list.numberOfItems).compactMap { list.atIndex($0)?.stringValue }
+    }
+
+    private static func boolList(from reply: NSAppleEventDescriptor) -> [Bool] {
+        guard let list = reply.paramDescriptor(forKeyword: keyDirectObject),
+              list.numberOfItems > 0 else {
+            return []
+        }
+        // AEDesc list indices are 1-based.
+        return (1...list.numberOfItems).map { list.atIndex($0)?.booleanValue ?? false }
     }
 
     private static func send(eventID: String, directParameter: NSAppleEventDescriptor?) throws -> NSAppleEventDescriptor {

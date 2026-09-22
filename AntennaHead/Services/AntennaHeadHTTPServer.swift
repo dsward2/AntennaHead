@@ -985,6 +985,21 @@ final class AntennaHeadHTTPServer {
             sdrController?.terminateTasks()
             return htmlFragmentResponse(controlBoothPageHTML())
 
+        case "/controlboothairplaylisten.html":
+            // Same ordering as /controlboothlistenbuttonclicked.html above, for
+            // the same SIGPIPE-avoidance reason: stop any other ControlBooth
+            // pipeline first, open AntennaHead's receiver, only then tell
+            // ControlBooth to relay.
+            try? ControlBoothClient.stopAllPipelines()
+            await sdrController?.startControlBoothListening(name: Self.controlBoothAirPlaySourceName)
+            try? ControlBoothClient.startAirPlayRelay()
+            return okResponse()
+
+        case "/controlboothairplaystop.html":
+            try? ControlBoothClient.stopAirPlayRelay()
+            sdrController?.terminateTasks()
+            return htmlFragmentResponse(controlBoothPageHTML())
+
         case "/fillerstop.html":
             // Stop the auto filler and stay silent (enterIdle: false), rather
             // than the usual stop which returns straight to the filler.
@@ -1051,6 +1066,12 @@ final class AntennaHeadHTTPServer {
 
         case APIEndpoint.controlBoothStop:
             return apiControlBoothStopResponse()
+
+        case APIEndpoint.controlBoothAirPlayStart:
+            return await apiControlBoothAirPlayStartResponse()
+
+        case APIEndpoint.controlBoothAirPlayStop:
+            return apiControlBoothAirPlayStopResponse()
 
         case APIEndpoint.spatialAudio:
             return apiSpatialAudioResponse()
@@ -1281,14 +1302,18 @@ final class AntennaHeadHTTPServer {
     }
 
     /// The JSON-API equivalent of `controlBoothPageHTML()`'s status portion.
-    /// Pipeline names are only fetched when ControlBooth is actually running
-    /// — `ControlBoothClient.pipelines()` talks to ControlBooth over
-    /// AppleEvents, which has nothing to answer when it's not open.
+    /// Pipeline names and AirPlay status are only fetched when ControlBooth
+    /// is actually running — talking to it over AppleEvents has nothing to
+    /// answer when it's not open.
     @MainActor private func apiControlBoothStatusResponse() -> HTTPResponse {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let pipelines = isRunning ? ((try? ControlBoothClient.pipelines()) ?? []) : []
+        let airPlay = isRunning ? (try? ControlBoothClient.airPlayStatus()) : nil
         return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines,
-                                            activePipelineName: sdrController?.activeControlBoothPipelineName))
+                                            activePipelineName: sdrController?.activeControlBoothPipelineName,
+                                            airPlayEnabled: airPlay?.enabled,
+                                            airPlayRelayEnabled: airPlay?.relayEnabled,
+                                            airPlayReceivingAudio: airPlay?.isReceivingAudio))
     }
 
     /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
@@ -1322,6 +1347,21 @@ final class AntennaHeadHTTPServer {
         return apiNowPlayingResponse()
     }
 
+    /// The JSON-API equivalent of `/controlboothairplaylisten.html`.
+    @MainActor private func apiControlBoothAirPlayStartResponse() async -> HTTPResponse {
+        try? ControlBoothClient.stopAllPipelines()
+        await sdrController?.startControlBoothListening(name: Self.controlBoothAirPlaySourceName)
+        try? ControlBoothClient.startAirPlayRelay()
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/controlboothairplaystop.html`.
+    @MainActor private func apiControlBoothAirPlayStopResponse() -> HTTPResponse {
+        try? ControlBoothClient.stopAirPlayRelay()
+        sdrController?.terminateTasks()
+        return apiNowPlayingResponse()
+    }
+
     @MainActor private func controlBoothPageHTML() -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
@@ -1336,9 +1376,14 @@ final class AntennaHeadHTTPServer {
         // reload it, without any push channel from the server.
         // data-active is read by controlBoothPoll() too, so a pipeline started
         // or stopped from ControlBooth's own Play/Stop buttons refreshes this
-        // fragment to show the new pipeline name.
+        // fragment to show the new pipeline name. data-airplay-relay/
+        // data-airplay-receiving ride the same poll/diff so the AirPlay
+        // section below stays live without a second poll loop.
         let activePipeline = sdrController?.activeControlBoothPipelineName
-        s += "<p id='controlbooth_status' data-running='\(isRunning)' data-active='\(htmlAttribute(activePipeline ?? ""))'>ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        let airPlayStatus = isRunning ? (try? ControlBoothClient.airPlayStatus()) : nil
+        s += "<p id='controlbooth_status' data-running='\(isRunning)' data-active='\(htmlAttribute(activePipeline ?? ""))' "
+        s += "data-airplay-relay='\(airPlayStatus?.relayEnabled ?? false)' data-airplay-receiving='\(airPlayStatus?.isReceivingAudio ?? false)'>"
+        s += "ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
         if let activePipeline {
             s += "<p id='controlbooth_active'>Now playing: <strong>\(htmlText(activePipeline))</strong></p>"
         }
@@ -1362,6 +1407,7 @@ final class AntennaHeadHTTPServer {
                 s += "<form action='javascript:loadContent(&quot;controlboothstop.html&quot;)'>"
                 s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
             }
+            s += controlBoothAirPlaySectionHTML(status: airPlayStatus, activePipeline: activePipeline)
         } else {
             s += "<form action='javascript:loadContent(&quot;controlboothlaunched.html&quot;)'>"
             s += "<input class='twelve columns button button-primary' type='submit' value='Launch ControlBooth'>"
@@ -1369,6 +1415,43 @@ final class AntennaHeadHTTPServer {
         }
         s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('controlbooth.html');\"><br>&nbsp;<br>"
         s += "</section></div>"
+        return s
+    }
+
+    /// Name `startControlBoothListening`/`activeControlBoothPipelineName`
+    /// track this source under — not a real ControlBooth Pipeline record, so
+    /// it's kept in its own Remote Control page section rather than folded
+    /// into the "Select Pipeline" dropdown above (which assumes every name is
+    /// one). Must match ControlBooth's own `AirPlayReceiverService
+    /// .antennaHeadTaskName` exactly, since that's the string ControlBooth
+    /// itself announces under when its local Settings UI turns the relay on.
+    private static let controlBoothAirPlaySourceName = "ControlBooth AirPlay Receiver"
+
+    /// A separate section below the pipeline picker (see `controlBoothPageHTML`)
+    /// since the AirPlay receiver isn't a saved Pipeline: its own status line
+    /// and Listen/Stop button, mirroring that section's HTML/button style.
+    @MainActor private func controlBoothAirPlaySectionHTML(
+        status: (enabled: Bool, relayEnabled: Bool, isReceivingAudio: Bool)?, activePipeline: String?
+    ) -> String {
+        guard let status else { return "" }
+        let statusText: String
+        if !status.enabled {
+            statusText = "Not in use"
+        } else if status.isReceivingAudio {
+            statusText = "Receiving AirPlay audio"
+        } else {
+            statusText = "Idle — advertising, no AirPlay client connected"
+        }
+        var s = "<hr><h4 class='title'>AirPlay Receiver</h4>"
+        s += "<p>AirPlay: <strong>\(htmlText(statusText))</strong></p>"
+        if activePipeline == Self.controlBoothAirPlaySourceName {
+            s += "<form action='javascript:loadContent(&quot;controlboothairplaystop.html&quot;)'>"
+            s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
+        } else {
+            s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
+            s += "onclick=\"controlBoothAirPlayListenButtonClicked();\" "
+            s += "title='Start relaying ControlBooth AirPlay Receiver audio to AntennaHead.'><br>&nbsp;<br>"
+        }
         return s
     }
 
