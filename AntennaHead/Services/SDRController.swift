@@ -143,11 +143,14 @@ final class SDRController {
     }
 
     /// Playback order for `startPlayAudioFiles` — mirrors `TextToSpeechSequence`
-    /// (same three choices on the Play Audio Files page's "Sequence" <select>).
+    /// (same three choices on the Play Audio Files page's "Sequence" <select>),
+    /// plus `asListed` for when a playlist (.m3u/.m3u8) was picked instead: the
+    /// files already arrive in the playlist's own order, so no re-sorting.
     enum PlayAudioFilesSequence: String {
         case chronological  // oldest file first, by modification date
         case alphabetical   // by file name
         case random
+        case asListed       // preserve the given order (e.g. from a playlist)
     }
 
     /// Staged-copy directory for the currently running Play Audio Files
@@ -1820,6 +1823,7 @@ final class SDRController {
         case .chronological: ordered = files.sorted { $0.modified < $1.modified }
         case .alphabetical: ordered = files.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         case .random: ordered = files.shuffled()
+        case .asListed: ordered = files
         }
 
         guard !ordered.isEmpty else {

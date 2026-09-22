@@ -1989,10 +1989,26 @@ function pafSelectAllFiles(selected)
   checkboxes.forEach(function(checkbox) { checkbox.checked = selected; });
 }
 
+// Playlist popup (only rendered when the folder has .m3u/.m3u8 files):
+// picking one plays exactly its files, in its own order, so the Sequence
+// select and the per-file checkboxes no longer apply — grey them out to
+// make that clear rather than leaving them clickable but ignored. Picking
+// "None" back reverses it.
+function pafPlaylistChanged(select)
+{
+  var disable = !!select.value;
+  var form = select.form;
+  var sequenceSelect = form.querySelector("#paf_sequence");
+  if (sequenceSelect) sequenceSelect.disabled = disable;
+  var checkboxes = form.querySelectorAll(".paf-file-checkbox");
+  checkboxes.forEach(function(checkbox) { checkbox.disabled = disable; });
+}
+
 function playAudioFilesListenButtonClicked(form)
 {
   var sequenceSelect = form.querySelector("#paf_sequence");
   var repeatCheckbox = form.querySelector("#paf_repeat");
+  var playlistSelect = form.querySelector("#paf_playlist");
   var fileCheckboxes = form.querySelectorAll(".paf-file-checkbox:checked");
   var selectedFiles = Array.prototype.map.call(fileCheckboxes, function(checkbox) {
     return checkbox.value;
@@ -2000,7 +2016,8 @@ function playAudioFilesListenButtonClicked(form)
   var payload = {
     sequence: sequenceSelect ? sequenceSelect.value : "chronological",
     repeat: (repeatCheckbox && repeatCheckbox.checked) ? "1" : "0",
-    files: selectedFiles
+    files: selectedFiles,
+    playlist: playlistSelect ? playlistSelect.value : ""
   };
 
   var getUrl = window.location;

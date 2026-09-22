@@ -96,6 +96,9 @@ final class AntennaHeadHTTPServer {
     /// same set `SDRController`'s custom filler accepts.
     private static let playAudioFilesAudioExtensions: Set<String> =
         ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "flac"]
+    /// Playlist file types offered in the "Playlist" popup — standard M3U/M3U8,
+    /// read by `playAudioFilesPlaylistFiles(playlistName:)`.
+    private static let playAudioFilesPlaylistExtensions: Set<String> = ["m3u", "m3u8"]
 
     /// The stored output bitrate (bits/sec), falling back to the default.
     @MainActor static func storedOutputBitrate(sqlite: SQLiteController?) -> Int {
@@ -686,15 +689,25 @@ final class AntennaHeadHTTPServer {
             return okResponse()
 
         case "/playaudiofileslistenbuttonclicked.html":
-            // Same payload shape as Text to Speech: {sequence, repeat, files}.
-            // The folder is the saved setting — stage the checked audio files
-            // (see `playAudioFilesFolderFiles`) and hand them to SDRController.
+            // Same payload shape as Text to Speech, plus an optional `playlist`
+            // name: {sequence, repeat, files, playlist}. A non-empty playlist
+            // takes over entirely — its own files, in its own order — and
+            // `files`/`sequence` are ignored (see `playAudioFilesPlaylistFiles`);
+            // otherwise this is the plain checked-files + Sequence flow (see
+            // `playAudioFilesFolderFiles`). Either way SDRController just gets
+            // an ordered file list.
             let po = jsonObject(fromBody: request.body)
-            let paSequence = SDRController.PlayAudioFilesSequence(rawValue: po.string("sequence")) ?? .chronological
-            let paRepeatForever = (po["repeat"] as? String) == "1"
-            let paSelectedNames = po.stringArray("files").map(Set.init)
-            sdrController?.startPlayAudioFiles(files: playAudioFilesFolderFiles(selectedNames: paSelectedNames),
-                                              sequence: paSequence, repeatForever: paRepeatForever)
+            let paPlaylistName = po.string("playlist")
+            if !paPlaylistName.isEmpty {
+                sdrController?.startPlayAudioFiles(files: playAudioFilesPlaylistFiles(playlistName: paPlaylistName),
+                                                  sequence: .asListed, repeatForever: (po["repeat"] as? String) == "1")
+            } else {
+                let paSequence = SDRController.PlayAudioFilesSequence(rawValue: po.string("sequence")) ?? .chronological
+                let paRepeatForever = (po["repeat"] as? String) == "1"
+                let paSelectedNames = po.stringArray("files").map(Set.init)
+                sdrController?.startPlayAudioFiles(files: playAudioFilesFolderFiles(selectedNames: paSelectedNames),
+                                                  sequence: paSequence, repeatForever: paRepeatForever)
+            }
             return okResponse()
 
         case "/settings.html":
@@ -1838,6 +1851,9 @@ final class AntennaHeadHTTPServer {
     /// lists what's in it, checkbox per file (`playAudioFilesListHTML()`),
     /// plus the order and repeat toggle, then Listen. No voice picker here —
     /// unlike Text to Speech there's no synthesis step to choose a voice for.
+    /// If the folder also has playlist files (.m3u/.m3u8), a "Playlist" popup
+    /// (`playAudioFilesPlaylistSelectHTML()`) appears too — picking one plays
+    /// its files in its own order instead of the checked files and Sequence.
     /// `/playaudiofileslistenbuttonclicked.html` resolves the saved
     /// security-scoped bookmark, stages copies of only the checked audio
     /// files, and hands them to `SDRController.startPlayAudioFiles` →
@@ -1855,6 +1871,7 @@ final class AntennaHeadHTTPServer {
         s += "<option value='alphabetical'>Alphabetical (by file name)</option>"
         s += "<option value='random'>Random</option>"
         s += "</select>"
+        s += playAudioFilesPlaylistSelectHTML()
         s += "<label for='paf_repeat' title='Loop through the folder continuously until you play something else.'>"
         s += "<input type='checkbox' id='paf_repeat' name='paf_repeat' value='1'> Repeat indefinitely</label>"
         s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
@@ -1922,6 +1939,27 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
+    /// `<select>` listing any playlist files (.m3u/.m3u8) found in the Play
+    /// Audio Files folder, or `""` (omitted entirely) when there aren't any —
+    /// a folder without playlists just gets the plain Sequence/checkbox form
+    /// it always had. Picking a playlist here plays exactly its files in its
+    /// own order (`playAudioFilesPlaylistFiles(playlistName:)` on Listen),
+    /// bypassing the checked files and Sequence choice — `pafPlaylistChanged()`
+    /// in `antennahead.js` greys those out client-side to make that clear.
+    @MainActor private func playAudioFilesPlaylistSelectHTML() -> String {
+        let playlists = playAudioFilesPlaylistNames()
+        guard !playlists.isEmpty else { return "" }
+
+        var s = "<label for='paf_playlist' title='Play a playlist file&#39;s own files, in its own order, instead of the checked files above.'>Playlist</label>"
+        s += "<select id='paf_playlist' name='paf_playlist' class='u-full-width' onchange='pafPlaylistChanged(this);'>"
+        s += "<option value=''>None (use checked files and Sequence above)</option>"
+        for name in playlists {
+            s += "<option value='\(htmlAttribute(name))'>\(htmlText(name))</option>"
+        }
+        s += "</select>"
+        return s
+    }
+
     /// Resolves the saved Play Audio Files folder bookmark (refreshing it if
     /// stale). Shared by `playAudioFilesFolderFiles()` (Listen-time, needs to
     /// copy the files) and `playAudioFilesListHTML()` (the read-only listing on
@@ -1971,6 +2009,94 @@ final class AntennaHeadHTTPServer {
             .filter { selectedNames?.contains($0.lastPathComponent) ?? true }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
+        let files = stagePlayAudioFiles(entries.map { url in
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return (name: url.lastPathComponent, sourceURL: url, modified: modified)
+        })
+        if files.isEmpty {
+            let reason = (selectedNames?.isEmpty ?? false)
+                ? "no files were left checked" : "no readable audio files in \(folderURL.path)"
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "Play Audio Files: \(reason)")
+        }
+        return files
+    }
+
+    /// Playlist files (.m3u/.m3u8) found in the configured Play Audio Files
+    /// folder, for the "Playlist" popup on the web page (`playAudioFilesFormHTML()`) —
+    /// empty when there aren't any, in which case the popup itself is omitted.
+    @MainActor private func playAudioFilesPlaylistNames() -> [String] {
+        guard let folderURL = resolvePlayAudioFilesFolder() else { return [] }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        return ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter { Self.playAudioFilesPlaylistExtensions.contains($0.pathExtension.lowercased()) }
+            .map { $0.lastPathComponent }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Resolves the saved Play Audio Files folder bookmark, reads the named
+    /// playlist (a standard M3U/M3U8 text file — one path per line, blank
+    /// lines and lines starting with `#` such as `#EXTM3U`/`#EXTINF`
+    /// ignored), and stages the audio files it lists, in the playlist's own
+    /// order. Only the *last path component* of each playlist line is used —
+    /// a playlist can reference only files actually in this same folder,
+    /// never an arbitrary path elsewhere on disk, matching how the folder
+    /// itself is scoped to a single security-scoped bookmark. An entry that
+    /// doesn't match a file in the folder is skipped (logged), same as a
+    /// stale checkbox selection would be.
+    @MainActor private func playAudioFilesPlaylistFiles(playlistName: String) -> [SDRController.PlayableAudioFile] {
+        guard !playlistName.isEmpty, !playlistName.contains("/"),
+              Self.playAudioFilesPlaylistExtensions.contains((playlistName as NSString).pathExtension.lowercased()),
+              let folderURL = resolvePlayAudioFilesFolder() else { return [] }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        guard let contents = try? String(contentsOf: folderURL.appendingPathComponent(playlistName), encoding: .utf8) else {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: could not read playlist \(playlistName)")
+            return []
+        }
+        let names = contents.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+            return (trimmed as NSString).lastPathComponent
+        }
+
+        let entries: [(name: String, sourceURL: URL, modified: Date)] = names.compactMap { name in
+            let sourceURL = folderURL.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+                LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+                                    "Play Audio Files: playlist \(playlistName) entry \(name) not found in the folder — skipping")
+                return nil
+            }
+            let modified = (try? sourceURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return (name: name, sourceURL: sourceURL, modified: modified)
+        }
+
+        let files = stagePlayAudioFiles(entries)
+        if files.isEmpty {
+            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: no playable files from playlist \(playlistName)")
+        }
+        return files
+    }
+
+    /// Copies `entries` (already resolved, existing source files) into a fresh
+    /// temp directory inside the app's own sandbox container, while the
+    /// caller holds the folder's security-scoped access — the sandboxed
+    /// `PCMFilePlayer` child can't follow that scope itself (same constraint
+    /// `SDRController`'s custom filler cache works around by copying into the
+    /// app group container instead). Shared by `playAudioFilesFolderFiles()`
+    /// (checked files) and `playAudioFilesPlaylistFiles()` (a playlist's
+    /// entries) — both just differ in how `entries` gets built.
+    @MainActor private func stagePlayAudioFiles(
+        _ entries: [(name: String, sourceURL: URL, modified: Date)]
+    ) -> [SDRController.PlayableAudioFile] {
+        guard !entries.isEmpty else { return [] }
         let stagingDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("AntennaHead-PlayAudioFiles-\(UUID().uuidString)", isDirectory: true)
         guard (try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)) != nil else {
@@ -1980,28 +2106,19 @@ final class AntennaHeadHTTPServer {
         }
 
         var files: [SDRController.PlayableAudioFile] = []
-        for url in entries {
-            guard files.count < Self.playAudioFilesMaxFiles else {
-                LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
-                                    "Play Audio Files: folder has more than the \(Self.playAudioFilesMaxFiles)-file "
-                                    + "cap — playing the first part only")
-                break
-            }
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate ?? .distantPast
-            let destination = stagingDirectory.appendingPathComponent(url.lastPathComponent)
+        for entry in entries.prefix(Self.playAudioFilesMaxFiles) {
+            let destination = stagingDirectory.appendingPathComponent(entry.name)
             do {
-                try FileManager.default.copyItem(at: url, to: destination)
-                files.append(SDRController.PlayableAudioFile(name: url.lastPathComponent, modified: modified, fileURL: destination))
+                try FileManager.default.copyItem(at: entry.sourceURL, to: destination)
+                files.append(SDRController.PlayableAudioFile(name: entry.name, modified: entry.modified, fileURL: destination))
             } catch {
                 LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
-                                    "Play Audio Files: could not copy \(url.lastPathComponent): \(error)")
+                                    "Play Audio Files: could not copy \(entry.name): \(error)")
             }
         }
-        if files.isEmpty {
-            let reason = (selectedNames?.isEmpty ?? false)
-                ? "no files were left checked" : "no readable audio files in \(folderURL.path)"
-            LogStore.shared.log(.error, source: "AntennaHeadHTTPServer", "Play Audio Files: \(reason)")
+        if entries.count > Self.playAudioFilesMaxFiles {
+            LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+                                "Play Audio Files: more than the \(Self.playAudioFilesMaxFiles)-file cap — playing the first part only")
         }
         return files
     }
