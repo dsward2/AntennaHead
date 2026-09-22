@@ -788,6 +788,45 @@ function initTunerDigitKeyboard()
 
 
 
+// Called by every Listen button handler the moment it is clicked: relabels the
+// top frame's "Now Playing: ..." tab button as "Up Next: <title>" so the user
+// sees what they just asked for while the tuner/stream is still switching.
+// periodicUpdate() puts "Now Playing: ..." back once the server reports the
+// new station. With no argument the title is read from the page's
+// #listen_title heading.
+function showUpNextInNavBar(title)
+{
+  try {
+    var navBarLink = window.top.document.getElementById("nowPlayingNavBarLink");
+    if (navBarLink == null) { return; }
+
+    if (title === undefined || title === null)
+    {
+      var titleElement = window.document.getElementById("listen_title");
+      title = (titleElement != null) ? titleElement.innerText : "";
+    }
+
+    title = String(title).trim();
+    if (title === "") { return; }
+
+    navBarLink.innerText = "UP NEXT: " + title;
+  }
+  catch (err) {
+    // ignore: the tab label is cosmetic
+  }
+}
+
+
+// Formats a tuner frequency in Hz (digits, possibly zero-padded) for the
+// "Up Next" label, e.g. "0089100000" -> "89.1 MHz". Falls back to the raw text.
+function upNextFrequencyTitle(frequency)
+{
+  var hertz = parseInt(frequency, 10);
+  if (isNaN(hertz) || hertz <= 0) { return String(frequency); }
+  return (hertz / 1000000).toString() + " MHz";
+}
+
+
 function listenButtonClicked(form)
 {
   //console.log("listenButtonClicked");
@@ -811,6 +850,8 @@ function listenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
+  showUpNextInNavBar();
+
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
@@ -927,6 +968,8 @@ function frequencyListenButtonClicked()
     xhttp.send(jsonData);
 
     // handle the audio tag with the new source
+    showUpNextInNavBar(upNextFrequencyTitle(frequency));
+
     window.top.postMessage("startaudio", "*");
 
     //console.log("postMessage startaudio");
@@ -963,6 +1006,8 @@ function advancedListenButtonClicked(form)
     xhttp.open("POST", baseUrl + "frequencylistenbuttonclicked.html", true);
     xhttp.send(jsonData);
 
+    showUpNextInNavBar(upNextFrequencyTitle(tuningArray.frequency));
+
     window.top.postMessage("startaudio", "*");
 
     return false;
@@ -996,6 +1041,8 @@ function scannerListenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
+  showUpNextInNavBar();
+
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
@@ -1026,6 +1073,8 @@ function deviceListenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
+  showUpNextInNavBar();
+
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
@@ -1053,6 +1102,8 @@ function gqrxListenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
+  showUpNextInNavBar();
+
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
@@ -1087,6 +1138,8 @@ function recordingListenButtonClicked(form)
   xhttp.send(jsonData);
 
   // handle the audio tag with the new source
+  showUpNextInNavBar(selected.value);
+
   window.top.postMessage("startaudio", "*");
 
   //console.log("postMessage startaudio");
@@ -1202,6 +1255,8 @@ function controlBoothListenButtonClicked(form)
     };
   xhttp.open("POST", listenButtonClickedUrl, true);
   xhttp.send(jsonData);
+
+  showUpNextInNavBar();
 
   window.top.postMessage("startaudio", "*");
 }
@@ -1893,6 +1948,8 @@ function textToSpeechListenButtonClicked(form)
   xhttp.send(JSON.stringify(payload));
 
   // handle the audio tag with the new source
+  showUpNextInNavBar();
+
   window.top.postMessage("startaudio", "*");
 }
 
