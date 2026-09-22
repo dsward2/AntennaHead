@@ -1881,6 +1881,7 @@ final class AntennaHeadHTTPServer {
         if let v = fields["frequency_mode"] { f.frequencyMode = (v == "frequency_mode_range" || v == "1") ? 1 : 0 }
         if let v = fields["frequency_scan_end"], let n = Int(v) { f.frequencyScanEnd = n }
         if let v = fields["frequency_scan_interval"], let n = Int(v) { f.frequencyScanInterval = n }
+        if let v = fields["frequency_scan_squelch_delay"], let n = Double(v) { f.frequencyScanSquelchDelay = n }
         if let v = fields["modulation"] { f.modulation = v }
         if let v = fields["stereo_flag"] { f.stereoFlag = (v == "1") }
         if let v = fields["sample_rate"], let n = Int(v) { f.sampleRate = n }
@@ -2197,6 +2198,7 @@ final class AntennaHeadHTTPServer {
                     [("frequency_mode_single", "Single Frequency"), ("frequency_mode_range", "Scan Range")])
         s += text("Scan Range End (Hz)", "frequency_scan_end", "\(f.frequencyScanEnd)", type: "number")
         s += text("Scan Range Interval (Hz)", "frequency_scan_interval", "\(f.frequencyScanInterval)", type: "number")
+        s += text("Scan Range Squelch Delay", "frequency_scan_squelch_delay", "\(f.frequencyScanSquelchDelay)", type: "number", step: "0.1")
         s += select("Modulation", "modulation", f.modulation, modulationOptions)
         s += select("FM Stereo", "stereo_flag", f.stereoFlag ? "1" : "0", [("0", "Off"), ("1", "On")])
         s += text("Sample Rate", "sample_rate", "\(f.sampleRate)", type: "number")
@@ -2232,6 +2234,7 @@ final class AntennaHeadHTTPServer {
         if let v = fields["frequency_mode"] { record.frequencyMode = (v == "frequency_mode_range") ? 1 : 0 }
         if let v = fields["frequency_scan_end"], let n = Int(v) { record.frequencyScanEnd = n }
         if let v = fields["frequency_scan_interval"], let n = Int(v) { record.frequencyScanInterval = n }
+        if let v = fields["frequency_scan_squelch_delay"], let n = Double(v) { record.frequencyScanSquelchDelay = n }
         if let v = fields["modulation"] { record.modulation = v }
         if let v = fields["stereo_flag"] { record.stereoFlag = (v == "1") }
         if let v = fields["sample_rate"], let n = Int(v) { record.sampleRate = n }
@@ -2475,6 +2478,7 @@ final class AntennaHeadHTTPServer {
             dict["frequency_mode"] = f.frequencyMode
             dict["frequency_scan_end"] = f.frequencyScanEnd
             dict["frequency_scan_interval"] = f.frequencyScanInterval
+            dict["frequency_scan_squelch_delay"] = f.frequencyScanSquelchDelay
             dict["modulation"] = f.modulation
             dict["sample_rate"] = f.sampleRate
             dict["sampling_mode"] = f.samplingMode

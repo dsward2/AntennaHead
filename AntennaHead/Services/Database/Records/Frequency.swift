@@ -8,6 +8,7 @@ struct Frequency: Codable, Identifiable, Hashable, FetchableRecord, MutablePersi
     var frequency: Int
     var frequencyScanEnd: Int
     var frequencyScanInterval: Int
+    var frequencyScanSquelchDelay: Double
     var tunerGain: Double
     var tunerAgc: Int
     var samplingMode: Int
@@ -32,6 +33,7 @@ struct Frequency: Codable, Identifiable, Hashable, FetchableRecord, MutablePersi
         case frequency
         case frequencyScanEnd = "frequency_scan_end"
         case frequencyScanInterval = "frequency_scan_interval"
+        case frequencyScanSquelchDelay = "frequency_scan_squelch_delay"
         case tunerGain = "tuner_gain"
         case tunerAgc = "tuner_agc"
         case samplingMode = "sampling_mode"
@@ -71,6 +73,7 @@ struct Frequency: Codable, Identifiable, Hashable, FetchableRecord, MutablePersi
             frequency: 89_100_000,
             frequencyScanEnd: 0,
             frequencyScanInterval: 0,
+            frequencyScanSquelchDelay: 0,
             tunerGain: 49.5,
             tunerAgc: 0,
             samplingMode: 0,

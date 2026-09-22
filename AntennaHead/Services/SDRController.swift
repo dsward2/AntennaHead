@@ -2657,7 +2657,7 @@ final class SDRController {
         Tuning(
             modulation: f.modulation,
             squelchLevel: Int(f.squelchLevel),
-            squelchDelay: 0,   // not stored per-frequency in LocalRadio
+            squelchDelay: Int(f.frequencyScanSquelchDelay),
             firSize: f.firSize,
             tunerGain: f.tunerGain,
             sampleRate: f.sampleRate,

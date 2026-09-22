@@ -35,6 +35,13 @@ final class AppDatabase {
                 try db.rename(table: "local_radio_config", to: "app_config")
             }
         }
+        m.registerMigration("v3_add_frequency_scan_squelch_delay") { db in
+            if try db.tableExists("frequency"), try !db.columns(in: "frequency").contains(where: { $0.name == "frequency_scan_squelch_delay" }) {
+                try db.alter(table: "frequency") { t in
+                    t.add(column: "frequency_scan_squelch_delay", .double).notNull().defaults(to: 0)
+                }
+            }
+        }
         return m
     }
 
