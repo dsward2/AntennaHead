@@ -56,6 +56,7 @@ enum ShareValidator {
         guard (1...2_200_000_000).contains(f.frequency) else { return .failure(.init("frequency \(f.frequency) Hz is out of range")) }
         guard (0...2_200_000_000).contains(f.frequencyScanEnd) else { return .failure(.init("scan end frequency is out of range")) }
         guard (0...100_000_000).contains(f.frequencyScanInterval) else { return .failure(.init("scan interval is out of range")) }
+        guard f.frequencyScanSquelchDelay.isFinite, (0...600).contains(f.frequencyScanSquelchDelay) else { return .failure(.init("scan squelch delay is out of range")) }
         if f.frequencyMode == 1, f.frequencyScanEnd < f.frequency { return .failure(.init("scan range ends before it starts")) }
         guard Frequency.modulationOptions.contains(f.modulation) else { return .failure(.init("unknown modulation \"\(f.modulation)\"")) }
         if let problem = commonProblem(gain: f.tunerGain, agc: f.tunerAgc, sampling: f.samplingMode,

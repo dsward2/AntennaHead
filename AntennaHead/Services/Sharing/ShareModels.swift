@@ -77,6 +77,7 @@ struct SharedFavorite: Codable, Equatable {
     var frequency: Int
     var frequencyScanEnd: Int
     var frequencyScanInterval: Int
+    var frequencyScanSquelchDelay: Double
     var tunerGain: Double
     var tunerAgc: Int
     var samplingMode: Int
@@ -99,6 +100,7 @@ struct SharedFavorite: Codable, Equatable {
         case frequency
         case frequencyScanEnd = "frequency_scan_end"
         case frequencyScanInterval = "frequency_scan_interval"
+        case frequencyScanSquelchDelay = "frequency_scan_squelch_delay"
         case tunerGain = "tuner_gain"
         case tunerAgc = "tuner_agc"
         case samplingMode = "sampling_mode"
@@ -178,6 +180,7 @@ extension SharedFavorite {
     init(_ f: Frequency, categoryNames: [String]) {
         self.init(stationName: f.stationName, frequencyMode: f.frequencyMode, frequency: f.frequency,
                   frequencyScanEnd: f.frequencyScanEnd, frequencyScanInterval: f.frequencyScanInterval,
+                  frequencyScanSquelchDelay: f.frequencyScanSquelchDelay,
                   tunerGain: f.tunerGain, tunerAgc: f.tunerAgc, samplingMode: f.samplingMode,
                   sampleRate: f.sampleRate, oversampling: f.oversampling, modulation: f.modulation,
                   squelchLevel: f.squelchLevel, options: f.options, firSize: f.firSize,
@@ -189,6 +192,7 @@ extension SharedFavorite {
     func makeRecord(named name: String) -> Frequency {
         Frequency(id: nil, stationName: name, frequencyMode: frequencyMode, frequency: frequency,
                   frequencyScanEnd: frequencyScanEnd, frequencyScanInterval: frequencyScanInterval,
+                  frequencyScanSquelchDelay: frequencyScanSquelchDelay,
                   tunerGain: tunerGain, tunerAgc: tunerAgc, samplingMode: samplingMode,
                   sampleRate: sampleRate, oversampling: oversampling, modulation: modulation,
                   squelchLevel: squelchLevel, options: options, firSize: firSize, atanMath: atanMath,
@@ -201,6 +205,7 @@ extension SharedFavorite {
     func apply(to f: inout Frequency) {
         f.stationName = stationName; f.frequencyMode = frequencyMode; f.frequency = frequency
         f.frequencyScanEnd = frequencyScanEnd; f.frequencyScanInterval = frequencyScanInterval
+        f.frequencyScanSquelchDelay = frequencyScanSquelchDelay
         f.tunerGain = tunerGain; f.tunerAgc = tunerAgc; f.samplingMode = samplingMode
         f.sampleRate = sampleRate; f.oversampling = oversampling; f.modulation = modulation
         f.squelchLevel = squelchLevel; f.options = options; f.firSize = firSize
@@ -214,6 +219,7 @@ extension SharedFavorite {
         var d: [String] = []
         if stationName != o.stationName { d.append("name") }
         if frequencyScanInterval != o.frequencyScanInterval { d.append("scan interval") }
+        if !frequencyScanSquelchDelay.isClose(to: o.frequencyScanSquelchDelay) { d.append("scan squelch delay") }
         if !tunerGain.isClose(to: o.tunerGain) { d.append("tuner gain") }
         if tunerAgc != o.tunerAgc { d.append("AGC") }
         if samplingMode != o.samplingMode { d.append("sampling mode") }
