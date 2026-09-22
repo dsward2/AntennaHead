@@ -3219,17 +3219,18 @@ final class AntennaHeadHTTPServer {
             // The ControlBooth remote-control page is reached from a tile on the
             // Devices page (it used to be a top-level hub item). The tile only
             // appears when ControlBooth integration is enabled in Configuration,
-            // mirroring the old hub gate. It carries its own row wrapper so the
-            // placeholder disappears entirely (no empty row) when disabled.
+            // mirroring the old hub gate. Same shape as radio.html's GQRX_TILE:
+            // just the one column, placed as the second tile in an already-open
+            // row (see devices.html) rather than wrapping its own row — a
+            // wrapper here left row 2 column 2 empty and pushed this tile onto
+            // its own row 3 instead.
             dict["CONTROLBOOTH_TILE"] = webConfig.controlBoothEnabled ? """
-                    <div class="value-prop row">
-                        <div class="six columns value-prop">
-                            \(loadSVG(named: "controlbooth"))
-                            <div class="value-prop">
-                                <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
-                            </div>
-                            Start a ControlBooth pipeline<br>as the audio source
+                    <div class="six columns value-prop">
+                        \(loadSVG(named: "controlbooth"))
+                        <div class="value-prop">
+                            <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
                         </div>
+                        Start a ControlBooth pipeline<br>as the audio source
                     </div>
                 """ : ""
         default:
