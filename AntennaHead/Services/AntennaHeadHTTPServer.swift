@@ -1433,7 +1433,11 @@ final class AntennaHeadHTTPServer {
     /// one). Must match ControlBooth's own `AirPlayReceiverService
     /// .antennaHeadTaskName` exactly, since that's the string ControlBooth
     /// itself announces under when its local Settings UI turns the relay on.
-    private static let controlBoothAirPlaySourceName = "ControlBooth AirPlay Receiver"
+    /// Deliberately doesn't repeat "ControlBooth": `statusFunction` is always
+    /// rendered as "ControlBooth: <this name>" (see
+    /// `SDRController.startControlBoothListening`), so this used to read
+    /// "ControlBooth: ControlBooth AirPlay Receiver" before this was renamed.
+    private static let controlBoothAirPlaySourceName = "AirPlay Receiver"
 
     /// A separate section below the pipeline picker (see `controlBoothPageHTML`)
     /// since the AirPlay receiver isn't a saved Pipeline: its own status line

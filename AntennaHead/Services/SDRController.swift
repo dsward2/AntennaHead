@@ -600,6 +600,13 @@ final class SDRController {
     private(set) var activeFrequencyID: Int64?
     private(set) var statusFunction: String = "No active tuning"
     private(set) var stationName: String = ""
+    /// Track title/artist ControlBooth's AirPlay receiver is currently
+    /// reporting, while it's this controller's active source — see
+    /// `nowPlayingDisplayName`. Set by `ControlBoothEventReceiver` handling
+    /// the 'NpUp' AppleEvent; cleared in `terminateTasks()` and at the start
+    /// of every `startControlBoothListening(name:)` so a stale value can
+    /// never survive a source switch.
+    private(set) var controlBoothNowPlayingDetail: String?
     private(set) var frequencyDisplay: String = ""
     private(set) var modulation: String = ""
     private(set) var sampleRate: Int = 0
@@ -750,7 +757,18 @@ final class SDRController {
 
     /// The name shown by the status API and the "Now Playing" nav item.
     var nowPlayingDisplayName: String {
-        statusFunction == "Gqrx" ? gqrxNowPlayingName : statusFunction
+        if statusFunction == "Gqrx" { return gqrxNowPlayingName }
+        if taskMode == .customTask, let detail = controlBoothNowPlayingDetail, !detail.isEmpty {
+            return "\(statusFunction) — \(detail)"
+        }
+        return statusFunction
+    }
+
+    /// Called by `ControlBoothEventReceiver` handling the 'NpUp' AppleEvent.
+    /// `nil`/empty clears it (e.g. the AirPlay client paused or disconnected
+    /// while relay stayed on).
+    func setControlBoothNowPlayingDetail(_ text: String?) {
+        controlBoothNowPlayingDetail = (text?.isEmpty ?? true) ? nil : text
     }
     /// True when this Gqrx carries the device-control commands (PR #1446).
     private(set) var gqrxHasDeviceControl = false
@@ -1116,6 +1134,11 @@ final class SDRController {
         activeFrequencyID = nil
         statusFunction = "ControlBooth: \(name)"
         stationName = name
+        // Cleared here (not just on terminateTasks()) so switching straight
+        // from one ControlBooth source to another can't briefly show the
+        // previous one's leftover track text; a fresh 'NpUp' arrives shortly
+        // after if the new source has metadata to report.
+        controlBoothNowPlayingDetail = nil
         modulation = ""
         frequencyDisplay = ""
         sampleRate = Self.outputSampleRate
@@ -2194,6 +2217,7 @@ final class SDRController {
         taskMode = .stopped
         activeFrequencyID = nil
         statusFunction = "No active tuning"
+        controlBoothNowPlayingDetail = nil
         signalLevel = 0
         liveFrequencyHz = 0
         activeDeviceSerial = ""
