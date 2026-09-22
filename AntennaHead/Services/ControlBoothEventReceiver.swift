@@ -37,6 +37,13 @@ import SharedLogging
 ///                                  `NSRunningApplication` check.) A workspace
 ///                                  termination observer covers a crash or force-quit,
 ///                                  which never sends this notice.
+///   'NpUp'  now playing update     direct parameter: display text (e.g.
+///                                  "Artist — Title"), empty to clear. No
+///                                  reply expected. Sent by ControlBooth's
+///                                  AirPlay receiver whenever shairport-sync's
+///                                  metadata pipe reports a track change;
+///                                  ignored unless the AirPlay receiver is
+///                                  currently the active source.
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
 /// zero or one name, and 'Stop' naming anything other than the active source
@@ -79,8 +86,12 @@ final class ControlBoothEventReceiver: NSObject {
                                 andSelector: #selector(handleQuitting(_:withReplyEvent:)),
                                 forEventClass: Self.eventClass,
                                 andEventID: Self.fourCC("CBQt"))
+        manager.setEventHandler(self,
+                                andSelector: #selector(handleNowPlayingUpdate(_:withReplyEvent:)),
+                                forEventClass: Self.eventClass,
+                                andEventID: Self.fourCC("NpUp"))
         LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
-            "registered all 6 AE handlers (Strt/Stop/Runs/RecS/RecP/CBQt) — PID \(ProcessInfo.processInfo.processIdentifier)")
+            "registered all 7 AE handlers (Strt/Stop/Runs/RecS/RecP/CBQt/NpUp) — PID \(ProcessInfo.processInfo.processIdentifier)")
 
         // ControlBooth crashing or being force-quit sends no 'CBQt'; the
         // workspace notification catches those (and is a second signal for a
@@ -251,6 +262,21 @@ final class ControlBoothEventReceiver: NSObject {
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
                 "ControlBooth is quitting")
             controlBoothWentAway(reason: "ControlBooth is quitting")
+        }
+    }
+
+    /// Ignored unless the AirPlay receiver is currently the active source —
+    /// "AirPlay Receiver" must match ControlBooth's own
+    /// `AirPlayReceiverService.antennaHeadTaskName` (and this app's own
+    /// `AntennaHeadHTTPServer.controlBoothAirPlaySourceName`) exactly. Empty
+    /// direct parameter is a valid "clear", so this reads it directly rather
+    /// than through `directParameter(of:)` (which treats empty as missing).
+    @objc private func handleNowPlayingUpdate(_ event: NSAppleEventDescriptor,
+                                              withReplyEvent reply: NSAppleEventDescriptor) {
+        MainActor.assumeIsolated {
+            guard sdrController.taskMode == .customTask, sdrController.stationName == "AirPlay Receiver" else { return }
+            let text = event.paramDescriptor(forKeyword: Self.keyDirectObject)?.stringValue
+            sdrController.setControlBoothNowPlayingDetail(text)
         }
     }
 
