@@ -16,6 +16,9 @@ struct ConfigurationView: View {
     /// LAS doesn't expose its TLS port, so show the configured value.
     @State private var streamingHTTPSPort = PortSettings.default.streamingHTTPS
     @State private var showingEditSheet = false
+    /// Saved ports, so "Restore Default Ports…" can disable itself when nothing differs.
+    @State private var storedPorts = PortSettings.default
+    @State private var confirmingRestoreDefaultPorts = false
     @State private var controlBoothEnabled = false
     @State private var controlBoothAppPath = "/Applications/ControlBooth.app"
     @State private var launchControlBoothOnStartup = false
@@ -91,6 +94,23 @@ struct ConfigurationView: View {
                 portRow("Status Port (UDP):", Int(sdrController.statusUDPPort))
                 portRow("Audio Port (UDP):", Int(sdrController.udpInputPort))
                 portRow("ControlBooth Receive Port (UDP):", Int(sdrController.controlBoothReceivePort))
+                HStack {
+                    Spacer()
+                    Button("Restore Default Ports\u{2026}") {
+                        confirmingRestoreDefaultPorts = true
+                    }
+                    .disabled(storedPorts == .default)
+                    .help(storedPorts == .default
+                          ? "All ports are already set to their defaults."
+                          : "Reset every port above to its default (\(Self.defaultPortsSummary)).")
+                }
+            }
+            .confirmationDialog("Restore the default port numbers?",
+                                isPresented: $confirmingRestoreDefaultPorts) {
+                Button("Restore Default Ports") { restoreDefaultPorts() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(Self.defaultPortsSummary).\n\nThis restarts the streaming servers, which interrupts web audio players. Web clients bookmarked on a custom port will need the new address.")
             }
 
             Section("AAC Settings") {
@@ -450,6 +470,22 @@ struct ConfigurationView: View {
         }
     }
 
+    /// e.g. "Web 8090/8094, Streaming 8080/8443, UDP Status 6021, Audio 6020, ControlBooth 6019".
+    private static var defaultPortsSummary: String {
+        let d = PortSettings.default
+        return "Web \(d.webHTTP)/\(d.webHTTPS), Streaming \(d.streamingHTTP)/\(d.streamingHTTPS), "
+            + "UDP Status \(d.statusUDP), Audio \(d.audioUDP), ControlBooth \(d.controlBoothUDP)"
+    }
+
+    /// Stores the default ports (leaving the AAC bitrate alone) and restarts services,
+    /// the same path the edit sheet's Save uses.
+    private func restoreDefaultPorts() {
+        PortSettings.default.store()
+        NotificationCenter.default.post(
+            name: AntennaHeadHTTPServer.settingsDidChangeNotification, object: nil)
+        reloadSettings()
+    }
+
     private func portRow(_ label: String, _ port: Int) -> some View {
         LabeledContent(label) {
             Text(String(port))
@@ -471,7 +507,8 @@ struct ConfigurationView: View {
 
     private func reloadSettings() {
         outputBitrate = AntennaHeadHTTPServer.storedOutputBitrate(sqlite: .shared)
-        streamingHTTPSPort = PortSettings.load().streamingHTTPS
+        storedPorts = PortSettings.load()
+        streamingHTTPSPort = storedPorts.streamingHTTPS
         let enabled = (try? SQLiteController.shared.appSettingsValue(forKey: Self.controlBoothEnabledKey)) ?? nil
         controlBoothEnabled = enabled == "1"
         var resolvedFromBookmark = false
