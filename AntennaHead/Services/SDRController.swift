@@ -623,13 +623,24 @@ final class SDRController {
     /// falls back to this cache.
     private var deviceSerialByIndex: [UInt32: String] = [:]
 
+    /// One line of the on-screen Captions transcript: a finalized speech-to-
+    /// text segment, or a synthesized marker line echoing the spoken "Now
+    /// playing …" announcement (`insertAnnouncementCaption`), rendered in
+    /// italics client-side (`updateCaptionsDisplay` in antennahead.js) so a
+    /// retune is visible in the transcript even though `resetCaptions()`
+    /// already wiped whatever the previous source had.
+    struct CaptionLine: Sendable {
+        let text: String
+        let isAnnouncement: Bool
+    }
+
     /// Most recent not-yet-final caption hypothesis from the `PCMTranscriber`
     /// tap, or "" when there is none pending. Cleared when it finalizes and
     /// whenever a pipeline is (re)built or stopped.
     private(set) var liveCaption: String = ""
-    /// Finalized caption segments for the current listening session, oldest
+    /// Finalized caption lines for the current listening session, oldest
     /// first, capped at `captionHistoryLimit`. Reset on each retune.
-    private(set) var captionHistory: [String] = []
+    private(set) var captionHistory: [CaptionLine] = []
     private static let captionHistoryLimit = 200
     /// Monotonic count of finalized caption segments for the current session.
     /// `captionHistory.count` plateaus at `captionHistoryLimit` once the ring
@@ -826,11 +837,19 @@ final class SDRController {
         case .final:
             liveCaption = ""
             guard !text.isEmpty else { return }
-            captionHistory.append(text)
-            captionSeq &+= 1
-            if captionHistory.count > Self.captionHistoryLimit {
-                captionHistory.removeFirst(captionHistory.count - Self.captionHistoryLimit)
-            }
+            appendCaptionLine(text, isAnnouncement: false)
+        }
+    }
+
+    /// Appends one line to `captionHistory`, bumping `captionSeq` and trimming
+    /// the ring to `captionHistoryLimit`. Shared by finalized STT segments
+    /// (`applyCaption`) and the synthesized announcement marker
+    /// (`insertAnnouncementCaption`).
+    private func appendCaptionLine(_ text: String, isAnnouncement: Bool) {
+        captionHistory.append(CaptionLine(text: text, isAnnouncement: isAnnouncement))
+        captionSeq &+= 1
+        if captionHistory.count > Self.captionHistoryLimit {
+            captionHistory.removeFirst(captionHistory.count - Self.captionHistoryLimit)
         }
     }
 
@@ -840,6 +859,23 @@ final class SDRController {
         liveCaption = ""
         captionHistory.removeAll()
         captionSeq = 0
+    }
+
+    /// Seeds the just-reset transcript with a styled marker line echoing the
+    /// spoken "Now playing …" announcement — the plain core text, not the
+    /// longer "…with audio delay of N seconds" variant some tunings actually
+    /// speak, since that wording reads oddly repeated as a caption line.
+    /// Because `resetCaptions()` already wiped anything left over from the
+    /// previous source, this line doubles as the boundary between the old
+    /// transcript and the new one; it's only an approximation of the real
+    /// audio timing, since the spoken clip itself trails the retune by
+    /// however long the pipeline takes to (re)launch. Called once per
+    /// pipeline (re)build, only when both live captions and the spoken
+    /// announcement are enabled — see `addTranscriberStageIfEnabled`.
+    private func insertAnnouncementCaption(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        appendCaptionLine(trimmed, isAnnouncement: true)
     }
 
     // MARK: Public control API (ported from SDRController.h)
@@ -927,7 +963,7 @@ final class SDRController {
         radioTaskPipelineManager.add(capture)
         radioTaskPipelineManager.add(resample)
         addAnnouncementAndDelayStages(announcement)
-        addTranscriberStageIfEnabled()
+        addTranscriberStageIfEnabled(announcementText: announcement?.pending.text)
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
@@ -979,7 +1015,7 @@ final class SDRController {
 
         radioTaskPipelineManager.add(player)
         addAnnouncementAndDelayStages(announcement)
-        addTranscriberStageIfEnabled()
+        addTranscriberStageIfEnabled(announcementText: announcement?.pending.text)
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
@@ -1066,7 +1102,7 @@ final class SDRController {
 
         radioTaskPipelineManager.add(receiver)
         addAnnouncementAndDelayStages(announcement)
-        addTranscriberStageIfEnabled()
+        addTranscriberStageIfEnabled(announcementText: announcement?.pending.text)
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
@@ -1231,7 +1267,7 @@ final class SDRController {
         radioTaskPipelineManager.add(receiver)
         radioTaskPipelineManager.add(resample)
         addAnnouncementAndDelayStages(announcement)
-        addTranscriberStageIfEnabled()
+        addTranscriberStageIfEnabled(announcementText: announcement?.pending.text)
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(sender)
@@ -2843,7 +2879,7 @@ final class SDRController {
         radioTaskPipelineManager.add(resample)
         if let deemphasis { radioTaskPipelineManager.add(deemphasis) }
         addAnnouncementAndDelayStages(announcement)
-        addTranscriberStageIfEnabled()
+        addTranscriberStageIfEnabled(announcementText: announcement?.pending.text)
         addSpatialGainStageIfEnabled()
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
@@ -3037,11 +3073,18 @@ final class SDRController {
     /// the source. Caption JSON always goes to `transcriptionUDPPort`; an SRT
     /// transcript is also written to the shared Recordings folder when the
     /// "save transcript" setting is on.
-    private func addTranscriberStageIfEnabled() {
+    ///
+    /// `announcementText`, when given, is the same "Now playing …" line the
+    /// spoken announcement reads (each call site's `PendingAnnouncement.text`)
+    /// — it's echoed into the freshly-reset transcript as a styled marker
+    /// line via `insertAnnouncementCaption`, independent of whether the
+    /// PCMTranscriber tap below is actually available.
+    private func addTranscriberStageIfEnabled(announcementText: String? = nil) {
         transcriptFileURL = nil
         // A new pipeline means a new (or no) tap — start its transcript fresh.
         resetCaptions()
         guard transcriptionEnabled else { return }
+        if let announcementText { insertAnnouncementCaption(announcementText) }
 
         let path = helperPath("PCMTranscriber")
         guard FileManager.default.isExecutableFile(atPath: path) else {

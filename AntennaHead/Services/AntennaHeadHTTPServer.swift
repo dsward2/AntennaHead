@@ -2578,12 +2578,18 @@ final class AntennaHeadHTTPServer {
     /// Live speech-to-text state for a polling caption client: whether the
     /// `PCMTranscriber` tap is enabled, the current volatile hypothesis, and
     /// the finalized transcript so far (oldest first). Empty/blank when
-    /// transcription is off or nothing has been recognized yet.
+    /// transcription is off or nothing has been recognized yet. Each `final`
+    /// entry is `{"text":…, "announcement": bool}` — `announcement` marks the
+    /// synthesized "Now playing …" lines `SDRController.insertAnnouncementCaption`
+    /// seeds the transcript with, which the web UI renders in italics.
     @MainActor private func captionsJSON() -> Data {
+        let finals = (sdrController?.captionHistory ?? []).map {
+            ["text": $0.text, "announcement": $0.isAnnouncement] as [String: Any]
+        }
         let dict: [String: Any] = [
             "enabled": sdrController?.transcriptionEnabled ?? false,
             "live": sdrController?.liveCaption ?? "",
-            "final": sdrController?.captionHistory ?? [],
+            "final": finals,
             "seq": sdrController?.captionSeq ?? 0
         ]
         return (try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])) ?? Data("{}".utf8)

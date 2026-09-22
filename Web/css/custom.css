@@ -1016,6 +1016,22 @@ svg.lr-animation {
     content: "Waiting for speech\2026";
     opacity: 0.55;
 }
+/* A synthesized "Now playing …" marker line (SDRController.
+   insertAnnouncementCaption) rather than a transcribed one. It's always the
+   first line of a freshly-reset transcript, so the top border/spacing reads
+   as the boundary between the previous source's captions and this one's. */
+.caption-transcript p.caption-announcement {
+    font-style: italic;
+    opacity: 0.75;
+    border-top: 1px solid var(--ah-border);
+    padding-top: 0.45em;
+    margin-top: 0.45em;
+}
+.caption-transcript p.caption-announcement:first-child {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+}
 .caption-live {
     margin-top: 10px;
     padding: 8px 14px;

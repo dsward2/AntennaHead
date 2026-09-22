@@ -1825,7 +1825,13 @@ var controlBoothPollIntervalID = setInterval(controlBoothPoll, 3000);
 // SDRController's TranscriptionCaptionListener, which consumes the
 // PCMTranscriber tap's newline-delimited JSON on UDP 6023. Runs globally
 // like aacRecorderPoll(); it's a no-op until the captions fragment is in
-// the DOM. Shape: {"enabled":bool, "live":str, "final":[str,...]}.
+// the DOM. Shape: {"enabled":bool, "live":str,
+// "final":[{"text":str,"announcement":bool},...]}. A `final` entry with
+// "announcement":true is a synthesized line echoing the spoken "Now
+// playing …" clip (SDRController.insertAnnouncementCaption) rather than a
+// transcribed one — rendered in italics with a leading marker, since
+// `resetCaptions()` wipes the transcript on every retune and this is the
+// first line of the new one.
 var captionsLastRenderedSeq = -1;
 var captionsPollInFlight = false;
 
@@ -1884,7 +1890,15 @@ function updateCaptionsDisplay(data)
             var html = "";
             for (var i = 0; i < finals.length; i++)
             {
-                html += "<p>" + captionsEscapeHTML(finals[i]) + "</p>";
+                // Each entry is normally {"text":str,"announcement":bool}; a
+                // bare string is accepted too so an older server frame still
+                // renders (just without the announcement styling).
+                var entry = finals[i];
+                var isObject = (entry !== null && typeof entry === "object");
+                var lineText = isObject ? entry.text : entry;
+                var isAnnouncement = isObject && !!entry.announcement;
+                var cssClass = isAnnouncement ? " class='caption-announcement'" : "";
+                html += "<p" + cssClass + ">" + captionsEscapeHTML(lineText) + "</p>";
             }
             transcript.innerHTML = html;
             transcript.scrollTop = transcript.scrollHeight;   // keep newest in view
