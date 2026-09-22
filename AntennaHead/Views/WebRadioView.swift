@@ -243,6 +243,28 @@ struct WebRadioView: NSViewRepresentable {
             }
         }
 
+        /// Handles `<input type="file">` activation (Speak RSS Headlines'
+        /// "Import OPML…" picker) — without this, WKWebView on macOS shows
+        /// nothing at all when a file input is clicked (no error, no panel),
+        /// same silent-swallow behavior `window.alert()` has above without
+        /// its own handler.
+        func webView(_ webView: WKWebView,
+                     runOpenPanelWith parameters: WKOpenPanelParameters,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping ([URL]?) -> Void) {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.canChooseFiles = true
+            if let window = webView.window {
+                panel.beginSheetModal(for: window) { response in
+                    completionHandler(response == .OK ? panel.urls : nil)
+                }
+            } else {
+                completionHandler(panel.runModal() == .OK ? panel.urls : nil)
+            }
+        }
+
         /// Bridge for `recorderBridgeScript`: substitutes a container-writable
         /// temp path for the LiveAudioServer recorder to write to (a raw
         /// user-typed path like `~/Downloads/...` fails silently under the App

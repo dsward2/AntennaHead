@@ -2253,7 +2253,13 @@ final class AntennaHeadHTTPServer {
         s += "</table></div>"
         s += "<div class='tts-select-actions'>"
         s += "<input class='button' type='button' value='Add New Feed' onclick=\"loadContent('addrssfeedform.html');\">"
-        s += "<input class='button' type='button' value='Import OPML\u{2026}' onclick=\"getElementById('rss_opml_file').click();\">"
+        // A `<label for=…>` — not a button whose onclick calls .click() on the
+        // input — is what actually opens the file picker reliably in the
+        // app's WKWebView: browsers treat activating a label as a genuine
+        // user action on its target control, whereas a script-triggered
+        // .click() on a hidden file input is exactly the kind of synthetic
+        // interaction WebKit is prone to silently ignore.
+        s += "<label class='button' for='rss_opml_file'>Import OPML\u{2026}</label>"
         s += "<input type='file' id='rss_opml_file' accept='.opml,.xml,text/xml' style='display:none;' onchange='importOPMLFeeds(this);'>"
         s += "</div><br>&nbsp;<br>"
         return s
