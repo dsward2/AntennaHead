@@ -1405,7 +1405,16 @@ final class AntennaHeadHTTPServer {
     /// answer when it's not open.
     @MainActor private func apiControlBoothStatusResponse() -> HTTPResponse {
         let isRunning = ControlBoothClient.isControlBoothRunning
-        let pipelines = isRunning ? ((try? ControlBoothClient.pipelines()) ?? []) : []
+        var pipelines: [String] = []
+        if isRunning {
+            // A failed call must not look like "no pipelines" — see
+            // controlBoothUnreachableMessage(_:).
+            do {
+                pipelines = try ControlBoothClient.pipelines()
+            } catch {
+                return jsonErrorResponse(Self.controlBoothUnreachableMessage(error), status: 502)
+            }
+        }
         let airPlay = isRunning ? (try? ControlBoothClient.airPlayStatus()) : nil
         return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines,
                                             activePipelineName: sdrController?.activeControlBoothPipelineName,
@@ -1612,6 +1621,19 @@ final class AntennaHeadHTTPServer {
         return apiNowPlayingResponse()
     }
 
+    /// Shown when ControlBooth is running but didn't answer the pipeline-list
+    /// Apple Event. Before this, the page and the API both swallowed the
+    /// error and reported "No pipelines configured", which sent people
+    /// looking in ControlBooth for a problem that wasn't there. Seen in
+    /// practice when the running copy's app bundle was deleted after launch
+    /// (a cleared DerivedData folder): the process lives on, so it still
+    /// counts as running, but Apple Events addressed to its bundle ID fail.
+    nonisolated static func controlBoothUnreachableMessage(_ error: Error) -> String {
+        "ControlBooth is running, but AntennaHead couldn't get its pipeline list (\(error.localizedDescription)). "
+            + "Quit and reopen ControlBooth, and check that AntennaHead is allowed to control it in "
+            + "System Settings › Privacy & Security › Automation."
+    }
+
     @MainActor private func controlBoothPageHTML() -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
@@ -1638,8 +1660,11 @@ final class AntennaHeadHTTPServer {
             s += "<p id='controlbooth_active'>Now playing: <strong>\(htmlText(activePipeline))</strong></p>"
         }
         if isRunning {
-            let pipelines = (try? ControlBoothClient.pipelines()) ?? []
-            if pipelines.isEmpty {
+            let pipelinesResult = Result { try ControlBoothClient.pipelines() }
+            let pipelines = (try? pipelinesResult.get()) ?? []
+            if case .failure(let error) = pipelinesResult {
+                s += "<p style='color:#cc0000'>\(htmlText(Self.controlBoothUnreachableMessage(error)))</p>"
+            } else if pipelines.isEmpty {
                 s += "<p>No pipelines configured in ControlBooth.</p>"
             } else {
                 s += "<form class='controlbooth_form' id='controlBoothForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
