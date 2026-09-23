@@ -1117,6 +1117,38 @@ final class AntennaHeadHTTPServer {
         case APIEndpoint.controlBoothAirPlayStop:
             return apiControlBoothAirPlayStopResponse()
 
+        case APIEndpoint.gqrxStatus:
+            return apiGqrxStatusResponse()
+
+        case APIEndpoint.gqrxLaunch:
+            return apiGqrxLaunchResponse()
+
+        case APIEndpoint.gqrxStart:
+            return apiGqrxStartResponse(body: request.body)
+
+        case APIEndpoint.audioFiles:
+            return apiEncode(apiFolderListing(folderURL: resolvePlayAudioFilesFolder(),
+                                              extensions: Self.playAudioFilesAudioExtensions,
+                                              playlistExtensions: Self.playAudioFilesPlaylistExtensions))
+
+        case APIEndpoint.audioFilesStart:
+            return apiAudioFilesStartResponse(body: request.body)
+
+        case APIEndpoint.textToSpeech:
+            return apiEncode(apiFolderListing(folderURL: resolveTextToSpeechFolder(), extensions: ["txt"]))
+
+        case APIEndpoint.textToSpeechStart:
+            return apiTextToSpeechStartResponse(body: request.body)
+
+        case APIEndpoint.rssFeeds:
+            let feeds = ((try? sqlite?.allRSSFeedRecords()) ?? []).compactMap { feed in
+                feed.id.map { RSSFeedSummary(id: $0, name: feed.name, feedURL: feed.feedURL) }
+            }
+            return apiEncode(feeds)
+
+        case APIEndpoint.rssHeadlinesStart:
+            return await apiRSSHeadlinesStartResponse(body: request.body)
+
         case APIEndpoint.spatialAudio:
             return apiSpatialAudioResponse()
 
@@ -1406,6 +1438,127 @@ final class AntennaHeadHTTPServer {
         return apiNowPlayingResponse()
     }
 
+    /// The JSON-API equivalent of `gqrxFormHTML()`'s state.
+    @MainActor private func apiGqrxStatusResponse() -> HTTPResponse {
+        apiEncode(GqrxStatus(isRunning: Self.isGqrxRunning,
+                             receivePort: Int(sdrController?.gqrxReceivePort ?? 7355)))
+    }
+
+    /// The JSON-API equivalent of `/gqrxlaunched.html`: launch Gqrx and start
+    /// listening in stereo right away, with Gqrx's own DSP started once it
+    /// connects. Like `apiControlBoothLaunchResponse()`, the returned status
+    /// may still show `isRunning == false` while Gqrx is starting up.
+    @MainActor private func apiGqrxLaunchResponse() -> HTTPResponse {
+        launchGqrx()
+        sdrController?.startGqrxListening(channels: 2, alsoStartReceiver: true)
+        return apiGqrxStatusResponse()
+    }
+
+    /// The JSON-API equivalent of `/gqrxlistenbuttonclicked.html`.
+    @MainActor private func apiGqrxStartResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartGqrxRequest.self, from: body),
+              req.channels == 1 || req.channels == 2 else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        sdrController?.startGqrxListening(channels: req.channels)
+        return apiNowPlayingResponse()
+    }
+
+    /// Lists a configured source folder for `FolderListing` — the JSON-API
+    /// equivalent of `playAudioFilesListHTML()`/`textToSpeechFilesListHTML()`
+    /// (and `playAudioFilesPlaylistNames()` when `playlistExtensions` is
+    /// non-empty). `folderURL` is the already-resolved bookmark, or `nil`
+    /// when no folder is configured.
+    @MainActor private func apiFolderListing(folderURL: URL?, extensions: Set<String>,
+                                             playlistExtensions: Set<String> = []) -> FolderListing {
+        guard let folderURL else {
+            return FolderListing(folderConfigured: false, folderPath: nil, files: [])
+        }
+        let accessed = folderURL.startAccessingSecurityScopedResource()
+        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles])) ?? []
+        let byName: (URL, URL) -> Bool = {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
+        let files = entries
+            .filter { extensions.contains($0.pathExtension.lowercased()) }
+            .sorted(by: byName)
+            .map { url -> FolderFile in
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                return FolderFile(name: url.lastPathComponent,
+                                  modifiedAt: values?.contentModificationDate ?? .distantPast,
+                                  size: Int64(values?.fileSize ?? 0))
+            }
+        let playlists = entries
+            .filter { playlistExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted(by: byName)
+            .map(\.lastPathComponent)
+        return FolderListing(folderConfigured: true, folderPath: folderURL.path, files: files, playlists: playlists)
+    }
+
+    /// The JSON-API equivalent of `/playaudiofileslistenbuttonclicked.html`.
+    /// Unlike that route, an empty file list is an error rather than a start:
+    /// starting with nothing to play would just stop whatever's playing now.
+    @MainActor private func apiAudioFilesStartResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartAudioFilesRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        let files: [SDRController.PlayableAudioFile]
+        let sequence: SDRController.PlayAudioFilesSequence
+        if let playlistName = req.playlistName, !playlistName.isEmpty {
+            files = playAudioFilesPlaylistFiles(playlistName: playlistName)
+            sequence = .asListed
+        } else {
+            files = playAudioFilesFolderFiles(selectedNames: req.fileNames.map(Set.init))
+            sequence = SDRController.PlayAudioFilesSequence(rawValue: req.sequence.rawValue) ?? .chronological
+        }
+        guard !files.isEmpty else {
+            return jsonErrorResponse("There are no audio files to play.", status: 404)
+        }
+        sdrController?.startPlayAudioFiles(files: files, sequence: sequence, repeatForever: req.repeatForever)
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/texttospeechlistenbuttonclicked.html`, with
+    /// the same empty-list rule as `apiAudioFilesStartResponse`.
+    @MainActor private func apiTextToSpeechStartResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartTextToSpeechRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        let files = textToSpeechFolderFiles(selectedNames: req.fileNames.map(Set.init))
+        guard !files.isEmpty else {
+            return jsonErrorResponse("There are no text files to speak.", status: 404)
+        }
+        let sequence = SDRController.TextToSpeechSequence(rawValue: req.sequence.rawValue) ?? .chronological
+        sdrController?.startTextToSpeech(files: files, sequence: sequence, repeatForever: req.repeatForever)
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `/speakrssheadlineslistenbuttonclicked.html`
+    /// in its "use each feed's own voice" mode. Fetches and renders before
+    /// responding, and leaves the current source playing if nothing came back
+    /// (same reasoning as that route's comment).
+    @MainActor private func apiRSSHeadlinesStartResponse(body: Data) async -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(StartRSSHeadlinesRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        guard !req.feedIDs.isEmpty else {
+            return jsonErrorResponse("Select at least one feed.", status: 400)
+        }
+        let clips = await speakRSSHeadlinesClips(feedIDs: req.feedIDs, itemsPerFeed: min(20, max(1, req.itemsPerFeed)),
+                                                 alternate: false, voiceA: "", voiceB: "")
+        let renderedFiles = await sdrController?.renderSpeechClips(clips) ?? []
+        guard !renderedFiles.isEmpty else {
+            return jsonErrorResponse("Couldn't get any headlines from the selected feeds.", status: 502)
+        }
+        sdrController?.startPlayAudioFiles(files: renderedFiles, sequence: .asListed, repeatForever: req.repeatForever,
+                                          statusLabel: "Speak RSS Headlines")
+        return apiNowPlayingResponse()
+    }
+
     @MainActor private func controlBoothPageHTML() -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
@@ -1473,7 +1626,7 @@ final class AntennaHeadHTTPServer {
     /// rendered as "ControlBooth: <this name>" (see
     /// `SDRController.startControlBoothListening`), so this used to read
     /// "ControlBooth: ControlBooth AirPlay Receiver" before this was renamed.
-    private static let controlBoothAirPlaySourceName = "AirPlay Receiver"
+    private static let controlBoothAirPlaySourceName = ControlBoothStatus.airPlaySourceName
 
     /// A separate section below the pipeline picker (see `controlBoothPageHTML`)
     /// since the AirPlay receiver isn't a saved Pipeline: its own status line
