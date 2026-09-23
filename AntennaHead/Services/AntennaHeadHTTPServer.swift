@@ -3388,17 +3388,22 @@ final class AntennaHeadHTTPServer {
     /// entry is `{"text":…, "announcement": bool}` — `announcement` marks the
     /// synthesized "Now playing …" lines `SDRController.insertAnnouncementCaption`
     /// seeds the transcript with, which the web UI renders in italics.
+    ///
+    /// Encoded from `AntennaHeadAPI`'s `CaptionsStatus` rather than a
+    /// hand-built dictionary, so a shape change here is a compile error in
+    /// the package AntennaHeadTV decodes with instead of a silent mismatch
+    /// (which is how `final` becoming objects once broke its Captions tab).
     @MainActor private func captionsJSON() -> Data {
-        let finals = (sdrController?.captionHistory ?? []).map {
-            ["text": $0.text, "announcement": $0.isAnnouncement] as [String: Any]
-        }
-        let dict: [String: Any] = [
-            "enabled": sdrController?.transcriptionEnabled ?? false,
-            "live": sdrController?.liveCaption ?? "",
-            "final": finals,
-            "seq": sdrController?.captionSeq ?? 0
-        ]
-        return (try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])) ?? Data("{}".utf8)
+        let status = CaptionsStatus(
+            enabled: sdrController?.transcriptionEnabled ?? false,
+            live: sdrController?.liveCaption ?? "",
+            final: (sdrController?.captionHistory ?? []).map {
+                CaptionLine(text: $0.text, isAnnouncement: $0.isAnnouncement)
+            },
+            seq: sdrController?.captionSeq ?? 0)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(status)) ?? Data("{}".utf8)
     }
 
     /// Parses a jQuery `serializeArray()` body — `[{"name":..,"value":..}, ...]`
