@@ -1684,6 +1684,32 @@ final class SDRController {
         gqrxRemote?.setOutputDevice(device)
     }
 
+    /// Gqrx's bookmarks for a client that wants to pick one: the live list
+    /// while listening to Gqrx (it may still be empty for the first second or
+    /// so, until the client connects), otherwise a one-shot download — see
+    /// `GqrxRemoteControlClient.fetchBookmarksOnce`.
+    func gqrxBookmarksForListing() async -> [GqrxBookmark]? {
+        if gqrxRemote != nil { return gqrxBookmarks }
+        return await GqrxRemoteControlClient.fetchBookmarksOnce()
+    }
+
+    /// Plays one of Gqrx's bookmarks: tunes the running Gqrx to it if
+    /// AntennaHead is already listening to Gqrx, otherwise starts listening
+    /// first (and starts Gqrx's own receiver, like Launch Gqrx does). In that
+    /// case the deferred "Now playing …" announcement names the bookmark once
+    /// Gqrx reports the new frequency, so it isn't cancelled here the way
+    /// `gqrxApplyBookmark` cancels it.
+    func gqrxPlayBookmark(_ frequencyHz: Int64, channels: Int = 2) {
+        if statusFunction == "Gqrx", gqrxRemote != nil {
+            gqrxApplyBookmark(frequencyHz)
+            return
+        }
+        startGqrxListening(channels: channels, alsoStartReceiver: true)
+        // Queued on the new client's serial queue behind its discovery, so it
+        // goes out as soon as the connection is up.
+        gqrxRemote?.applyBookmarkFrequency(frequencyHz)
+    }
+
     func gqrxApplyBookmark(_ frequencyHz: Int64) {
         // This Tune speaks the bookmark's own name below, so a still-pending
         // first announcement would only talk over it.
