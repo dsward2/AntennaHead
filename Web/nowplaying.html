@@ -17,9 +17,9 @@
                  outside #now-playing-details, which each poll replaces. -->
             <div id="np-device-notice" class="np-device-notice" role="status" hidden>
                 <p id="np-device-notice-text"></p>
-                <input id="np-release-gqrx" class="button" type="button" value="Release from Gqrx and Retry" hidden
-                       title="Ask Gqrx to release the dongle (stopping its DSP isn't enough), then tune again. Listen to Gqrx gives it back."
-                       onclick="nowPlayingReleaseGqrx();">
+                <input id="np-quit-gqrx" class="button" type="button" value="Quit Gqrx and Retry" hidden
+                       title="Quit Gqrx, which holds this dongle (stopping its DSP doesn't free it), then tune again. Launch Gqrx brings it back."
+                       onclick="nowPlayingQuitGqrx();">
             </div>
             <!-- Outside #now-playing-details on purpose: that div's innerHTML is
                  fully replaced by updateStatusDisplay() on every status poll

@@ -968,11 +968,16 @@ final class AntennaHeadHTTPServer {
             updateSpatialAudio(fromBody: request.body)
             return okResponse()
 
-        case "/releasegqrxdevice.html":
-            // The Now Playing notice's "Release from Gqrx and Retry" button,
-            // shown when the RTL-SDR preflight refused a tune because Gqrx
-            // holds that dongle (`usb_device_unavailable.can_release_gqrx`).
-            sdrController?.releaseGqrxDeviceAndRetry()
+        case "/quitgqrxandretry.html":
+            // The Now Playing notice's "Quit Gqrx and Retry" button, shown when
+            // the RTL-SDR preflight refused a tune because Gqrx holds that
+            // dongle (`usb_device_unavailable.can_quit_gqrx`).
+            sdrController?.quitGqrxAndRetry()
+            return okResponse()
+
+        case "/quitgqrx.html", "/restartgqrx.html":
+            // The Gqrx page's "Quit Gqrx" / "Quit and Restart Gqrx" buttons.
+            sdrController?.quitGqrx(restart: path == "/restartgqrx.html")
             return okResponse()
 
         case "/nowplayingstoppipeline.html":
@@ -1725,15 +1730,11 @@ final class AntennaHeadHTTPServer {
         NSWorkspace.shared.open(url)
     }
 
-    /// Bundle identifiers to check when detecting whether Gqrx is already
-    /// running — either a stock build or the custom "Gqrx for AntennaHead"
-    /// build (`com.dsward.gqrx-for-antennahead`, see
-    /// `Docs/GQRX_FOR_ANTENNAHEAD_BUILD.md`).
-    private static let gqrxBundleIdentifiers = ["com.dsward.gqrx-for-antennahead", "dk.gqrx.gqrx"]
-
-    private static var isGqrxRunning: Bool {
-        gqrxBundleIdentifiers.contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
-    }
+    /// Whether a stock Gqrx or the custom "Gqrx for AntennaHead" build
+    /// (`com.dsward.gqrx-for-antennahead`, see
+    /// `Docs/GQRX_FOR_ANTENNAHEAD_BUILD.md`) is running — `GqrxApp` holds the
+    /// bundle identifiers.
+    private static var isGqrxRunning: Bool { GqrxApp.isRunning }
 
     /// Launches Gqrx using the security-scoped bookmark saved by
     /// ConfigurationView's file picker, falling back to the stored path, then
@@ -1976,6 +1977,17 @@ final class AntennaHeadHTTPServer {
             s += "<form action='javascript:loadContent(&quot;gqrxlaunched.html&quot;)'>"
             s += "<input class='twelve columns button button-primary' type='submit' value='Launch Gqrx'>"
             s += "</form><br>&nbsp;<br>"
+        } else {
+            // A running Gqrx holds its dongle from launch (stopping its DSP
+            // doesn't free it), and sometimes its audio turns to noise with
+            // streaks down the waterfall; quitting fixes the first, a restart
+            // the second. Both are normal quits (see SDRController.quitGqrx).
+            s += "<div class='gqrx-app-buttons'>"
+            s += "<input class='button' type='button' value='Quit Gqrx' onclick='gqrxQuitApp(false);' "
+            s += "title='Quit Gqrx, freeing the RTL-SDR it holds.'>"
+            s += "<input class='button' type='button' value='Quit and Restart Gqrx' onclick='gqrxQuitApp(true);' "
+            s += "title='Quit Gqrx and open it again — for when its audio is noise and the waterfall shows vertical streaks.'>"
+            s += "</div>"
         }
         s += "<form class='gqrx_form' id='gqrxForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
         s += "<label>Listen to Gqrx</label>"
@@ -3530,7 +3542,7 @@ final class AntennaHeadHTTPServer {
             dict["usb_device_unavailable"] = [
                 "message": report.message,
                 "device": report.deviceLabel,
-                "can_release_gqrx": report.gqrxCanRelease,
+                "can_quit_gqrx": report.gqrxIsHolder,
             ]
         }
         if sdrController?.isFillerPlaying == true {
@@ -3561,8 +3573,6 @@ final class AntennaHeadHTTPServer {
                 "udp_audio_running": sdr.gqrxUDPAudioRunning,
                 "has_udp_control": sdr.gqrxHasUDPControl,
                 "udp_streaming_on_gqrx": sdr.gqrxUDPStreamingOnGqrx,
-                "has_input_control": sdr.gqrxHasInputControl,
-                "input_open": sdr.gqrxInputOpen,
                 "modes": sdr.gqrxModeList,
                 "bookmarks": sdr.gqrxBookmarks.map { [
                     "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,

@@ -690,11 +690,11 @@ final class SDRController {
 
     /// Why the last RTL-SDR tune was refused before launch — the dongle is
     /// held by another program or isn't connected (`RTLSDRPreflight`). Drives
-    /// the notice and its "Release from Gqrx and Retry" button in Now Playing,
-    /// native and web. Cleared by the next successful start and by Stop.
+    /// the notice and its "Quit Gqrx and Retry" button in Now Playing, native
+    /// and web. Cleared by the next successful start and by Stop.
     private(set) var deviceUnavailableReport: RTLSDRPreflightReport?
     /// The most recent RTL-SDR tune `startPipeline` was asked for, so
-    /// `releaseGqrxDeviceAndRetry()` can redo a refused one.
+    /// `quitGqrxAndRetry()` can redo a refused one.
     @ObservationIgnored private var lastRTLTune: (tuning: Tuning, mode: TaskMode, frequencyID: Int64?)?
 
     // MARK: Gqrx remote control
@@ -794,11 +794,6 @@ final class SDRController {
     /// (`gqrx-rc-udp-streaming` patch) — lets the web UI note when an older
     /// Gqrx build won't respond to `gqrxSetUDPAudioRunning`'s remote half.
     private(set) var gqrxHasUDPControl = false
-    /// True when this Gqrx carries `U INPUT` (dsward2/gqrx#3), so it can be
-    /// asked to release its SDR device for AntennaHead and take it back.
-    private(set) var gqrxHasInputControl = false
-    /// Whether Gqrx has its SDR input device open (false while released).
-    private(set) var gqrxInputOpen = true
     /// Gqrx's own UDP-streaming button state, as it last reported it (`u
     /// UDP`) — purely informational; AntennaHead's own relay state is
     /// tracked separately by `gqrxUDPAudioRunning`, which is what this
@@ -1284,8 +1279,6 @@ final class SDRController {
             // which is guaranteed to have a live connection to send it on.
             gqrxNeedsUDPStreamSync = true
             if alsoStartReceiver { gqrxNeedsDSPStart = true }
-            gqrxNeedsInputReopen = true
-            gqrxInputReopenAttempts = 0
         }
     }
 
@@ -1305,14 +1298,6 @@ final class SDRController {
     /// also start Gqrx's own DSP once connected — see `startGqrxListening`'s
     /// `alsoStartReceiver`.
     @ObservationIgnored private var gqrxNeedsDSPStart = false
-    /// Set by `startGqrxListening`: if Gqrx reports its input device released
-    /// (`U INPUT 0`, e.g. by "Release from Gqrx and Retry"), reopen it once
-    /// connected — listening to Gqrx needs Gqrx to have its dongle. Retried
-    /// each poll (our own rtl_fm may still be exiting, and Gqrx answers RPRT 1
-    /// while the device is busy) up to `gqrxInputReopenMaxAttempts` times.
-    @ObservationIgnored private var gqrxNeedsInputReopen = false
-    @ObservationIgnored private var gqrxInputReopenAttempts = 0
-    private static let gqrxInputReopenMaxAttempts = 10
     /// True while the Gqrx page has paused Gqrx's receiver and handed the LAS
     /// input over to the filler loop; resuming rebuilds the relay.
     @ObservationIgnored private var gqrxPausedToFiller = false
@@ -1490,20 +1475,6 @@ final class SDRController {
         if !s.inputDevice.isEmpty { gqrxInputDevice = s.inputDevice }
         if !s.outputDevice.isEmpty { gqrxOutputDevice = s.outputDevice }
         gqrxHasUDPControl = s.hasUDPControl
-        gqrxHasInputControl = s.hasInputControl
-        if let v = s.inputOpen { gqrxInputOpen = v }
-        if gqrxNeedsInputReopen, s.hasInputControl, let open = s.inputOpen {
-            if open {
-                gqrxNeedsInputReopen = false
-            } else if gqrxInputReopenAttempts < Self.gqrxInputReopenMaxAttempts {
-                gqrxInputReopenAttempts += 1
-                gqrxRemote?.setInputOpen(true)
-            } else {
-                gqrxNeedsInputReopen = false
-                LogStore.shared.log(.error, source: "SDRController",
-                                    "Gqrx couldn't reopen its input device — another program still holds it")
-            }
-        }
         if let v = s.udpStreaming {
             // Auto-follow: when Gqrx's *own* reported UDP state changes from
             // what it was on the previous poll — a manual click over there,
@@ -1557,8 +1528,6 @@ final class SDRController {
         gqrxInputDevices = []
         gqrxOutputDevices = []
         gqrxDSPRunning = false
-        gqrxHasInputControl = false
-        gqrxInputOpen = true
         gqrxPausedToFiller = false
         // Reset so a stale value from a *previous* Gqrx session can't look
         // like a real transition the moment the first poll of a fresh one
@@ -2979,30 +2948,62 @@ final class SDRController {
         deviceUnavailableReport = report
     }
 
-    /// "Release from Gqrx and Retry": asks Gqrx to release the dongle the
-    /// refused tune needs (`U INPUT 0` — stopping its DSP isn't enough, the
-    /// device stays claimed), then retries that tune. Only acts when the
-    /// preflight found Gqrx holding that very device. "Listen to Gqrx" hands
-    /// the device back (see `gqrxNeedsInputReopen`).
-    func releaseGqrxDeviceAndRetry() {
-        guard let report = deviceUnavailableReport, report.gqrxCanRelease,
+    /// "Quit Gqrx and Retry": quits Gqrx, which holds the dongle the refused
+    /// tune needs (stopping its DSP isn't enough — Gqrx keeps the device open
+    /// from launch), then retries that tune. Only acts when the preflight
+    /// found Gqrx holding that very device. "Launch Gqrx" brings it back.
+    func quitGqrxAndRetry() {
+        guard let report = deviceUnavailableReport, report.gqrxIsHolder,
               let tune = lastRTLTune else { return }
         let device = tune.tuning.usbDevice
-        LogStore.shared.log(.info, source: "SDRController", "asking Gqrx to release \(report.deviceLabel)")
+        LogStore.shared.log(.info, source: "SDRController", "quitting Gqrx to free \(report.deviceLabel)")
         Task { @MainActor [weak self] in
-            let fresh = await Task.detached(priority: .userInitiated) {
-                RTLSDRPreflight.releaseFromGqrxAndRecheck(device: device, backend: LibRTLSDRBackend())
+            let (quit, fresh) = await Task.detached(priority: .userInitiated) {
+                RTLSDRPreflight.quitGqrxAndRecheck(device: device, backend: LibRTLSDRBackend())
             }.value
             // Something else was started (or Stop pressed) meanwhile: leave it.
             guard let self, self.deviceUnavailableReport == report else { return }
             guard fresh.isAvailable else {
-                self.lastError = SDRError.deviceUnavailable(fresh.message)
+                var why = fresh.message
+                if case .failed(let quitProblem) = quit { why = quitProblem + " " + why }
+                self.lastError = SDRError.deviceUnavailable(why)
                 self.deviceUnavailableReport = fresh
                 return
             }
             self.taskMode = tune.mode
             self.activeFrequencyID = tune.frequencyID
             self.startPipeline(with: tune.tuning)
+        }
+    }
+
+    /// The Gqrx page's "Quit Gqrx" / "Quit and Restart Gqrx": a normal quit
+    /// (never a kill — Gqrx would report a crash on its next launch), which
+    /// also frees whatever dongle it held; with `restart`, the same Gqrx app
+    /// is opened again — the fix when its audio has turned to noise with
+    /// streaks down the waterfall. A plain quit while listening to Gqrx goes
+    /// idle (the filler plays); a restart keeps listening and, like "Launch
+    /// Gqrx", starts Gqrx's receiver once it's back.
+    func quitGqrx(restart: Bool) {
+        let wasListening = statusFunction == "Gqrx"
+        let channels = gqrxRelayChannels
+        LogStore.shared.log(.info, source: "SDRController", restart ? "restarting Gqrx" : "quitting Gqrx")
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { GqrxApp.quit() }.value
+            guard let self else { return }
+            switch result {
+            case .notRunning:
+                return
+            case .failed(let why):
+                self.lastError = SDRError.pipelineFailed(why)
+                LogStore.shared.log(.error, source: "SDRController", why)
+            case .quit(let bundleURLs):
+                if restart {
+                    await GqrxApp.relaunch(bundleURLs)
+                    if wasListening { self.startGqrxListening(channels: channels, alsoStartReceiver: true) }
+                } else if wasListening, self.statusFunction == "Gqrx" {
+                    self.terminateTasks()
+                }
+            }
         }
     }
 

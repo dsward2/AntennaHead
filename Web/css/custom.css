@@ -740,6 +740,10 @@ html {
 /* Skeleton's `.button { display: inline-block }` would override `hidden`. */
 .np-device-notice[hidden], .np-device-notice .button[hidden] { display: none; }
 
+/* The Gqrx page's Quit Gqrx / Quit and Restart Gqrx buttons (gqrxFormHTML). */
+.gqrx-app-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.gqrx-app-buttons .button { flex: 1 1 12em; margin: 0; }
+
 /* AAC recorder toggle, shown next to the <audio> element in the bottom bar.
    flex-shrink:0 keeps it from being squeezed out when the row is tight (see
    #audiodiv in index.html, which lets the <audio> element shrink instead). */

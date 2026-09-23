@@ -39,12 +39,6 @@ struct GqrxSnapshot: Sendable {
     /// Gqrx's own UDP audio-streaming button state (`u UDP`) — nil until
     /// first polled, or on a Gqrx build that predates `hasUDPControl`.
     var udpStreaming: Bool?
-    /// True when this Gqrx carries the `U INPUT` input-device release command
-    /// (the `gqrx-rc-input-release` patch, dsward2/gqrx#3).
-    var hasInputControl = false
-    /// Whether Gqrx has its SDR input device open (`u INPUT`) — false after a
-    /// `U INPUT 0` release. nil until first polled, or on an older Gqrx.
-    var inputOpen: Bool?
     var modeList: [String] = []
     var bookmarks: [GqrxBookmark] = []
 
@@ -91,7 +85,6 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     private var bookmarks: [GqrxBookmark] = []
     private var hasDeviceControl = false
     private var hasUDPControl = false
-    private var hasInputControl = false
     private var inputDeviceList: [String] = []
     private var outputDeviceList: [String] = []
     private var currentInputDevice = ""
@@ -162,10 +155,6 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
     /// `gqrx-rc-udp-streaming` patch. Harmless no-op (RPRT 1, ignored) against
     /// a Gqrx build that predates it.
     func setUDPStreaming(_ on: Bool)            { send("U UDP \(on ? 1 : 0)") }
-    /// Releases (`false`) or reopens (`true`) Gqrx's SDR input device, via the
-    /// `gqrx-rc-input-release` patch. Reopening answers RPRT 1 (ignored here;
-    /// the next poll's `inputOpen` tells) while another program holds it.
-    func setInputOpen(_ open: Bool)             { send("U INPUT \(open ? 1 : 0)") }
     func applyBookmarkFrequency(_ hz: Int64)    { send("\\set_bookmark_freq \(hz)") }
     // Unlike the other setters, these also refresh the cached current-device
     // string on success — `currentInputDevice`/`currentOutputDevice` are only
@@ -287,7 +276,6 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         modeList = exchange("M ?")?.first?.split(separator: " ").map(String.init) ?? []
         let funcs = exchange("u ?")?.first?.split(separator: " ").map(String.init) ?? []
         hasUDPControl = funcs.contains { $0.caseInsensitiveCompare("UDP") == .orderedSame }
-        hasInputControl = funcs.contains { $0.caseInsensitiveCompare("INPUT") == .orderedSame }
         bookmarks = fetchBookmarks() ?? []
     }
 
@@ -384,7 +372,6 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         snap.bookmarks = bookmarks
         snap.hasDeviceControl = hasDeviceControl
         snap.hasUDPControl = hasUDPControl
-        snap.hasInputControl = hasInputControl
         snap.inputDeviceList = inputDeviceList
         snap.outputDeviceList = outputDeviceList
 
@@ -410,9 +397,6 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         if let dsp = exchange("u DSP")?.first?.trimmingCharacters(in: .whitespaces) { snap.dspRunning = (dsp == "1") }
         if hasUDPControl, let udp = exchange("u UDP")?.first?.trimmingCharacters(in: .whitespaces) {
             snap.udpStreaming = (udp == "1")
-        }
-        if hasInputControl, let input = exchange("u INPUT")?.first?.trimmingCharacters(in: .whitespaces) {
-            snap.inputOpen = (input == "1")
         }
         // Set at connect (discoverDevices()) and refreshed by setInputDevice/
         // setOutputDevice on a successful write — not re-queried here every

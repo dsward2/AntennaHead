@@ -1574,21 +1574,21 @@ function nowPlayingCopyPipelineFallback(text)
 // hears the filler the server switches to (silence if filler is off).
 // Notice for a tune the RTL-SDR preflight refused — the dongle is busy or
 // missing (the usb_device_unavailable object in nowplayingstatus.html) — with
-// a Release from Gqrx and Retry button when Gqrx holds that very dongle.
+// a Quit Gqrx and Retry button when Gqrx holds that very dongle.
 var nowPlayingDeviceNoticeMessage = null;
 
 function nowPlayingUpdateDeviceNotice(info)
 {
     var notice = document.getElementById("np-device-notice");
     if (notice == null) return;
-    var button = document.getElementById("np-release-gqrx");
+    var button = document.getElementById("np-quit-gqrx");
     var message = info ? info.message : null;
     if (message !== nowPlayingDeviceNoticeMessage)
     {
-        // A new refusal (or none): re-arm the button a release disabled.
+        // A new refusal (or none): re-arm the button a quit disabled.
         nowPlayingDeviceNoticeMessage = message;
         button.disabled = false;
-        button.value = "Release from Gqrx and Retry";
+        button.value = "Quit Gqrx and Retry";
     }
     if (!info)
     {
@@ -1596,22 +1596,39 @@ function nowPlayingUpdateDeviceNotice(info)
         return;
     }
     document.getElementById("np-device-notice-text").textContent = info.message;
-    button.hidden = !info.can_release_gqrx;
+    button.hidden = !info.can_quit_gqrx;
     notice.hidden = false;
 }
 
-function nowPlayingReleaseGqrx()
+function nowPlayingQuitGqrx()
 {
-    var button = document.getElementById("np-release-gqrx");
+    var button = document.getElementById("np-quit-gqrx");
     button.disabled = true;
-    button.value = "Releasing\u2026";
+    button.value = "Quitting Gqrx\u2026";
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function ()
     {
-        // The release and retune take a second or two; poll after that.
-        if (this.readyState == 4) setTimeout(periodicUpdate, 2500);
+        // Gqrx takes a few seconds to quit, then the tune retries; poll after.
+        if (this.readyState == 4) setTimeout(periodicUpdate, 4000);
     };
-    xhttp.open("POST", "releasegqrxdevice.html", true);
+    xhttp.open("POST", "quitgqrxandretry.html", true);
+    xhttp.send();
+}
+
+// The Gqrx page's Quit Gqrx / Quit and Restart Gqrx buttons. Gqrx takes a few
+// seconds to quit (and longer to relaunch), so the page — whose Launch vs.
+// Quit buttons depend on whether Gqrx is running — reloads after a delay.
+function gqrxQuitApp(restart)
+{
+    var buttons = document.querySelectorAll(".gqrx-app-buttons input");
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = true;
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (this.readyState == 4)
+            setTimeout(function () { loadContent("devicegqrx.html"); }, restart ? 8000 : 4000);
+    };
+    xhttp.open("POST", restart ? "restartgqrx.html" : "quitgqrx.html", true);
     xhttp.send();
 }
 
