@@ -792,6 +792,36 @@ html {
     color: #ff3b30;
     margin-left: 2px;
 }
+/* Native-player controls, used instead of the <audio> element when the page
+   runs inside the AntennaHead iOS app (see nativeAudioBridge() in
+   index.html). The app plays the stream itself with AVPlayer, so this row is
+   just a play/pause button, the app's status text, and a way back to the
+   app's server list. */
+.native-audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.native-audio-controls .native-audio-btn {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    font-size: 18px;
+    line-height: 32px;
+}
+.native-audio-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    color: var(--ah-muted, #6e6e73);
+}
 /* Compact file size shown beside each recording's name in the list. */
 .rec-size {
     color: var(--ah-muted, #6e6e73);
