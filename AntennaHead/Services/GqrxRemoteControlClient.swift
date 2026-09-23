@@ -122,6 +122,23 @@ final class GqrxRemoteControlClient: @unchecked Sendable {
         }
     }
 
+    /// Downloads Gqrx's bookmarks over a short-lived connection of its own,
+    /// for when no polling client is running (e.g. AntennaHeadTV listing
+    /// bookmarks before it has started listening to Gqrx). `nil` when Gqrx
+    /// can't be reached or predates `\get_bookmarks` (PR #1464). Don't use it
+    /// alongside a running client: Gqrx's remote control serves one
+    /// connection at a time.
+    static func fetchBookmarksOnce(host: String = "127.0.0.1", port: UInt16 = 7356) async -> [GqrxBookmark]? {
+        let client = GqrxRemoteControlClient(host: host, port: port)
+        return await withCheckedContinuation { continuation in
+            client.queue.async {
+                let bookmarks = client.fetchBookmarks()
+                client.closeSocket()
+                continuation.resume(returning: bookmarks)
+            }
+        }
+    }
+
     // MARK: Writes (fire-and-forget)
 
     func setFrequency(_ hz: Int64)              { send("F \(hz)") }

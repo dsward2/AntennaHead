@@ -1126,6 +1126,12 @@ final class AntennaHeadHTTPServer {
         case APIEndpoint.gqrxStart:
             return apiGqrxStartResponse(body: request.body)
 
+        case APIEndpoint.gqrxBookmarks:
+            return await apiGqrxBookmarksResponse()
+
+        case APIEndpoint.gqrxBookmarkPlay:
+            return apiGqrxBookmarkPlayResponse(body: request.body)
+
         case APIEndpoint.audioFiles:
             return apiEncode(apiFolderListing(folderURL: resolvePlayAudioFilesFolder(),
                                               extensions: Self.playAudioFilesAudioExtensions,
@@ -1280,7 +1286,10 @@ final class AntennaHeadHTTPServer {
             return apiEncode(status)
         }
         let statusText = sdrController?.statusFunction ?? "Not Playing"
-        let status = NowPlayingStatus(taskMode: mode, stationName: statusText, formattedFrequency: nil,
+        // Same name the web UI shows (`nowplayingstatus.html`'s station_name),
+        // e.g. "Gqrx — KUAR-NPR Little Rock 89.1" rather than just "Gqrx".
+        let stationName = sdrController?.nowPlayingDisplayName ?? statusText
+        let status = NowPlayingStatus(taskMode: mode, stationName: stationName, formattedFrequency: nil,
                                       statusText: statusText, signalLevel: signalLevel)
         return apiEncode(status)
     }
@@ -1461,6 +1470,37 @@ final class AntennaHeadHTTPServer {
             return jsonErrorResponse("malformed request body", status: 400)
         }
         sdrController?.startGqrxListening(channels: req.channels)
+        return apiNowPlayingResponse()
+    }
+
+    /// Gqrx's bookmarks as `[GqrxBookmarkSummary]` — the JSON-API equivalent
+    /// of the web panel's bookmark list, but available before listening
+    /// starts too (see `SDRController.gqrxBookmarksForListing`).
+    @MainActor private func apiGqrxBookmarksResponse() async -> HTTPResponse {
+        guard Self.isGqrxRunning else {
+            return jsonErrorResponse("Gqrx isn't running.", status: 409)
+        }
+        guard let bookmarks = await sdrController?.gqrxBookmarksForListing() else {
+            return jsonErrorResponse("Couldn't get Gqrx's bookmarks. Check that Gqrx's remote control is on, "
+                                     + "and that this Gqrx build supports bookmarks.", status: 502)
+        }
+        return apiEncode(bookmarks.map {
+            GqrxBookmarkSummary(frequencyHz: $0.frequencyHz, name: $0.name, modulation: $0.modulation,
+                                bandwidthHz: $0.bandwidthHz, tags: $0.tags)
+        })
+    }
+
+    /// The JSON-API equivalent of `/gqrxbookmark.html`, which also starts
+    /// listening to Gqrx when AntennaHead isn't already.
+    @MainActor private func apiGqrxBookmarkPlayResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(PlayGqrxBookmarkRequest.self, from: body),
+              req.frequencyHz > 0, req.channels == 1 || req.channels == 2 else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        guard Self.isGqrxRunning else {
+            return jsonErrorResponse("Gqrx isn't running.", status: 409)
+        }
+        sdrController?.gqrxPlayBookmark(req.frequencyHz, channels: req.channels)
         return apiNowPlayingResponse()
     }
 
