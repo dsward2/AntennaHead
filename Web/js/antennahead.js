@@ -1314,6 +1314,7 @@ function updateStatusDisplay(statusData)
 
     gqrxUpdatePanel(statusObj.gqrx);
     nowPlayingUpdatePipeline(statusObj.pipeline, statusObj.rtlsdr_task_mode);
+    nowPlayingUpdateDeviceNotice(statusObj.usb_device_unavailable);
 
     var rtlsdr_task_mode = statusObj.rtlsdr_task_mode;
     
@@ -1571,6 +1572,49 @@ function nowPlayingCopyPipelineFallback(text)
 // Mirrors the native Status tab's Stop Pipeline: tears down the pipeline on
 // the server. This page's <audio> element keeps playing, so the listener
 // hears the filler the server switches to (silence if filler is off).
+// Notice for a tune the RTL-SDR preflight refused — the dongle is busy or
+// missing (the usb_device_unavailable object in nowplayingstatus.html) — with
+// a Release from Gqrx and Retry button when Gqrx holds that very dongle.
+var nowPlayingDeviceNoticeMessage = null;
+
+function nowPlayingUpdateDeviceNotice(info)
+{
+    var notice = document.getElementById("np-device-notice");
+    if (notice == null) return;
+    var button = document.getElementById("np-release-gqrx");
+    var message = info ? info.message : null;
+    if (message !== nowPlayingDeviceNoticeMessage)
+    {
+        // A new refusal (or none): re-arm the button a release disabled.
+        nowPlayingDeviceNoticeMessage = message;
+        button.disabled = false;
+        button.value = "Release from Gqrx and Retry";
+    }
+    if (!info)
+    {
+        notice.hidden = true;
+        return;
+    }
+    document.getElementById("np-device-notice-text").textContent = info.message;
+    button.hidden = !info.can_release_gqrx;
+    notice.hidden = false;
+}
+
+function nowPlayingReleaseGqrx()
+{
+    var button = document.getElementById("np-release-gqrx");
+    button.disabled = true;
+    button.value = "Releasing\u2026";
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        // The release and retune take a second or two; poll after that.
+        if (this.readyState == 4) setTimeout(periodicUpdate, 2500);
+    };
+    xhttp.open("POST", "releasegqrxdevice.html", true);
+    xhttp.send();
+}
+
 function nowPlayingStopPipeline()
 {
     var xhttp = new XMLHttpRequest();

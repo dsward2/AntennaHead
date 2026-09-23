@@ -723,6 +723,23 @@ html {
 }
 .np-pipeline-buttons .button { margin: 0 4px 10px; }
 
+/* Now Playing's notice for a tune the RTL-SDR preflight refused (dongle busy
+   or missing) — see nowPlayingUpdateDeviceNotice in antennahead.js. */
+.np-device-notice {
+    margin: 12px auto 4px;
+    max-width: 34em;
+    padding: 10px 14px 4px;
+    border: 1px solid light-dark(#c93400, #ff9f0a);
+    border-radius: 8px;
+    background: light-dark(#fff4e5, #3a2a12);
+    color: var(--ah-fg, #1c1c1e);
+    text-align: center;
+}
+.np-device-notice p { margin: 0 0 8px; }
+.np-device-notice .button { margin-bottom: 6px; }
+/* Skeleton's `.button { display: inline-block }` would override `hidden`. */
+.np-device-notice[hidden], .np-device-notice .button[hidden] { display: none; }
+
 /* AAC recorder toggle, shown next to the <audio> element in the bottom bar.
    flex-shrink:0 keeps it from being squeezed out when the row is tight (see
    #audiodiv in index.html, which lets the <audio> element shrink instead). */

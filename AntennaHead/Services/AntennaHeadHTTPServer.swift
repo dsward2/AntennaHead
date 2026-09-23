@@ -5,6 +5,7 @@ import CoreMedia
 import Foundation
 import Network
 import PipelineRunner
+import SDRDeviceAccess
 import SharedLogging
 
 private extension Dictionary where Key == String, Value == Any {
@@ -965,6 +966,13 @@ final class AntennaHeadHTTPServer {
 
         case "/api/spatial-audio/update":
             updateSpatialAudio(fromBody: request.body)
+            return okResponse()
+
+        case "/releasegqrxdevice.html":
+            // The Now Playing notice's "Release from Gqrx and Retry" button,
+            // shown when the RTL-SDR preflight refused a tune because Gqrx
+            // holds that dongle (`usb_device_unavailable.can_release_gqrx`).
+            sdrController?.releaseGqrxDeviceAndRetry()
             return okResponse()
 
         case "/nowplayingstoppipeline.html":
@@ -3516,6 +3524,15 @@ final class AntennaHeadHTTPServer {
             dict["station_name"] = sdrController?.nowPlayingDisplayName ?? "Not Playing"
             dict["short_frequency"] = ""
         }
+        if let report = sdrController?.deviceUnavailableReport {
+            // A tune the RTL-SDR preflight refused (dongle busy or missing) —
+            // nowplaying.html's notice (nowPlayingUpdateDeviceNotice).
+            dict["usb_device_unavailable"] = [
+                "message": report.message,
+                "device": report.deviceLabel,
+                "can_release_gqrx": report.gqrxCanRelease,
+            ]
+        }
         if sdrController?.isFillerPlaying == true {
             dict["filler"] = true
             dict["filler_source"] = sdrController?.stationName ?? "Monitor Beacon"
@@ -3544,6 +3561,8 @@ final class AntennaHeadHTTPServer {
                 "udp_audio_running": sdr.gqrxUDPAudioRunning,
                 "has_udp_control": sdr.gqrxHasUDPControl,
                 "udp_streaming_on_gqrx": sdr.gqrxUDPStreamingOnGqrx,
+                "has_input_control": sdr.gqrxHasInputControl,
+                "input_open": sdr.gqrxInputOpen,
                 "modes": sdr.gqrxModeList,
                 "bookmarks": sdr.gqrxBookmarks.map { [
                     "frequency": $0.frequencyHz, "name": $0.name, "modulation": $0.modulation,

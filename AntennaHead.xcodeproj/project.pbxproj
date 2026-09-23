@@ -40,6 +40,7 @@
 		0EAEB8CD2FF3BBD100BA711A /* libopus.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C72FF3BBD100BA711A /* libopus.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEB8CE2FF3BBD100BA711A /* libvorbis.0.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0EAEB8C82FF3BBD100BA711A /* libvorbis.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */ = {isa = PBXBuildFile; productRef = 0EAEBB192FFAD5F300BA711A /* PipelineRunner */; };
+		0EDA7A012FFB000000C0FFEE /* SDRDeviceAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 0EDA7A022FFB000000C0FFEE /* SDRDeviceAccess */; };
 		0EAEBB1C2FFADA5700BA711A /* LiveAudioServer in Copy Helper Files */ = {isa = PBXBuildFile; fileRef = 0EAEBB1B2FFADA5700BA711A /* LiveAudioServer */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0ECF51072FD87EB4006943DA /* X509 in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51062FD87EB4006943DA /* X509 */; };
 		0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 0ECF51272FDA8FF5006943DA /* GRDB */; };
@@ -269,6 +270,7 @@
 				0ECF51282FDA8FF5006943DA /* GRDB in Frameworks */,
 				AA000003AA000003AA000003 /* librtlsdr in Frameworks */,
 				0EAEBB1A2FFAD5F300BA711A /* PipelineRunner in Frameworks */,
+				0EDA7A012FFB000000C0FFEE /* SDRDeviceAccess in Frameworks */,
 				A72841DCF0D2B73E6813A9E7 /* SharedLogging in Frameworks */,
 				132E3C554A0820090867A88F /* AntennaHeadAPI in Frameworks */,
 			);
@@ -399,6 +401,7 @@
 				0ECF51272FDA8FF5006943DA /* GRDB */,
 				AA000002AA000002AA000002 /* librtlsdr */,
 				0EAEBB192FFAD5F300BA711A /* PipelineRunner */,
+				0EDA7A022FFB000000C0FFEE /* SDRDeviceAccess */,
 				0EFDB0012FFB000000BA711A /* PCMUDPSender */,
 				0EFDB0022FFB000000BA711A /* PCMUDPReceiver */,
 				0EFDB0032FFB000000BA711A /* PCMPassthrough */,
@@ -1164,6 +1167,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
 			productName = PipelineRunner;
+		};
+		0EDA7A022FFB000000C0FFEE /* SDRDeviceAccess */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0EAEBB182FFAD5F300BA711A /* XCLocalSwiftPackageReference "../PipelineHelpers" */;
+			productName = SDRDeviceAccess;
 		};
 		0ECF51062FD87EB4006943DA /* X509 */ = {
 			isa = XCSwiftPackageProductDependency;

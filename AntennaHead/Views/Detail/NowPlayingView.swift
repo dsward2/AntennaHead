@@ -1,3 +1,4 @@
+import SDRDeviceAccess
 import SwiftUI
 
 struct NowPlayingView: View {
@@ -94,6 +95,15 @@ struct PlaybackControlsView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // The tune was refused because Gqrx holds this dongle: stopping
+            // Gqrx's DSP wouldn't free it, but Gqrx can be asked to let go.
+            if sdrController.deviceUnavailableReport?.gqrxCanRelease == true {
+                Button("Release from Gqrx and Retry", systemImage: "arrow.uturn.backward.circle") {
+                    sdrController.releaseGqrxDeviceAndRetry()
+                }
+                .help("Ask Gqrx to release the dongle, then tune again. Listen to Gqrx gives it back.")
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

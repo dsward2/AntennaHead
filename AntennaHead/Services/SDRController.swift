@@ -3,6 +3,7 @@ import Foundation
 import Network
 import Observation
 import PipelineRunner
+import SDRDeviceAccess
 import SharedLogging
 
 /// Builds and drives the RTL-SDR audio pipeline, ported from LocalRadio's
@@ -48,6 +49,9 @@ final class SDRController {
         case recordingNotFound(String)
         case notImplemented(String)
         case pipelineFailed(String)
+        /// The RTL-SDR preflight refused the tune: the dongle is busy or
+        /// missing (see `deviceUnavailableReport`).
+        case deviceUnavailable(String)
 
         var description: String {
             switch self {
@@ -57,6 +61,7 @@ final class SDRController {
             case .recordingNotFound(let name): return "Recording '\(name)' was not found in the shared Recordings folder."
             case .notImplemented(let what): return "\(what) is not yet implemented."
             case .pipelineFailed(let what): return what
+            case .deviceUnavailable(let why): return why
             }
         }
     }
@@ -683,6 +688,15 @@ final class SDRController {
 
     private(set) var lastError: Error?
 
+    /// Why the last RTL-SDR tune was refused before launch — the dongle is
+    /// held by another program or isn't connected (`RTLSDRPreflight`). Drives
+    /// the notice and its "Release from Gqrx and Retry" button in Now Playing,
+    /// native and web. Cleared by the next successful start and by Stop.
+    private(set) var deviceUnavailableReport: RTLSDRPreflightReport?
+    /// The most recent RTL-SDR tune `startPipeline` was asked for, so
+    /// `releaseGqrxDeviceAndRetry()` can redo a refused one.
+    @ObservationIgnored private var lastRTLTune: (tuning: Tuning, mode: TaskMode, frequencyID: Int64?)?
+
     // MARK: Gqrx remote control
     //
     // Populated only while `statusFunction == "Gqrx"`. `startGqrxRemote()` opens
@@ -780,6 +794,11 @@ final class SDRController {
     /// (`gqrx-rc-udp-streaming` patch) — lets the web UI note when an older
     /// Gqrx build won't respond to `gqrxSetUDPAudioRunning`'s remote half.
     private(set) var gqrxHasUDPControl = false
+    /// True when this Gqrx carries `U INPUT` (dsward2/gqrx#3), so it can be
+    /// asked to release its SDR device for AntennaHead and take it back.
+    private(set) var gqrxHasInputControl = false
+    /// Whether Gqrx has its SDR input device open (false while released).
+    private(set) var gqrxInputOpen = true
     /// Gqrx's own UDP-streaming button state, as it last reported it (`u
     /// UDP`) — purely informational; AntennaHead's own relay state is
     /// tracked separately by `gqrxUDPAudioRunning`, which is what this
@@ -1265,6 +1284,8 @@ final class SDRController {
             // which is guaranteed to have a live connection to send it on.
             gqrxNeedsUDPStreamSync = true
             if alsoStartReceiver { gqrxNeedsDSPStart = true }
+            gqrxNeedsInputReopen = true
+            gqrxInputReopenAttempts = 0
         }
     }
 
@@ -1284,6 +1305,14 @@ final class SDRController {
     /// also start Gqrx's own DSP once connected — see `startGqrxListening`'s
     /// `alsoStartReceiver`.
     @ObservationIgnored private var gqrxNeedsDSPStart = false
+    /// Set by `startGqrxListening`: if Gqrx reports its input device released
+    /// (`U INPUT 0`, e.g. by "Release from Gqrx and Retry"), reopen it once
+    /// connected — listening to Gqrx needs Gqrx to have its dongle. Retried
+    /// each poll (our own rtl_fm may still be exiting, and Gqrx answers RPRT 1
+    /// while the device is busy) up to `gqrxInputReopenMaxAttempts` times.
+    @ObservationIgnored private var gqrxNeedsInputReopen = false
+    @ObservationIgnored private var gqrxInputReopenAttempts = 0
+    private static let gqrxInputReopenMaxAttempts = 10
     /// True while the Gqrx page has paused Gqrx's receiver and handed the LAS
     /// input over to the filler loop; resuming rebuilds the relay.
     @ObservationIgnored private var gqrxPausedToFiller = false
@@ -1461,6 +1490,20 @@ final class SDRController {
         if !s.inputDevice.isEmpty { gqrxInputDevice = s.inputDevice }
         if !s.outputDevice.isEmpty { gqrxOutputDevice = s.outputDevice }
         gqrxHasUDPControl = s.hasUDPControl
+        gqrxHasInputControl = s.hasInputControl
+        if let v = s.inputOpen { gqrxInputOpen = v }
+        if gqrxNeedsInputReopen, s.hasInputControl, let open = s.inputOpen {
+            if open {
+                gqrxNeedsInputReopen = false
+            } else if gqrxInputReopenAttempts < Self.gqrxInputReopenMaxAttempts {
+                gqrxInputReopenAttempts += 1
+                gqrxRemote?.setInputOpen(true)
+            } else {
+                gqrxNeedsInputReopen = false
+                LogStore.shared.log(.error, source: "SDRController",
+                                    "Gqrx couldn't reopen its input device — another program still holds it")
+            }
+        }
         if let v = s.udpStreaming {
             // Auto-follow: when Gqrx's *own* reported UDP state changes from
             // what it was on the previous poll — a manual click over there,
@@ -1514,6 +1557,8 @@ final class SDRController {
         gqrxInputDevices = []
         gqrxOutputDevices = []
         gqrxDSPRunning = false
+        gqrxHasInputControl = false
+        gqrxInputOpen = true
         gqrxPausedToFiller = false
         // Reset so a stale value from a *previous* Gqrx session can't look
         // like a real transition the moment the first poll of a fresh one
@@ -2231,6 +2276,7 @@ final class SDRController {
     func terminateTasks(enterIdle: Bool = true) {
         pipelineStartTask?.cancel()
         pipelineStartTask = nil
+        deviceUnavailableReport = nil
         teardownGqrxRemote()
         radioTaskPipelineManager.terminate()
         cleanUpSpeechSynthTextFile()
@@ -2853,7 +2899,8 @@ final class SDRController {
     /// failure right after a Listen click, check here first.
     private func launchCurrentPipeline(dying: [Process],
                                        waitForDyingProcesses: Bool = true,
-                                       announcement: PendingAnnouncement? = nil) {
+                                       announcement: PendingAnnouncement? = nil,
+                                       preflightUSBDevice: String? = nil) {
         pipelineStartTask?.cancel()
         // A filler faded out by `stopFillerForNewSource()` is still feeding
         // LiveAudioServer for the length of its fade. Always wait it out —
@@ -2867,6 +2914,26 @@ final class SDRController {
             if !mustWait.isEmpty {
                 await Self.waitForProcessesToExit(mustWait)
                 guard !Task.isCancelled else { return }
+            }
+            // RTL-SDR source: check the dongle can actually be opened before
+            // launching rtl_fm on it — after the previous pipeline's rtl_fm
+            // has exited (above), or it would find our own old process holding
+            // it. A busy or missing device is reported (naming the likely
+            // holder, offering to release it from Gqrx) instead of launching a
+            // pipeline that just dies.
+            if let device = preflightUSBDevice {
+                let report = await Task.detached(priority: .userInitiated) {
+                    RTLSDRPreflight.check(device: device, backend: LibRTLSDRBackend())
+                }.value
+                guard !Task.isCancelled else { return }
+                guard report.isAvailable else {
+                    self.refuseTune(report)
+                    return
+                }
+                // The preflight resolves `-d` exactly as rtl_fm will, so it
+                // names the real dongle more reliably than publishStatus did.
+                self.activeDeviceSerial = report.serial
+                self.activeDeviceIndex = report.index.map(Int.init) ?? -1
             }
             if let announcement {
                 // Render the "Now playing …" clip the PCMPrefix stage will read.
@@ -2891,12 +2958,51 @@ final class SDRController {
             do {
                 try self.radioTaskPipelineManager.start()
                 self.lastError = nil
+                self.deviceUnavailableReport = nil
             } catch {
                 self.lastError = error
                 self.taskMode = .stopped
                 self.activeFrequencyID = nil
                 LogStore.shared.log(.error, source: "SDRController", "pipeline start failed: \(error)")
             }
+        }
+    }
+
+    // MARK: RTL-SDR device preflight
+
+    /// The preflight found the tune's dongle busy or missing: go idle exactly
+    /// as Stop does (so the filler plays), then say why.
+    private func refuseTune(_ report: RTLSDRPreflightReport) {
+        LogStore.shared.log(.error, source: "SDRController", "RTL-SDR preflight: \(report.message)")
+        terminateTasks()
+        lastError = SDRError.deviceUnavailable(report.message)
+        deviceUnavailableReport = report
+    }
+
+    /// "Release from Gqrx and Retry": asks Gqrx to release the dongle the
+    /// refused tune needs (`U INPUT 0` — stopping its DSP isn't enough, the
+    /// device stays claimed), then retries that tune. Only acts when the
+    /// preflight found Gqrx holding that very device. "Listen to Gqrx" hands
+    /// the device back (see `gqrxNeedsInputReopen`).
+    func releaseGqrxDeviceAndRetry() {
+        guard let report = deviceUnavailableReport, report.gqrxCanRelease,
+              let tune = lastRTLTune else { return }
+        let device = tune.tuning.usbDevice
+        LogStore.shared.log(.info, source: "SDRController", "asking Gqrx to release \(report.deviceLabel)")
+        Task { @MainActor [weak self] in
+            let fresh = await Task.detached(priority: .userInitiated) {
+                RTLSDRPreflight.releaseFromGqrxAndRecheck(device: device, backend: LibRTLSDRBackend())
+            }.value
+            // Something else was started (or Stop pressed) meanwhile: leave it.
+            guard let self, self.deviceUnavailableReport == report else { return }
+            guard fresh.isAvailable else {
+                self.lastError = SDRError.deviceUnavailable(fresh.message)
+                self.deviceUnavailableReport = fresh
+                return
+            }
+            self.taskMode = tune.mode
+            self.activeFrequencyID = tune.frequencyID
+            self.startPipeline(with: tune.tuning)
         }
     }
 
@@ -3158,7 +3264,9 @@ final class SDRController {
         addBinauralPannerStageIfEnabled()
         radioTaskPipelineManager.add(udpSender)
 
-        launchCurrentPipeline(dying: dying, announcement: announcement?.pending)
+        lastRTLTune = (tuning, taskMode, activeFrequencyID)
+        launchCurrentPipeline(dying: dying, announcement: announcement?.pending,
+                              preflightUSBDevice: tuning.usbDevice)
     }
 
     /// AudioInputCapture source stage: captures the named Core Audio input and
