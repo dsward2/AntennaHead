@@ -18,6 +18,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>AntennaHead quits and restarts Gqrx when you ask it to, to free an RTL-SDR that Gqrx holds or to recover Gqrx when its audio turns to noise.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AntennaHead captures audio from the selected input device to stream it.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -12,6 +12,15 @@
             <div id="now-playing-details">
             %%NOW_PLAYING_DETAILS%%
             </div>
+            <!-- Shown when the RTL-SDR preflight refused a tune because the
+                 dongle is busy or missing (nowPlayingUpdateDeviceNotice). Also
+                 outside #now-playing-details, which each poll replaces. -->
+            <div id="np-device-notice" class="np-device-notice" role="status" hidden>
+                <p id="np-device-notice-text"></p>
+                <input id="np-quit-gqrx" class="button" type="button" value="Quit Gqrx and Retry" hidden
+                       title="Quit Gqrx, which holds this dongle (stopping its DSP doesn't free it), then tune again. Launch Gqrx brings it back."
+                       onclick="nowPlayingQuitGqrx();">
+            </div>
             <!-- Outside #now-playing-details on purpose: that div's innerHTML is
                  fully replaced by updateStatusDisplay() on every status poll
                  (see antennahead.js), which would wipe these sliders every couple
