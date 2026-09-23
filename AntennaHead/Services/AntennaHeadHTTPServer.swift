@@ -172,6 +172,13 @@ final class AntennaHeadHTTPServer {
 
     private var httpListener: NWListener?
     private var httpsListener: NWListener?
+    /// The `_antennahead._tcp` advertisement native clients (AntennaHeadTV)
+    /// browse for — see `BonjourAdvertisement`. A `NetService` rather than
+    /// another `NWListener.service`, since a listener carries only one
+    /// service and the HTTP listener's is already `_http._tcp` for Safari.
+    /// Published only once the HTTP listener is actually `.ready`, so a
+    /// failed bind never leaves a client an address nothing answers on.
+    private var apiService: NetService?
     nonisolated private let queue = DispatchQueue(label: "com.dsward.AntennaHead.HTTPServer", qos: .userInitiated)
 
     /// Params from the most recent `start()`, kept so a bind retry can rebuild
@@ -215,6 +222,7 @@ final class AntennaHeadHTTPServer {
     }
 
     func stop() {
+        unpublishAPIService()
         httpListener?.cancel()
         httpsListener?.cancel()
         httpListener = nil
@@ -266,6 +274,7 @@ final class AntennaHeadHTTPServer {
             } else {
                 httpRetryAttempt = 0
                 isRunning = true
+                publishAPIService()
             }
             lastError = nil
         case .failed(let error):
@@ -281,12 +290,39 @@ final class AntennaHeadHTTPServer {
                 httpsEnabled = false
             } else {
                 isRunning = false
+                unpublishAPIService()
             }
             LogStore.shared.log(.error, source: "AntennaHeadHTTPServer",
                 "\(isSecure ? "HTTPS" : "HTTP") listener failed: \(error)")
         default:
             break
         }
+    }
+
+    /// An empty instance name makes mDNSResponder use the Mac's own
+    /// computer name (System Settings › General › Sharing), so two Macs
+    /// running AntennaHead show up as, e.g., "Studio Mac mini" and
+    /// "MacBook Pro" rather than "AntennaHead" and "AntennaHead (2)".
+    @MainActor private func publishAPIService() {
+        unpublishAPIService()
+        let advertisement = BonjourAdvertisement(
+            requiresAuth: lastAuth != nil,
+            httpsPort: lastTLSIdentity != nil ? httpsPort : nil)
+        let service = NetService(domain: "local.",
+                                 type: BonjourAdvertisement.serviceType + ".",
+                                 name: "",
+                                 port: Int32(httpPort))
+        service.setTXTRecord(NetService.data(fromTXTRecord:
+            advertisement.txtRecord.mapValues { Data($0.utf8) }))
+        service.publish()
+        apiService = service
+        LogStore.shared.log(.info, source: "AntennaHeadHTTPServer",
+            "Bonjour: published \(BonjourAdvertisement.serviceType) on port \(httpPort)")
+    }
+
+    private func unpublishAPIService() {
+        apiService?.stop()
+        apiService = nil
     }
 
     private func isEADDRINUSE(_ error: Error) -> Bool {
