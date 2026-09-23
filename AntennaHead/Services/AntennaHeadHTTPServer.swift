@@ -970,8 +970,8 @@ final class AntennaHeadHTTPServer {
         case "/nowplayingstoppipeline.html":
             // The Now Playing page's Stop Pipeline button — same as the native
             // Status tab's (`StatusView.stopPipeline`): tear down the pipeline,
-            // falling back to the filler if it's enabled. The page's JS pauses
-            // its own <audio> element.
+            // falling back to the filler if it's enabled. The page's <audio>
+            // element keeps playing, so the listener hears that filler.
             sdrController?.terminateTasks()
             return okResponse()
 

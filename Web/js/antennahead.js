@@ -1569,8 +1569,8 @@ function nowPlayingCopyPipelineFallback(text)
 }
 
 // Mirrors the native Status tab's Stop Pipeline: tears down the pipeline on
-// the server, then pauses this page's <audio> element (in the top frame) so
-// playback actually stops rather than playing on into the filler.
+// the server. This page's <audio> element keeps playing, so the listener
+// hears the filler the server switches to (silence if filler is off).
 function nowPlayingStopPipeline()
 {
     var xhttp = new XMLHttpRequest();
@@ -1583,13 +1583,6 @@ function nowPlayingStopPipeline()
     };
     xhttp.open("POST", "nowplayingstoppipeline.html", true);
     xhttp.send();
-
-    try
-    {
-        var audioPlayer = window.top.document.getElementById("audio_element");
-        if (audioPlayer != null) audioPlayer.pause();
-    }
-    catch (e) {}
 }
 
 var intervalID = setInterval(function(){periodicUpdate();}, 20000);     // for Now Playing periodic updates using setInterval()

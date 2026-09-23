@@ -20,7 +20,7 @@ struct StatusView: View {
                     stopPipeline()
                 }
                 .disabled(sdrController.taskMode == .stopped)
-                .help("Halt and tear down the tuning pipeline, and stop audio playback.")
+                .help("Halt and tear down the tuning pipeline. Playback continues with the filler, if it's enabled.")
             }
             .padding([.top, .horizontal], 10)
 
@@ -40,13 +40,11 @@ struct StatusView: View {
     }
 
     /// Halts and tears down the SDR pipeline (rtl_fm/sox/etc. — mirrors
-    /// `NowPlayingView`'s Stop button), then pauses the `<audio>` element in
-    /// every live `WebRadioView` so playback actually stops, not just the
-    /// upstream source (LiveAudioServer keeps streaming filler audio after
-    /// the pipeline tears down, so the player would otherwise play on).
+    /// `NowPlayingView`'s Stop button). `terminateTasks()` falls back to the
+    /// filler when it's enabled, and every `WebRadioView`'s player is left
+    /// playing so the listener hears it rather than going silent.
     private func stopPipeline() {
         sdrController.terminateTasks()
-        NotificationCenter.default.post(name: WebRadioView.stopAudioNotification, object: nil)
     }
 
     /// Builds the snapshot from current controller state. Reading the observable
