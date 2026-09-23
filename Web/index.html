@@ -350,9 +350,107 @@
     }
   
   
+    // ---- AntennaHead iOS app bridge ------------------------------------
+    // Inside the AntennaHead iOS app this page runs in a WKWebView, and the
+    // app plays audio natively (AVPlayer + AVAudioSession) instead of this
+    // page's <audio> element, so playback survives interruptions --
+    // notification sounds, calls, Siri -- and resumes on its own without the
+    // extra tap WebKit demands. The app installs a
+    // window.webkit.messageHandlers.antennaheadAudio handler; when it's there,
+    // startAudioPlayer()/startDownloadAudioPlayer() send it the stream URL
+    // instead of touching the <audio> element, and the <audio> element is
+    // hidden behind a small native-controls row (nativeAudioInstallControls()).
+    // In Safari or any other browser the handler is absent and nothing here
+    // changes. The app reports its player state back by calling
+    // antennaheadNativeAudioState(); see the AntennaHeadiOS repo's
+    // WebBridge.swift for the other side of this contract.
+    var antennaheadNativeAudioSupported = true;    // feature flag the app checks for
+
+    function nativeAudioBridge()
+    {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.antennaheadAudio)
+        {
+            return window.webkit.messageHandlers.antennaheadAudio;
+        }
+        return null;
+    }
+
+    function nativeAudioSend(message)
+    {
+        var bridge = nativeAudioBridge();
+        if (bridge === null)
+        {
+            return false;
+        }
+        bridge.postMessage(message);
+        return true;
+    }
+
+    function nativeAudioInstallControls()
+    {
+        var audioPlayer = document.getElementById("audio_element");
+        if (audioPlayer !== null)
+        {
+            // Make sure the web element can never play alongside the app's
+            // player: no autoplay, no src to fetch, and out of sight.
+            audioPlayer.removeAttribute("autoplay");
+            audioPlayer.autoplay = false;
+            audioPlayer.preload = "none";
+            audioPlayer.pause();
+            audioPlayer.removeAttribute("src");
+            audioPlayer.load();
+            audioPlayer.style.display = "none";
+        }
+
+        var audioDiv = document.getElementById("audiodiv");
+        if (audioDiv === null || document.getElementById("native-audio-controls") !== null)
+        {
+            return;
+        }
+        var controls = document.createElement("span");
+        controls.id = "native-audio-controls";
+        controls.className = "native-audio-controls";
+        controls.innerHTML =
+            "<button type='button' id='native-audio-play' class='native-audio-btn' title='Play or pause the audio stream'"
+            + " onclick=\"nativeAudioSend({command: 'toggle', url: liveStreamAudioSrc});\">&#9654;&#xFE0E;</button>"
+            + "<span id='native-audio-status' class='native-audio-status'>Tap a Listen button, or &#9654;&#xFE0E; to play</span>"
+            + "<button type='button' class='native-audio-btn' title='Choose a different AntennaHead server'"
+            + " onclick=\"nativeAudioSend({command: 'showServers'});\">&#8943;</button>";
+        audioDiv.appendChild(controls);
+    }
+
+    // Called by the iOS app (evaluateJavaScript) whenever its player changes
+    // state. `state` is "idle", "buffering", "playing", "paused",
+    // "reconnecting" or "failed"; `status` is a short human-readable line.
+    function antennaheadNativeAudioState(state, status)
+    {
+        var playButton = document.getElementById("native-audio-play");
+        if (playButton !== null)
+        {
+            var active = (state === "playing" || state === "buffering" || state === "reconnecting");
+            playButton.innerHTML = active ? "&#10074;&#10074;" : "&#9654;&#xFE0E;";
+        }
+        var statusSpan = document.getElementById("native-audio-status");
+        if (statusSpan !== null)
+        {
+            statusSpan.textContent = status;
+        }
+    }
+    // --------------------------------------------------------------------
+
+
     function startAudioPlayer()
     {
         console.log("startAudioPlayer");
+
+        if (nativeAudioSend({command: "playLive", url: liveStreamAudioSrc}))
+        {
+            audioElementInDownloadMode = false;
+            setTimeout(function(){periodicUpdate();}, 3000);      // same one-shot "Now Playing" refreshes as startAudioPlayerAfterDelay()
+            setTimeout(function(){periodicUpdate();}, 5000);
+            setTimeout(function(){periodicUpdate();}, 10000);
+            return;
+        }
 
         //var nowPlayingNavBarLink = window.document.getElementById("nowPlayingNavBarLink");
         //setTimeout(function() { nowPlayingNavBarLink.innerText = "NOW PLAYING: " + nowPlayingTitle.innerText; }, 1000);
@@ -393,6 +491,12 @@
     function startDownloadAudioPlayer(url, loop)
     {
         console.log("startDownloadAudioPlayer " + url + " loop=" + loop);
+
+        if (nativeAudioSend({command: "playFile", url: url, loop: loop}))
+        {
+            audioElementInDownloadMode = true;
+            return;
+        }
 
         var audioPlayer = document.getElementById("audio_element");
         if (audioPlayer === null)
@@ -557,6 +661,12 @@
         if (audioPlayer !== null)
         {
             liveStreamAudioSrc = audioPlayer.src;
+        }
+
+        if (nativeAudioBridge() !== null)
+        {
+            nativeAudioInstallControls();
+            nativeAudioSend({command: "pageLoaded", url: liveStreamAudioSrc});
         }
 
         loadContent("index2.html");
