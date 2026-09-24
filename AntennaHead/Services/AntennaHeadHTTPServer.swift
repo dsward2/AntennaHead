@@ -169,6 +169,9 @@ final class AntennaHeadHTTPServer {
         /// would otherwise force a second login when the audio element loads.
         var selfHTTPPort: Int = 8090
         var selfHTTPSPort: Int? = nil
+        /// True when the web UI requires a Basic Auth login. Set by `start()`
+        /// from its `auth` argument, not by callers.
+        var requiresAuth: Bool = false
     }
 
     private var httpListener: NWListener?
@@ -206,6 +209,8 @@ final class AntennaHeadHTTPServer {
         httpsRetryAttempt = 0
         lastTLSIdentity = tlsIdentity
         lastAuth = auth
+        var webConfig = webConfig
+        webConfig.requiresAuth = auth != nil
         lastWebConfig = webConfig
         do {
             httpListener = try makeListener(port: httpPort, tlsIdentity: nil, auth: auth, webConfig: webConfig)
@@ -4008,7 +4013,13 @@ final class AntennaHeadHTTPServer {
         // the stream URL themselves instead — and "localhost" on that device
         // means itself, not this Mac. Substitute a LAN-reachable host so the
         // stream is actually fetchable by a different device.
-        let audioHost = HostInfo.isLoopback(host) ? HostInfo.shareableHost() : host
+        //
+        // Except when the web login is on: the browser's login covers only
+        // the host it used to load this page, so an <audio> src on a different
+        // host (the LAN IP) gets a 401 with no login prompt and the player
+        // just shows an error. A receiver fetching the stream directly has no
+        // credentials either, so keeping the page's own host loses nothing.
+        let audioHost = HostInfo.isLoopback(host) && !webConfig.requiresAuth ? HostInfo.shareableHost() : host
         let src = "\(scheme)://\(audioHost):\(port)\(webConfig.hlsMount)"
         let mimeType = "application/vnd.apple.mpegurl"
         let autoplay = webConfig.autoplay ? "autoplay " : ""
