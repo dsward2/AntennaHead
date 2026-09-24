@@ -672,7 +672,7 @@ final class AntennaHeadHTTPServer {
             // (needs a capture helper), so this currently logs .notImplemented.
             let fields = formFields(fromBody: request.body)
             sdrController?.startTasksForDevice(deviceName: fields["audio_input"] ?? "",
-                                               deviceAudioOutputFilter: fields["audio_output_filter"] ?? "vol 1")
+                                               deviceAudioOutputFilter: fields["audio_output_filter"] ?? "vol 4")
             return okResponse()
 
         case "/gqrxlistenbuttonclicked.html":
@@ -1980,8 +1980,8 @@ final class AntennaHeadHTTPServer {
         }
         s += "</select>"
         s += "<label for='audio_output_filter'>Sox Audio Output Filter:</label>"
-        s += "<input class='twelve columns value-prop' type='text' \(Self.verbatimInputAttributes) id='audio_output_filter' name='audio_output_filter' value='vol 1' "
-        s += "title='Applied by the Sox audio tool to the final output. Default &quot;vol 1&quot;. Do not set a &quot;rate&quot; here — the sample rate is fixed at 48000.'>"
+        s += "<input class='twelve columns value-prop' type='text' \(Self.verbatimInputAttributes) id='audio_output_filter' name='audio_output_filter' value='vol 4' "
+        s += "title='Applied by the Sox audio tool to the final output. Default &quot;vol 4&quot;. Do not set a &quot;rate&quot; here — the sample rate is fixed at 48000.'>"
         s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
         s += "onclick=\"deviceListenButtonClicked(getElementById('deviceForm'));\" "
         s += "title='Listen to the selected audio input device.'>"
