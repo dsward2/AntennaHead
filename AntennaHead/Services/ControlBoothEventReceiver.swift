@@ -43,7 +43,12 @@ import SharedLogging
 ///                                  AirPlay receiver whenever shairport-sync's
 ///                                  metadata pipe reports a track change;
 ///                                  ignored unless the AirPlay receiver is
-///                                  currently the active source.
+///                                  currently the active source. Optional
+///                                  'Srce' parameter (string): the pipeline
+///                                  the text belongs to, sent when a pipeline
+///                                  stage reports its own now-playing text
+///                                  (e.g. a scanner's talkgroup); applied only
+///                                  while that pipeline is the active source.
 ///
 /// AntennaHead runs at most one pipeline at a time, so 'Runs' replies with
 /// zero or one name, and 'Stop' naming anything other than the active source
@@ -274,7 +279,11 @@ final class ControlBoothEventReceiver: NSObject {
     @objc private func handleNowPlayingUpdate(_ event: NSAppleEventDescriptor,
                                               withReplyEvent reply: NSAppleEventDescriptor) {
         MainActor.assumeIsolated {
-            guard sdrController.taskMode == .customTask, sdrController.stationName == "AirPlay Receiver" else { return }
+            if let source = event.paramDescriptor(forKeyword: Self.keyNowPlayingSource)?.stringValue {
+                guard sdrController.activeControlBoothPipelineName == source else { return }
+            } else {
+                guard sdrController.taskMode == .customTask, sdrController.stationName == "AirPlay Receiver" else { return }
+            }
             let text = event.paramDescriptor(forKeyword: Self.keyDirectObject)?.stringValue
             sdrController.setControlBoothNowPlayingDetail(text)
         }
@@ -303,6 +312,7 @@ final class ControlBoothEventReceiver: NSObject {
 
     private static let eventClass = fourCC("AntH")
     private static let keyDirectObject = fourCC("----")
+    private static let keyNowPlayingSource = fourCC("Srce")
     private static let keyErrorNumber = fourCC("errn")
     private static let keyErrorString = fourCC("errs")
     private static let typeNull = fourCC("null")
