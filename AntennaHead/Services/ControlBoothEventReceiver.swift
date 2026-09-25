@@ -279,13 +279,16 @@ final class ControlBoothEventReceiver: NSObject {
     @objc private func handleNowPlayingUpdate(_ event: NSAppleEventDescriptor,
                                               withReplyEvent reply: NSAppleEventDescriptor) {
         MainActor.assumeIsolated {
-            if let source = event.paramDescriptor(forKeyword: Self.keyNowPlayingSource)?.stringValue {
+            let source = event.paramDescriptor(forKeyword: Self.keyNowPlayingSource)?.stringValue
+            if let source {
                 guard sdrController.activeControlBoothPipelineName == source else { return }
             } else {
                 guard sdrController.taskMode == .customTask, sdrController.stationName == "AirPlay Receiver" else { return }
             }
             let text = event.paramDescriptor(forKeyword: Self.keyDirectObject)?.stringValue
-            sdrController.setControlBoothNowPlayingDetail(text)
+            // Pipeline updates (e.g. dsd-neo's talkgroup changes) also get a
+            // marker line in Captions; AirPlay track changes don't.
+            sdrController.setControlBoothNowPlayingDetail(text, markInCaptions: source != nil)
         }
     }
 

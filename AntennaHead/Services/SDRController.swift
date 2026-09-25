@@ -781,9 +781,25 @@ final class SDRController {
     /// Called by `ControlBoothEventReceiver` handling the 'NpUp' AppleEvent.
     /// `nil`/empty clears it (e.g. the AirPlay client paused or disconnected
     /// while relay stayed on).
-    func setControlBoothNowPlayingDetail(_ text: String?) {
-        controlBoothNowPlayingDetail = (text?.isEmpty ?? true) ? nil : text
+    ///
+    /// With `markInCaptions`, a new non-empty detail also adds an italic
+    /// "Now playing …" marker line to the Captions transcript, the same kind
+    /// of line a retune adds, so e.g. a dsd-neo talkgroup change is visible
+    /// among the captions. A repeat of the last marked detail adds nothing.
+    func setControlBoothNowPlayingDetail(_ text: String?, markInCaptions: Bool = false) {
+        let detail = (text?.isEmpty ?? true) ? nil : text
+        controlBoothNowPlayingDetail = detail
+        if markInCaptions, let detail, detail != lastCaptionMarkedDetail {
+            lastCaptionMarkedDetail = detail
+            insertAnnouncementCaption("Now playing \(detail)")
+        }
     }
+
+    /// The last detail `setControlBoothNowPlayingDetail` put in Captions,
+    /// so a repeated update doesn't add a duplicate line. Cleared with the
+    /// transcript in `resetCaptions()`.
+    @ObservationIgnored private var lastCaptionMarkedDetail: String?
+
     /// True when this Gqrx carries the device-control commands (PR #1446).
     private(set) var gqrxHasDeviceControl = false
     private(set) var gqrxInputDevices: [String] = []   // labels
@@ -927,6 +943,7 @@ final class SDRController {
         liveCaption = ""
         captionHistory.removeAll()
         captionSeq = 0
+        lastCaptionMarkedDetail = nil
     }
 
     /// Seeds the just-reset transcript with a styled marker line echoing the
