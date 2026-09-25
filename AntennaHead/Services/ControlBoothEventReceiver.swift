@@ -36,7 +36,10 @@ import SharedLogging
 ///                                  `ControlBoothClient.isControlBoothRunning`'s own
 ///                                  `NSRunningApplication` check.) A workspace
 ///                                  termination observer covers a crash or force-quit,
-///                                  which never sends this notice.
+///                                  which never sends this notice. Ignored when a
+///                                  ControlBooth other than the sender (by the
+///                                  event's sender PID) is still running, e.g. the
+///                                  XCTest host quitting beside the real app.
 ///   'NpUp'  now playing update     direct parameter: display text (e.g.
 ///                                  "Artist — Title"), empty to clear. No
 ///                                  reply expected. Sent by ControlBooth's
@@ -264,8 +267,26 @@ final class ControlBoothEventReceiver: NSObject {
     @objc private func handleQuitting(_ event: NSAppleEventDescriptor,
                                        withReplyEvent reply: NSAppleEventDescriptor) {
         MainActor.assumeIsolated {
+            // A second ControlBooth (e.g. the XCTest host when running its unit
+            // tests) quitting must not drop the pipeline the real one is still
+            // running. Exclude the sender by PID; if the event doesn't carry
+            // one, any second instance means someone is still around.
+            let senderPID = event.attributeDescriptor(forKeyword: keySenderPIDAttr)
+                .map { pid_t($0.int32Value) }.flatMap { $0 > 0 ? $0 : nil }
+            let running = NSRunningApplication.runningApplications(
+                withBundleIdentifier: ControlBoothClient.bundleIdentifier)
+                .filter { !$0.isTerminated }
+            let othersStillRunning = senderPID.map { pid in
+                running.contains { $0.processIdentifier != pid }
+            } ?? (running.count > 1)
+            let senderDescription = senderPID.map { "PID \($0)" } ?? "unknown PID"
+            guard !othersStillRunning else {
+                LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
+                    "ControlBooth (\(senderDescription)) is quitting, but another ControlBooth instance is still running; ignoring")
+                return
+            }
             LogStore.shared.log(.info, source: "ControlBoothEventReceiver",
-                "ControlBooth is quitting")
+                "ControlBooth (\(senderDescription)) is quitting")
             controlBoothWentAway(reason: "ControlBooth is quitting")
         }
     }
