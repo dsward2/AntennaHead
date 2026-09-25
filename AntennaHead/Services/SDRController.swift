@@ -957,11 +957,24 @@ final class SDRController {
     /// however long the pipeline takes to (re)launch. Called once per
     /// pipeline (re)build, only when both live captions and the spoken
     /// announcement are enabled — see `addTranscriberStageIfEnabled`.
+    ///
+    /// The line is prefixed with the local time it was added, in 24-hour form
+    /// ("17:23:37 - Now playing …"), so a transcript shows when each source or
+    /// talkgroup change happened.
     private func insertAnnouncementCaption(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        appendCaptionLine(trimmed, isAnnouncement: true)
+        let stamp = Self.captionTimeFormatter.string(from: Date())
+        appendCaptionLine("\(stamp) - \(trimmed)", isAnnouncement: true)
     }
+
+    /// 24-hour "HH:mm:ss" regardless of the user's 12/24-hour setting.
+    private static let captionTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     // MARK: Public control API (ported from SDRController.h)
 
