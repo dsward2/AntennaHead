@@ -1068,6 +1068,22 @@ final class AntennaHeadHTTPServer {
             sdrController?.terminateTasks(enterIdle: false)
             return okResponse()
 
+        case "/controlboothdsdneo.html":
+            return controlBoothDsdNeoActionResponse(requestPath: request.path)
+
+        case "/controlboothdsdneostatus.json":
+            // For controlBoothPoll(): the scanner's status line and the
+            // state/mode the dsd-neo section was rendered with.
+            var body: [String: Any] = ["available": false]
+            if ControlBoothClient.isControlBoothRunning, let status = try? ControlBoothClient.dsdNeoStatus() {
+                body = ["available": true, "state": status.state, "mode": status.mode,
+                        "statusText": Self.dsdNeoStatusText(status),
+                        "talkgroup": status.isActive ? (status.talkgroup ?? 0) : 0]
+            }
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
+                                body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8))
+
         case "/controlboothlaunched.html":
             launchControlBooth()
             return htmlFragmentResponse(controlBoothPageHTML())
@@ -1639,7 +1655,9 @@ final class AntennaHeadHTTPServer {
             + "System Settings › Privacy & Security › Automation."
     }
 
-    @MainActor private func controlBoothPageHTML() -> String {
+    /// `dsdNeoError` is shown in the dsd-neo Scanner section, for a control
+    /// there that ControlBooth refused.
+    @MainActor private func controlBoothPageHTML(dsdNeoError: String? = nil) -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
         let statusColor = isRunning ? "green" : "#cc0000"
@@ -1688,6 +1706,7 @@ final class AntennaHeadHTTPServer {
                 s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
             }
             s += controlBoothAirPlaySectionHTML(status: airPlayStatus, activePipeline: activePipeline)
+            s += controlBoothDsdNeoSectionHTML(activePipeline: activePipeline, error: dsdNeoError)
         } else {
             s += "<form action='javascript:loadContent(&quot;controlboothlaunched.html&quot;)'>"
             s += "<input class='twelve columns button button-primary' type='submit' value='Launch ControlBooth'>"
@@ -1737,6 +1756,196 @@ final class AntennaHeadHTTPServer {
             s += "title='Start relaying ControlBooth AirPlay Receiver audio to AntennaHead.'><br>&nbsp;<br>"
         }
         return s
+    }
+
+    /// The dsd-neo Scanner section below the AirPlay one: status, Listen/Stop
+    /// for its pipeline, which calls to follow, Skip, and the talkgroup
+    /// blacklist. Every control is a GET of `controlboothdsdneo.html?action=…`
+    /// (see `controlBoothDsdNeoActionResponse`), which answers with this
+    /// whole fragment re-rendered. Empty when ControlBooth has no dsd-neo
+    /// Scanner pipeline, or predates the dsd-neo AppleEvents.
+    @MainActor private func controlBoothDsdNeoSectionHTML(activePipeline: String?, error: String?) -> String {
+        guard let status = try? ControlBoothClient.dsdNeoStatus(),
+              let pipelineName = status.activePipeline ?? status.pipelineNames.first else { return "" }
+        let listening = activePipeline == pipelineName
+
+        func talkgroupLabel(_ tg: DsdNeoScannerStatus.Talkgroup) -> String {
+            tg.name.isEmpty ? "TG \(tg.talkgroup)" : "\(tg.name) (TG \(tg.talkgroup))"
+        }
+        func policyButton(_ title: String, talkgroup: Int, policy: String, primary: Bool = false) -> String {
+            "<input class='button\(primary ? " button-primary" : "")' type='button' value='\(htmlAttribute(title))' "
+                + "onclick=\"controlBoothDsdNeoPolicy(\(talkgroup), '\(policy)');\">"
+        }
+
+        // data-state/data-mode are read by controlBoothPoll() to reload this
+        // fragment when they change; the talkgroup line is updated in place
+        // so a reload doesn't clear what's being typed below.
+        var s = "<hr><h4 class='title'>dsd-neo Scanner</h4>"
+        s += "<div id='dsdneo_section' data-state='\(htmlAttribute(status.state))' data-mode='\(htmlAttribute(status.mode))'>"
+        if let error {
+            s += "<p style='color:#cc0000'>\(htmlText(error))</p>"
+        }
+        s += "<p>Scanner: <strong id='dsdneo_status'>\(htmlText(Self.dsdNeoStatusText(status)))</strong></p>"
+        if status.state == "failed" || status.state == "restarting", let message = status.message {
+            s += "<p style='color:#cc0000'>\(htmlText(message))</p>"
+        }
+        if !status.installed {
+            s += "<p>dsd-neo isn't installed on this Mac. See ControlBooth's dsd-neo Scanner tab.</p>"
+        } else if !status.configured {
+            s += "<p>Choose an RTL-SDR and a control channel in ControlBooth's dsd-neo Scanner tab first.</p>"
+        }
+
+        // Listen / Stop / Skip
+        if listening {
+            s += "<form action='javascript:loadContent(&quot;controlboothstop.html&quot;)'>"
+            s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
+            if status.isActive {
+                s += "<input class='twelve columns button' type='button' value='Skip Call' "
+                s += "onclick=\"loadContent('controlboothdsdneo.html?action=skip');\" "
+                s += "title='Leave this call and go back to the control channel. A call still in progress may be picked up again.'>"
+                s += "<br>&nbsp;<br>"
+            }
+        } else if status.installed && status.configured {
+            s += "<form id='controlBoothDsdNeoForm' onsubmit='event.preventDefault(); return false;'>"
+            s += "<input type='hidden' name='pipeline_select' value='\(htmlAttribute(pipelineName))'>"
+            s += "<input class='twelve columns button button-primary' type='button' value='Listen' "
+            s += "onclick=\"controlBoothListenButtonClicked(getElementById('controlBoothDsdNeoForm'));\" "
+            s += "title='Start the dsd-neo Scanner and listen to it.'></form><br>&nbsp;<br>"
+        }
+
+        // Talkgroup picker suggestions: recently heard, then the blacklist.
+        s += "<datalist id='dsdneo_talkgroups'>"
+        for tg in status.recent + status.lockedOut + status.alwaysAllowed {
+            s += "<option value='\(tg.talkgroup)'>\(htmlText(tg.name))</option>"
+        }
+        s += "</datalist>"
+
+        // Which calls to follow
+        let modes = [("scan", "Scan all talkgroups"), ("allowList", "Always Allow talkgroups only"),
+                     ("hold", "Hold one talkgroup")]
+        s += "<form id='dsdNeoModeForm' onsubmit='event.preventDefault(); return false;'>"
+        s += "<label for='dsdneo_mode'>Follow:</label>"
+        s += "<select id='dsdneo_mode' name='mode' class='twelve columns' "
+        s += "onchange=\"document.getElementById('dsdneo_hold_row').style.display = (this.value == 'hold') ? '' : 'none';\">"
+        for (value, title) in modes {
+            s += "<option value='\(value)'\(status.mode == value ? " selected" : "")>\(title)</option>"
+        }
+        s += "</select>"
+        let holdValue = status.holdTalkgroup ?? status.talkgroup
+        s += "<div id='dsdneo_hold_row'\(status.mode == "hold" ? "" : " style='display:none'")>"
+        s += "<label for='dsdneo_hold_tg'>Talkgroup to hold:</label>"
+        s += "<input id='dsdneo_hold_tg' name='tg' type='number' min='1' class='twelve columns' list='dsdneo_talkgroups' "
+        s += "value='\(holdValue.map(String.init) ?? "")'></div>"
+        if status.mode == "allowList" && status.alwaysAllowed.isEmpty {
+            s += "<p style='color:#cc0000'>No talkgroups are set to Always Allow, so nothing will play.</p>"
+        }
+        s += "<input class='twelve columns button' type='button' value='Apply' "
+        s += "onclick=\"controlBoothDsdNeoApplyMode(getElementById('dsdNeoModeForm'));\" "
+        s += "title='Save and restart dsd-neo with this mode (a few seconds of silence).'></form><br>&nbsp;<br>"
+
+        // The talkgroup being heard
+        // Always present, so controlBoothPoll() can fill it in when a call starts.
+        s += "<p id='dsdneo_current_row' data-talkgroup='\(status.isActive ? (status.talkgroup ?? 0) : 0)'>"
+        if let tg = status.talkgroup, status.isActive {
+            s += policyButton("Lock Out TG \(tg)", talkgroup: tg, policy: "lockout")
+        }
+        s += "</p>"
+
+        // Blacklist
+        s += "<h5>Locked Out Talkgroups</h5>"
+        if status.lockedOut.isEmpty {
+            s += "<p>None.</p>"
+        } else {
+            s += "<table class='u-full-width'><tbody>"
+            for tg in status.lockedOut {
+                s += "<tr><td>\(htmlText(talkgroupLabel(tg)))</td><td>"
+                s += policyButton("Remove", talkgroup: tg.talkgroup, policy: "automatic")
+                s += "</td></tr>"
+            }
+            s += "</tbody></table>"
+        }
+        s += "<form id='dsdNeoAddForm' onsubmit='event.preventDefault(); return false;'>"
+        s += "<label for='dsdneo_add_tg'>Talkgroup:</label>"
+        s += "<input id='dsdneo_add_tg' name='tg' type='number' min='1' class='twelve columns' list='dsdneo_talkgroups'>"
+        s += "<input class='button' type='button' value='Lock Out' "
+        s += "onclick=\"controlBoothDsdNeoAddPolicy(getElementById('dsdNeoAddForm'), 'lockout');\"> "
+        s += "<input class='button' type='button' value='Always Allow' "
+        s += "onclick=\"controlBoothDsdNeoAddPolicy(getElementById('dsdNeoAddForm'), 'allow');\">"
+        s += "</form>"
+
+        if !status.alwaysAllowed.isEmpty {
+            s += "<h5>Always Allow</h5><table class='u-full-width'><tbody>"
+            for tg in status.alwaysAllowed {
+                s += "<tr><td>\(htmlText(talkgroupLabel(tg)))</td><td>"
+                s += policyButton("Remove", talkgroup: tg.talkgroup, policy: "automatic")
+                s += "</td></tr>"
+            }
+            s += "</tbody></table>"
+        }
+        if !status.encryptedLockedOut.isEmpty {
+            s += "<details><summary>\(status.encryptedLockedOut.count) talkgroup(s) locked out for encryption</summary>"
+            s += "<table class='u-full-width'><tbody>"
+            for tg in status.encryptedLockedOut {
+                s += "<tr><td>\(htmlText(talkgroupLabel(tg)))</td><td>"
+                s += policyButton("Always Allow", talkgroup: tg.talkgroup, policy: "allow")
+                s += "</td></tr>"
+            }
+            s += "</tbody></table></details>"
+        }
+        s += "</div><br>"
+        return s
+    }
+
+    /// The scanner's one-line status, shared by the page and its poll.
+    nonisolated static func dsdNeoStatusText(_ status: DsdNeoScannerStatus) -> String {
+        var text: String
+        switch status.state {
+        case "running":
+            text = status.talkgroupText.map { "Running — last heard \($0)" } ?? "Running — waiting for a clear call"
+        case "restarting": text = "Restarting dsd-neo"
+        case "failed": text = "Stopped after an error"
+        default: text = "Not running"
+        }
+        switch status.mode {
+        case "allowList": text += " · Always Allow only"
+        case "hold": text += status.holdTalkgroup.map { " · Holding TG \($0)" } ?? ""
+        default: break
+        }
+        return text
+    }
+
+    /// `controlboothdsdneo.html?action=skip|mode|policy` — the dsd-neo
+    /// section's controls. Answers with the page re-rendered, with
+    /// ControlBooth's error (if it refused) in the dsd-neo section.
+    @MainActor private func controlBoothDsdNeoActionResponse(requestPath: String) -> HTTPResponse {
+        var failure: String?
+        do {
+            switch queryValue("action", in: requestPath) {
+            case "skip":
+                try ControlBoothClient.skipDsdNeoCall()
+            case "mode":
+                let mode = queryValue("mode", in: requestPath) ?? "scan"
+                let tg = queryValue("tg", in: requestPath).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                if mode == "hold", (tg ?? 0) <= 0 {
+                    failure = "Enter the talkgroup number to hold."
+                } else {
+                    try ControlBoothClient.setDsdNeoMode(mode, talkgroup: mode == "hold" ? tg : nil)
+                }
+            case "policy":
+                let policy = queryValue("policy", in: requestPath) ?? ""
+                if let tg = queryValue("tg", in: requestPath).flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }),
+                   tg > 0 {
+                    try ControlBoothClient.setDsdNeoTalkgroupPolicy(tg, policy: policy)
+                } else {
+                    failure = "Enter a talkgroup number."
+                }
+            default:
+                break
+            }
+        } catch {
+            failure = "\(error)"
+        }
+        return htmlFragmentResponse(controlBoothPageHTML(dsdNeoError: failure))
     }
 
     /// Launches the ControlBooth app using the security-scoped bookmark saved
