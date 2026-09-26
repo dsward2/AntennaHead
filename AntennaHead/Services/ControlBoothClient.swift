@@ -13,6 +13,13 @@ import AppKit
 ///   'ApOn'  start airplay relay  turns the AirPlay receiver on if needed and
 ///                                relays its audio to AntennaHead
 ///   'ApOf'  stop airplay relay   stops relaying without turning the receiver off
+///   'DnSt'  dsd-neo status       reply: JSON text (see `DsdNeoScannerStatus`)
+///   'DnMd'  set dsd-neo mode     direct parameter: "scan", "allowList" or
+///                                "hold"; 'DnTg' integer: talkgroup to hold
+///   'DnSk'  skip dsd-neo call    return to the control channel
+///   'DnPo'  set dsd-neo talkgroup policy
+///                                direct parameter: talkgroup (integer);
+///                                'DnPo' text: "lockout", "allow" or "automatic"
 ///
 /// Every ControlBooth command is in the `com.dsward.ControlBooth.pipelines`
 /// access group, matched by this app's `com.apple.security.scripting-targets`
@@ -76,6 +83,34 @@ enum ControlBoothClient {
         _ = try send(eventID: "ApOf", directParameter: nil)
     }
 
+    /// The dsd-neo Scanner's state. Throws if ControlBooth doesn't answer or
+    /// predates the dsd-neo commands.
+    static func dsdNeoStatus() throws -> DsdNeoScannerStatus {
+        let reply = try send(eventID: "DnSt", directParameter: nil)
+        guard let json = reply.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let status = try? JSONDecoder().decode(DsdNeoScannerStatus.self, from: Data(json.utf8)) else {
+            throw ClientError.eventError(code: 0, message: "ControlBooth sent an unreadable dsd-neo status.")
+        }
+        return status
+    }
+
+    /// `mode` is "scan", "allowList" or "hold"; hold needs `talkgroup`.
+    static func setDsdNeoMode(_ mode: String, talkgroup: Int?) throws {
+        var parameters: [FourCharCode: NSAppleEventDescriptor] = [:]
+        if let talkgroup { parameters[fourCC("DnTg")] = NSAppleEventDescriptor(int32: Int32(clamping: talkgroup)) }
+        _ = try send(eventID: "DnMd", directParameter: NSAppleEventDescriptor(string: mode), parameters: parameters)
+    }
+
+    static func skipDsdNeoCall() throws {
+        _ = try send(eventID: "DnSk", directParameter: nil)
+    }
+
+    /// `policy` is "lockout", "allow" or "automatic".
+    static func setDsdNeoTalkgroupPolicy(_ talkgroup: Int, policy: String) throws {
+        _ = try send(eventID: "DnPo", directParameter: NSAppleEventDescriptor(int32: Int32(clamping: talkgroup)),
+                     parameters: [fourCC("DnPo"): NSAppleEventDescriptor(string: policy)])
+    }
+
     private static func stringList(from reply: NSAppleEventDescriptor) -> [String] {
         guard let list = reply.paramDescriptor(forKeyword: keyDirectObject),
               list.numberOfItems > 0 else {
@@ -94,7 +129,8 @@ enum ControlBoothClient {
         return (1...list.numberOfItems).map { list.atIndex($0)?.booleanValue ?? false }
     }
 
-    private static func send(eventID: String, directParameter: NSAppleEventDescriptor?) throws -> NSAppleEventDescriptor {
+    private static func send(eventID: String, directParameter: NSAppleEventDescriptor?,
+                             parameters: [FourCharCode: NSAppleEventDescriptor] = [:]) throws -> NSAppleEventDescriptor {
         guard isControlBoothRunning else {
             throw ClientError.notRunning
         }
@@ -107,6 +143,9 @@ enum ControlBoothClient {
         )
         if let directParameter {
             event.setParam(directParameter, forKeyword: keyDirectObject)
+        }
+        for (keyword, value) in parameters {
+            event.setParam(value, forKeyword: keyword)
         }
         let reply = try event.sendEvent(options: [.waitForReply], timeout: 8)
         if let errorNumber = reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value,
@@ -126,4 +165,34 @@ enum ControlBoothClient {
     private static let keyDirectObject = fourCC("----")
     private static let keyErrorNumber = fourCC("errn")
     private static let keyErrorString = fourCC("errs")
+}
+
+/// ControlBooth's dsd-neo Scanner, as its 'DnSt' reply describes it (ControlBooth's
+/// `DsdNeoRemoteControl.Status`).
+struct DsdNeoScannerStatus: Decodable, Equatable {
+    struct Talkgroup: Decodable, Equatable {
+        var talkgroup: Int
+        var name: String
+    }
+
+    var installed: Bool
+    var configured: Bool
+    /// "idle", "running", "restarting" or "failed".
+    var state: String
+    var message: String?
+    var pipelineNames: [String]
+    var activePipeline: String?
+    /// "scan", "allowList" or "hold".
+    var mode: String
+    var holdTalkgroup: Int?
+    var talkgroup: Int?
+    var talkgroupText: String?
+    var systemID: String?
+    var controlChannelHz: Int
+    var lockedOut: [Talkgroup]
+    var encryptedLockedOut: [Talkgroup]
+    var alwaysAllowed: [Talkgroup]
+    var recent: [Talkgroup]
+
+    var isActive: Bool { state == "running" || state == "restarting" }
 }

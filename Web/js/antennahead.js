@@ -2019,6 +2019,69 @@ function controlBoothPoll()
 
 var controlBoothPollIntervalID = setInterval(controlBoothPoll, 3000);
 
+// The dsd-neo Scanner section of controlbooth.html. Its status line and
+// "Lock Out TG n" button follow the talkgroup in place; the fragment is only
+// reloaded when the scanner starts/stops or its mode changes, so a talkgroup
+// number being typed below isn't wiped out by every new call.
+function controlBoothDsdNeoPoll()
+{
+    var sectionEl = document.getElementById("dsdneo_section");
+    if (!sectionEl) return;
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState != 4 || this.status != 200) return;
+        try {
+            var data = JSON.parse(this.responseText);
+            if (!data.available) return;   // controlBoothPoll() handles ControlBooth quitting
+            if (data.state !== sectionEl.getAttribute("data-state")
+                || data.mode !== sectionEl.getAttribute("data-mode"))
+            {
+                loadContent("controlbooth.html");
+                return;
+            }
+            var statusEl = document.getElementById("dsdneo_status");
+            if (statusEl) statusEl.textContent = data.statusText;
+            var rowEl = document.getElementById("dsdneo_current_row");
+            if (rowEl && String(data.talkgroup) !== rowEl.getAttribute("data-talkgroup")) {
+                rowEl.setAttribute("data-talkgroup", String(data.talkgroup));
+                rowEl.innerHTML = "";
+                if (data.talkgroup > 0) {
+                    var button = document.createElement("input");
+                    button.type = "button";
+                    button.className = "button";
+                    button.value = "Lock Out TG " + data.talkgroup;
+                    button.onclick = function() { controlBoothDsdNeoPolicy(data.talkgroup, "lockout"); };
+                    rowEl.appendChild(button);
+                }
+            }
+        } catch (e) { /* ignore a malformed response */ }
+    };
+    xhttp.open("GET", "/controlboothdsdneostatus.json", true);
+    xhttp.send();
+}
+
+var controlBoothDsdNeoPollIntervalID = setInterval(controlBoothDsdNeoPoll, 2000);
+
+function controlBoothDsdNeoApplyMode(form)
+{
+    var mode = form.elements["mode"].value;
+    var tg = form.elements["tg"].value;
+    loadContent("controlboothdsdneo.html?action=mode&mode=" + encodeURIComponent(mode)
+                + "&tg=" + encodeURIComponent(tg));
+}
+
+function controlBoothDsdNeoPolicy(talkgroup, policy)
+{
+    loadContent("controlboothdsdneo.html?action=policy&policy=" + encodeURIComponent(policy)
+                + "&tg=" + encodeURIComponent(talkgroup));
+}
+
+function controlBoothDsdNeoAddPolicy(form, policy)
+{
+    controlBoothDsdNeoPolicy(form.elements["tg"].value, policy);
+}
+
 function controlBoothAirPlayListenButtonClicked()
 {
     var getUrl = window.location;
