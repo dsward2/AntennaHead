@@ -414,9 +414,39 @@
             "<button type='button' id='native-audio-play' class='native-audio-btn' title='Play or pause the audio stream'"
             + " onclick=\"nativeAudioSend({command: 'toggle', url: liveStreamAudioSrc});\">&#9654;&#xFE0E;</button>"
             + "<span id='native-audio-status' class='native-audio-status'>Tap a Listen button, or &#9654;&#xFE0E; to play</span>"
+            + nativeAudioAirPlaySlotHTML()
             + "<button type='button' class='native-audio-btn' title='Choose a different AntennaHead server'"
             + " onclick=\"nativeAudioSend({command: 'showServers'});\">&#8943;</button>";
         audioDiv.appendChild(controls);
+        nativeAudioReportAirPlaySlot();
+        window.addEventListener("resize", nativeAudioReportAirPlaySlot);
+    }
+
+    // The AirPlay button the <audio> element's own controls used to provide.
+    // A page can't open the system audio-output picker, so this is only an
+    // empty button-shaped slot: the app lays its own native AirPlay button
+    // (AVRoutePickerView) over it, at the rect reported here. Only an app
+    // new enough to do that defines window.antennaheadNativeAirPlaySupported
+    // (a script it injects before the page loads); an older app gets no slot.
+    function nativeAudioAirPlaySlotHTML()
+    {
+        if (window.antennaheadNativeAirPlaySupported !== true)
+        {
+            return "";
+        }
+        return "<button type='button' id='native-audio-airplay' class='native-audio-btn' tabindex='-1' aria-hidden='true'></button>";
+    }
+
+    function nativeAudioReportAirPlaySlot()
+    {
+        var slot = document.getElementById("native-audio-airplay");
+        if (slot === null)
+        {
+            return;
+        }
+        var r = slot.getBoundingClientRect();
+        nativeAudioSend({command: "airPlaySlot", x: r.left, y: r.top, width: r.width, height: r.height,
+                         color: window.getComputedStyle(slot).color});
     }
 
     // Called by the iOS app (evaluateJavaScript) whenever its player changes
