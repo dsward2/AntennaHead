@@ -2097,6 +2097,17 @@ function controlBoothRadioPoll()
 
 var controlBoothRadioPollIntervalID = setInterval(controlBoothRadioPoll, 2000);
 
+// Go On Air: like the Listen buttons, start the page's audio player too —
+// inside the click, so the browser allows playback. The station opens
+// AntennaHead's input itself a moment later.
+function controlBoothRadioGoOnAirClicked(sourceName)
+{
+    loadContent("controlboothradio.html?action=start");
+    window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+    showUpNextInNavBar(sourceName);
+    window.top.postMessage("startaudio", "*");
+}
+
 function controlBoothDsdNeoApplyMode(form)
 {
     var mode = form.elements["mode"].value;
