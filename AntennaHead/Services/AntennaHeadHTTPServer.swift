@@ -1084,6 +1084,21 @@ final class AntennaHeadHTTPServer {
                                 headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
                                 body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8))
 
+        case "/controlboothradio.html":
+            return controlBoothRadioActionResponse(requestPath: request.path)
+
+        case "/controlboothradiostatus.json":
+            // For controlBoothRadioPoll(): the phase the radio section was
+            // rendered with, plus the lines it updates in place.
+            var body: [String: Any] = ["available": false]
+            if ControlBoothClient.isControlBoothRunning, let status = try? ControlBoothClient.radioStatus() {
+                body = ["available": true, "phase": status.phase, "statusText": status.statusText,
+                        "nowPlaying": status.nowPlaying ?? ""]
+            }
+            return HTTPResponse(status: 200, reason: "OK",
+                                headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
+                                body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8))
+
         case "/controlboothlaunched.html":
             launchControlBooth()
             return htmlFragmentResponse(controlBoothPageHTML())
@@ -1655,9 +1670,9 @@ final class AntennaHeadHTTPServer {
             + "System Settings › Privacy & Security › Automation."
     }
 
-    /// `dsdNeoError` is shown in the dsd-neo Scanner section, for a control
-    /// there that ControlBooth refused.
-    @MainActor private func controlBoothPageHTML(dsdNeoError: String? = nil) -> String {
+    /// `dsdNeoError`/`radioError` are shown in the dsd-neo Scanner/AntennaHead
+    /// Radio sections, for a control there that ControlBooth refused.
+    @MainActor private func controlBoothPageHTML(dsdNeoError: String? = nil, radioError: String? = nil) -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
         let statusColor = isRunning ? "green" : "#cc0000"
@@ -1706,6 +1721,7 @@ final class AntennaHeadHTTPServer {
                 s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
             }
             s += controlBoothAirPlaySectionHTML(status: airPlayStatus, activePipeline: activePipeline)
+            s += controlBoothRadioSectionHTML(error: radioError)
             s += controlBoothDsdNeoSectionHTML(activePipeline: activePipeline, error: dsdNeoError)
         } else {
             s += "<form action='javascript:loadContent(&quot;controlboothlaunched.html&quot;)'>"
@@ -1756,6 +1772,58 @@ final class AntennaHeadHTTPServer {
             s += "title='Start relaying ControlBooth AirPlay Receiver audio to AntennaHead.'><br>&nbsp;<br>"
         }
         return s
+    }
+
+    /// ControlBooth's AntennaHead Radio station: status, song, and Go On Air /
+    /// Stop (`controlboothradio.html?action=start|stop`). The station opens
+    /// and closes AntennaHead's ControlBooth input itself, like a pipeline
+    /// started from ControlBooth. Empty when ControlBooth predates the radio
+    /// AppleEvents.
+    @MainActor private func controlBoothRadioSectionHTML(error: String?) -> String {
+        guard let status = try? ControlBoothClient.radioStatus() else { return "" }
+        // data-phase is read by controlBoothRadioPoll() to reload this
+        // fragment when the station starts or stops; the status line and song
+        // are updated in place.
+        var s = "<hr><h4 class='title'>AntennaHead Radio</h4>"
+        s += "<div id='radio_section' data-phase='\(htmlAttribute(status.phase))'>"
+        if let error {
+            s += "<p style='color:#cc0000'>\(htmlText(error))</p>"
+        }
+        s += "<p>Station: <strong id='radio_status'>\(htmlText(status.statusText))</strong></p>"
+        s += "<p id='radio_now_playing'>\(status.nowPlaying.map { "Now playing: " + htmlText($0) } ?? "")</p>"
+        if let lastError = status.lastError {
+            s += "<p style='color:#cc0000'>\(htmlText(lastError))</p>"
+        }
+        if status.isOnAir {
+            s += "<input class='twelve columns button' type='button' value='Stop' "
+            s += "onclick=\"loadContent('controlboothradio.html?action=stop');\""
+            s += status.phase == "stopping" ? " disabled" : ""
+            s += " title='Take AntennaHead Radio off the air.'><br>&nbsp;<br>"
+        } else {
+            s += "<input class='twelve columns button button-primary' type='button' value='Go On Air' "
+            s += "onclick=\"loadContent('controlboothradio.html?action=start');\" "
+            s += "title='Start AntennaHead Radio with the settings in ControlBooth&#39;s AntennaHead Radio tab. "
+            s += "It takes over the AirPlay receiver and this ControlBooth input while on air.'><br>&nbsp;<br>"
+        }
+        s += "</div>"
+        return s
+    }
+
+    /// `controlboothradio.html?action=start|stop`. Answers with the page
+    /// re-rendered, with ControlBooth's error (if it refused) in the radio
+    /// section.
+    @MainActor private func controlBoothRadioActionResponse(requestPath: String) -> HTTPResponse {
+        var failure: String?
+        do {
+            switch queryValue("action", in: requestPath) {
+            case "start": try ControlBoothClient.startRadio()
+            case "stop": try ControlBoothClient.stopRadio()
+            default: break
+            }
+        } catch {
+            failure = "\(error)"
+        }
+        return htmlFragmentResponse(controlBoothPageHTML(radioError: failure))
     }
 
     /// The dsd-neo Scanner section below the AirPlay one: status, Listen/Stop

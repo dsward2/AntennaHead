@@ -20,6 +20,10 @@ import AppKit
 ///   'DnPo'  set dsd-neo talkgroup policy
 ///                                direct parameter: talkgroup (integer);
 ///                                'DnPo' text: "lockout", "allow" or "automatic"
+///   'RdSt'  radio status         reply: JSON text (see `RadioStationStatus`)
+///   'RdOn'  start radio          AntennaHead Radio goes on the air; it then
+///                                asks AntennaHead to listen ('AntH' 'Strt')
+///   'RdOf'  stop radio           off the air; it then sends 'AntH' 'Stop'
 ///
 /// Every ControlBooth command is in the `com.dsward.ControlBooth.pipelines`
 /// access group, matched by this app's `com.apple.security.scripting-targets`
@@ -111,6 +115,27 @@ enum ControlBoothClient {
                      parameters: [fourCC("DnPo"): NSAppleEventDescriptor(string: policy)])
     }
 
+    /// AntennaHead Radio's state. Throws if ControlBooth doesn't answer or
+    /// predates the radio commands.
+    static func radioStatus() throws -> RadioStationStatus {
+        let reply = try send(eventID: "RdSt", directParameter: nil)
+        guard let json = reply.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let status = try? JSONDecoder().decode(RadioStationStatus.self, from: Data(json.utf8)) else {
+            throw ClientError.eventError(code: 0, message: "ControlBooth sent an unreadable AntennaHead Radio status.")
+        }
+        return status
+    }
+
+    /// Returns once the station has started starting; it opens AntennaHead's
+    /// receiver itself, and reports failures through `radioStatus()`.
+    static func startRadio() throws {
+        _ = try send(eventID: "RdOn", directParameter: nil)
+    }
+
+    static func stopRadio() throws {
+        _ = try send(eventID: "RdOf", directParameter: nil)
+    }
+
     private static func stringList(from reply: NSAppleEventDescriptor) -> [String] {
         guard let list = reply.paramDescriptor(forKeyword: keyDirectObject),
               list.numberOfItems > 0 else {
@@ -195,4 +220,18 @@ struct DsdNeoScannerStatus: Decodable, Equatable {
     var recent: [Talkgroup]
 
     var isActive: Bool { state == "running" || state == "restarting" }
+}
+
+/// ControlBooth's AntennaHead Radio station, as its 'RdSt' reply describes it
+/// (ControlBooth's `RadioStation.RemoteStatus`).
+struct RadioStationStatus: Decodable, Equatable {
+    /// "stopped", "starting", "onAir", "segment" or "stopping".
+    var phase: String
+    var statusText: String
+    var nowPlaying: String?
+    var lastError: String?
+    /// The source name the station listens under in AntennaHead.
+    var sourceName: String
+
+    var isOnAir: Bool { phase != "stopped" }
 }
