@@ -1166,6 +1166,12 @@ final class AntennaHeadHTTPServer {
         case APIEndpoint.controlBoothAirPlayStop:
             return apiControlBoothAirPlayStopResponse()
 
+        case APIEndpoint.controlBoothRadioStart:
+            return apiControlBoothRadioResponse(start: true)
+
+        case APIEndpoint.controlBoothRadioStop:
+            return apiControlBoothRadioResponse(start: false)
+
         case APIEndpoint.gqrxStatus:
             return apiGqrxStatusResponse()
 
@@ -1452,11 +1458,17 @@ final class AntennaHeadHTTPServer {
             }
         }
         let airPlay = isRunning ? (try? ControlBoothClient.airPlayStatus()) : nil
+        let radio = isRunning ? (try? ControlBoothClient.radioStatus()) : nil
         return apiEncode(ControlBoothStatus(isRunning: isRunning, pipelineNames: pipelines,
                                             activePipelineName: sdrController?.activeControlBoothPipelineName,
                                             airPlayEnabled: airPlay?.enabled,
                                             airPlayRelayEnabled: airPlay?.relayEnabled,
-                                            airPlayReceivingAudio: airPlay?.isReceivingAudio))
+                                            airPlayReceivingAudio: airPlay?.isReceivingAudio,
+                                            radioPhase: radio?.phase,
+                                            radioStatusText: radio?.statusText,
+                                            radioNowPlaying: radio?.nowPlaying,
+                                            radioLastError: radio?.lastError,
+                                            radioSourceName: radio?.sourceName))
     }
 
     /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
@@ -1502,6 +1514,20 @@ final class AntennaHeadHTTPServer {
     @MainActor private func apiControlBoothAirPlayStopResponse() -> HTTPResponse {
         try? ControlBoothClient.stopAirPlayRelay()
         sdrController?.terminateTasks()
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalents of `controlboothradio.html?action=start|stop`.
+    /// Unlike a pipeline, the station opens (and closes) AntennaHead's
+    /// ControlBooth input itself a few seconds later, so the returned
+    /// now-playing is still the previous source; clients poll
+    /// `controlBoothStatus` for the station's progress.
+    @MainActor private func apiControlBoothRadioResponse(start: Bool) -> HTTPResponse {
+        do {
+            if start { try ControlBoothClient.startRadio() } else { try ControlBoothClient.stopRadio() }
+        } catch {
+            return jsonErrorResponse("\(error)", status: 502)
+        }
         return apiNowPlayingResponse()
     }
 
