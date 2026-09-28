@@ -1801,7 +1801,8 @@ final class AntennaHeadHTTPServer {
             s += " title='Take AntennaHead Radio off the air.'><br>&nbsp;<br>"
         } else {
             s += "<input class='twelve columns button button-primary' type='button' value='Go On Air' "
-            s += "onclick=\"loadContent('controlboothradio.html?action=start');\" "
+            s += "onclick=\"controlBoothRadioGoOnAirClicked(this.getAttribute('data-source'));\" "
+            s += "data-source='\(htmlAttribute(status.sourceName))' "
             s += "title='Start AntennaHead Radio with the settings in ControlBooth&#39;s AntennaHead Radio tab. "
             s += "It takes over the AirPlay receiver and this ControlBooth input while on air.'><br>&nbsp;<br>"
         }
