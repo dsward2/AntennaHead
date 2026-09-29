@@ -1196,3 +1196,11 @@ svg.lr-animation {
 .gqrx-bm:last-child { border-bottom: none; }
 .gqrx-bm-name { color: var(--ah-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gqrx-bm-btn { margin-bottom: 0; padding: 0 14px; height: 30px; line-height: 30px; }
+
+/* Text to Speech › "Controlling the voice" guide: Skeleton sets every <code>
+   to white-space: nowrap, so the long markup examples forced the table
+   wider than a phone screen and the page clipped the Effect column. Let
+   code wrap here, anywhere if it must. */
+.speech-markup-help code { white-space: normal; overflow-wrap: anywhere; }
+.speech-markup-help table { table-layout: fixed; }
+.speech-markup-help th:first-child, .speech-markup-help td:first-child { width: 55%; }
