@@ -1819,7 +1819,35 @@ final class SDRController {
             LogStore.shared.log(.error, source: "SDRController", "Text to Speech: nothing to speak")
             return
         }
+        startSpeechSynthPipeline(text: combined, repeatForever: repeatForever, voiceIdentifier: nil, ssml: false, dying: dying)
+    }
 
+    /// Speaks one piece of text typed on the web UI's Text to Speech page
+    /// ("Speak Text" section) once, through the same pipeline as the folder
+    /// Listen. `voiceIdentifier` nil/empty = the Text to Speech voice setting.
+    /// Text starting with `<speak` is passed as SSML (`--ssml`), the same rule
+    /// StationDirector's announcer uses.
+    func speakText(_ text: String, voiceIdentifier: String?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            lastError = SDRError.notImplemented("Text to Speech — no text to speak")
+            LogStore.shared.log(.error, source: "SDRController", "Speak Text: nothing to speak")
+            return
+        }
+        let dying = radioTaskPipelineManager.taskItems.compactMap { $0.process }.filter { $0.isRunning }
+        Self.sweepOrphanedHelpers()
+        stopFillerForNewSource()
+        radioTaskPipelineManager.terminate()
+        startSpeechSynthPipeline(text: trimmed, repeatForever: false,
+                                 voiceIdentifier: voiceIdentifier.flatMap { $0.isEmpty ? nil : $0 },
+                                 ssml: trimmed.hasPrefix("<speak"), dying: dying)
+    }
+
+    /// The shared tail of `startTextToSpeech` and `speakText`: stages `text`
+    /// and launches PCMSpeechSynth → sox → PCMUDPSender. The caller has
+    /// already stopped the previous pipeline (`dying` are its processes).
+    private func startSpeechSynthPipeline(text combined: String, repeatForever: Bool,
+                                          voiceIdentifier: String?, ssml: Bool, dying: [Process]) {
         // Stage the combined text in the app's own temp dir (inside the sandbox
         // container, so the PCMSpeechSynth child can read it) rather than passing
         // it as a --text argument, which would risk ARG_MAX for a large folder.
@@ -1850,7 +1878,8 @@ final class SDRController {
         directSamplingQBranch = false
         lastError = nil
 
-        guard let synth = makeSpeechSynthTaskItem(textFileURL: textFileURL, repeatForever: repeatForever),
+        guard let synth = makeSpeechSynthTaskItem(textFileURL: textFileURL, repeatForever: repeatForever,
+                                                  voiceIdentifier: voiceIdentifier, ssml: ssml),
               let resample = makeResampleTaskItem(inputRate: Self.speechSynthSampleRate,
                                                   inputChannels: 1,
                                                   audioOutputFilter: "vol 1"),
@@ -1868,7 +1897,8 @@ final class SDRController {
         launchCurrentPipeline(dying: dying)
     }
 
-    private func makeSpeechSynthTaskItem(textFileURL: URL, repeatForever: Bool) -> TaskItem? {
+    private func makeSpeechSynthTaskItem(textFileURL: URL, repeatForever: Bool,
+                                         voiceIdentifier: String? = nil, ssml: Bool = false) -> TaskItem? {
         let path = helperPath("PCMSpeechSynth")
         guard FileManager.default.isExecutableFile(atPath: path) else {
             lastError = SDRError.notImplemented("PCMSpeechSynth helper missing at \(path)")
@@ -1880,10 +1910,11 @@ final class SDRController {
         item.addArgument("--rate"); item.addArgument(Self.speechSynthSampleRate)
         // Without --voice the helper would use the built-in default (compact
         // Samantha) and ignore the Speech settings entirely.
-        if let voice = SpeechVoicePreference.resolvedIdentifier(
+        if let voice = voiceIdentifier ?? SpeechVoicePreference.resolvedIdentifier(
             overrideKey: SpeechVoicePreference.textToSpeechVoiceKey, sqlite: sqliteController) {
             item.addArgument("--voice"); item.addArgument(voice)
         }
+        if ssml { item.addArgument("--ssml") }
         if repeatForever {
             item.addArgument("--repeat")
             item.addArgument("--gap"); item.addArgument(2)

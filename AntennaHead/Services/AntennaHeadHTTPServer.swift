@@ -765,6 +765,13 @@ final class AntennaHeadHTTPServer {
                                             sequence: sequence, repeatForever: repeatForever)
             return okResponse()
 
+        case "/speaktextbuttonclicked.html":
+            // Body: {text, voice}. The Text to Speech page's Speak Text
+            // section; `voice` "" = the Text to Speech voice setting.
+            let so = jsonObject(fromBody: request.body)
+            sdrController?.speakText(so.string("text"), voiceIdentifier: so.string("voice"))
+            return okResponse()
+
         case "/playaudiofileslistenbuttonclicked.html":
             // Same payload shape as Text to Speech, plus an optional `playlist`
             // name: {sequence, repeat, files, playlist}. A non-empty playlist
@@ -2459,8 +2466,68 @@ final class AntennaHeadHTTPServer {
         s += "onclick=\"textToSpeechListenButtonClicked(getElementById('textToSpeechForm'));\" "
         s += "title='Synthesize the selected folder&#39;s text files and stream them through the live audio pipeline.'>"
         s += "</form><br>&nbsp;<br>"
+        s += speakTextFormHTML()
         return s
     }
+
+    /// The SSML example the Speak Text box starts with.
+    nonisolated static let speakTextExample =
+        #"<speak>It is four oh nine <break time="700ms"/> <prosody rate="80%">on AntennaHead Radio.</prosody></speak>"#
+
+    /// "Speak Text" section at the bottom of the Text to Speech page: type
+    /// text, pick a voice, Speak → `/speaktextbuttonclicked.html` →
+    /// `SDRController.speakText`. Text starting with `<speak` is SSML. The
+    /// markup guide below reflects what was measured with the Premium Ava
+    /// voice on macOS 27 (rendered clip length/content), not just Apple's docs.
+    @MainActor private func speakTextFormHTML() -> String {
+        var s = "<form class='speak_text_form' id='speakTextForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+        s += "<label for='tts_speak_text'>Speak Text</label>"
+        s += "<p>Type text and speak it once through the live audio pipeline. Text that starts with "
+        s += "<code>&lt;speak&gt;</code> is read as SSML markup (see below).</p>"
+        s += "<textarea id='tts_speak_text' name='tts_speak_text' class='u-full-width' rows='6' "
+        s += "\(Self.verbatimInputAttributes)>\(htmlText(Self.speakTextExample))</textarea>"
+        s += "<label for='tts_speak_voice'>Voice</label>"
+        s += installedVoicesSelectOptionsHTML(selectID: "tts_speak_voice")
+        s += "<br><br><input class='twelve columns button button-primary' type='button' value='Speak' "
+        s += "onclick=\"speakTextButtonClicked(getElementById('speakTextForm'));\" "
+        s += "title='Synthesize this text with the chosen voice and stream it through the live audio pipeline.'>"
+        s += "</form><br>"
+        s += Self.speechMarkupHelpHTML
+        s += "<br>&nbsp;<br>"
+        return s
+    }
+
+    nonisolated static let speechMarkupHelpHTML = """
+        <details class='speech-markup-help'><summary>Controlling the voice: pauses, speed, pronunciation</summary>
+        <p>There are two ways to control how the text is spoken, and they depend on the voice.</p>
+        <p><strong>Modern voices</strong> (Ava, Samantha, Siri and other Premium/Enhanced voices): start the text with
+        <code>&lt;speak&gt;</code> and end it with <code>&lt;/speak&gt;</code> to use SSML markup. Measured with the Premium Ava voice:</p>
+        <table class='u-full-width'>
+        <thead><tr><th>Markup</th><th>Effect</th></tr></thead>
+        <tbody>
+        <tr><td><code>&lt;prosody rate="50%"&gt;&hellip;&lt;/prosody&gt;</code> (also <code>"150%"</code>, <code>"slow"</code>, <code>"fast"</code>)</td><td>✅ Speed. 50% took 3.7&nbsp;s where normal took 2.8&nbsp;s.</td></tr>
+        <tr><td><code>&lt;break time="1500ms"/&gt;</code></td><td>✅ A pause of that length.</td></tr>
+        <tr><td><code>&lt;prosody volume="x-soft"&gt;&hellip;&lt;/prosody&gt;</code></td><td>✅ Volume. <code>x-soft</code> is about a quarter as loud.</td></tr>
+        <tr><td><code>&lt;say-as interpret-as="characters"&gt;KARK&lt;/say-as&gt;</code></td><td>✅ Spells it out letter by letter.</td></tr>
+        <tr><td><code>&lt;phoneme alphabet="ipa" ph="&hellip;"&gt;word&lt;/phoneme&gt;</code></td><td>✅ Fixes a pronunciation, written in the IPA phonetic alphabet.</td></tr>
+        <tr><td><code>&lt;prosody pitch="+40%"&gt;&hellip;&lt;/prosody&gt;</code></td><td>⚠️ Changes the audio only slightly; the pitch barely moves.</td></tr>
+        <tr><td><code>&lt;emphasis level="strong"&gt;&hellip;&lt;/emphasis&gt;</code></td><td>❌ Ignored.</td></tr>
+        <tr><td><code>&lt;sub alias="North Little Rock"&gt;NLR&lt;/sub&gt;</code></td><td>❌ Ignored: still says the letters. Type the words out instead.</td></tr>
+        </tbody></table>
+        <p>If the markup can&rsquo;t be parsed (for example, a closing tag that doesn&rsquo;t match its opening tag),
+        nothing is spoken at all and the log shows &ldquo;invalid SSML&rdquo;. A <code>&lt;voice name="&hellip;"&gt;</code> tag inside the markup overrides the Voice menu.</p>
+        <p><strong>Classic voices</strong> (names in the Voice menu such as Alex, Albert and Fred, whose identifiers start with
+        <code>com.apple.speech.synthesis.voice.</code>) don&rsquo;t read SSML. Instead, put commands in double brackets
+        in plain text:</p>
+        <ul>
+        <li><code>[[slnc 1500]]</code> &mdash; pause 1.5 seconds</li>
+        <li><code>[[rate 120]]</code> &mdash; speed in words per minute</li>
+        <li><code>[[pbas 40]]</code> &mdash; base pitch; <code>[[pmod 60]]</code> &mdash; how much the pitch varies</li>
+        </ul>
+        <p>Don&rsquo;t mix the two: modern voices read <code>[[&hellip;]]</code> commands out loud, and classic voices read SSML tags out loud.
+        The Voice menu&rsquo;s &ldquo;Default voice&rdquo; is the Text to Speech voice chosen in AntennaHead&rsquo;s Configuration tab.</p>
+        </details>
+        """
 
     /// Listing of the `.txt` files in the configured Text to Speech folder, in
     /// the same name order Listen speaks them chronologically — each with a

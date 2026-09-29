@@ -2300,6 +2300,36 @@ function textToSpeechListenButtonClicked(form)
 }
 
 
+// Speak Text section (bottom of the Text to Speech page): speaks the text
+// box once with the chosen voice ("" = the Text to Speech voice setting).
+// Text starting with <speak> is SSML — the server decides.
+function speakTextButtonClicked(form)
+{
+  var textArea = form.querySelector("#tts_speak_text");
+  var voiceSelect = form.querySelector("#tts_speak_voice");
+  var payload = {
+    text: textArea ? textArea.value : "",
+    voice: voiceSelect ? voiceSelect.value : ""
+  };
+
+  var getUrl = window.location;
+  var baseUrl = getUrl.protocol + "//" + getUrl.host + "/";
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        window.top.nowPlayingTitle = window.document.getElementById("listen_title");
+      }
+    };
+  xhttp.open("POST", baseUrl + "speaktextbuttonclicked.html", true);
+  xhttp.setRequestHeader("Content-Type", "application/json");
+  xhttp.send(JSON.stringify(payload));
+
+  showUpNextInNavBar();
+
+  window.top.postMessage("startaudio", "*");
+}
+
+
 // ---- Play Audio Files (Audio Devices page) ------------------------------
 //
 // Same pattern as Text to Speech above: the folder is chosen in
