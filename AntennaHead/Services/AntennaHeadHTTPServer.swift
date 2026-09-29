@@ -1027,7 +1027,19 @@ final class AntennaHeadHTTPServer {
                                       "LISTEN_BUTTON_CLICKED_RESULT": "OK"])
 
         case "/controlbooth.html":
-            return htmlFragmentResponse(controlBoothPageHTML())
+            return htmlFragmentResponse(controlBoothPageHTML(.menu))
+
+        case "/controlboothpipelines.html":
+            return htmlFragmentResponse(controlBoothPageHTML(.pipelines))
+
+        case "/controlboothradiopage.html":
+            return htmlFragmentResponse(controlBoothPageHTML(.radio))
+
+        case "/controlboothairplay.html":
+            return htmlFragmentResponse(controlBoothPageHTML(.airPlay))
+
+        case "/controlboothdsdneopage.html":
+            return htmlFragmentResponse(controlBoothPageHTML(.dsdNeo))
 
         case "/controlboothlistenbuttonclicked.html":
             if let name = formFields(fromBody: request.body)["pipeline_select"], !name.isEmpty {
@@ -1052,7 +1064,7 @@ final class AntennaHeadHTTPServer {
         case "/controlboothstop.html":
             try? ControlBoothClient.stopAllPipelines()
             sdrController?.terminateTasks()
-            return htmlFragmentResponse(controlBoothPageHTML())
+            return htmlFragmentResponse(controlBoothPageHTML(.pipelines))
 
         case "/controlboothairplaylisten.html":
             // Same ordering as /controlboothlistenbuttonclicked.html above, for
@@ -1067,7 +1079,7 @@ final class AntennaHeadHTTPServer {
         case "/controlboothairplaystop.html":
             try? ControlBoothClient.stopAirPlayRelay()
             sdrController?.terminateTasks()
-            return htmlFragmentResponse(controlBoothPageHTML())
+            return htmlFragmentResponse(controlBoothPageHTML(.airPlay))
 
         case "/fillerstop.html":
             // Stop the auto filler and stay silent (enterIdle: false), rather
@@ -1108,7 +1120,7 @@ final class AntennaHeadHTTPServer {
 
         case "/controlboothlaunched.html":
             launchControlBooth()
-            return htmlFragmentResponse(controlBoothPageHTML())
+            return htmlFragmentResponse(controlBoothPageHTML(.menu))
 
         case "/api/aac-recorder/status":
             return aacRecorderStatusResponse()
@@ -1720,65 +1732,140 @@ final class AntennaHeadHTTPServer {
 
     /// `dsdNeoError`/`radioError` are shown in the dsd-neo Scanner/AntennaHead
     /// Radio sections, for a control there that ControlBooth refused.
-    @MainActor private func controlBoothPageHTML(dsdNeoError: String? = nil, radioError: String? = nil) -> String {
+    /// The web UI's ControlBooth pages: a menu of four icon tiles, each
+    /// opening one page. The action routes re-render the page they belong
+    /// to, and the JS polls reload the page named in `data-page`.
+    enum ControlBoothWebPage: String {
+        case menu = "controlbooth.html"
+        case pipelines = "controlboothpipelines.html"
+        case radio = "controlboothradiopage.html"
+        case airPlay = "controlboothairplay.html"
+        case dsdNeo = "controlboothdsdneopage.html"
+
+        var title: String {
+            switch self {
+            case .menu: "ControlBooth"
+            case .pipelines: "ControlBooth Remote Control"
+            case .radio: "AntennaHead Radio"
+            case .airPlay: "AirPlay Receiver"
+            case .dsdNeo: "dsd-neo Scanner"
+            }
+        }
+    }
+
+    @MainActor private func controlBoothPageHTML(_ page: ControlBoothWebPage,
+                                                 dsdNeoError: String? = nil, radioError: String? = nil) -> String {
         let isRunning = ControlBoothClient.isControlBoothRunning
         let statusText = isRunning ? "Running" : "Not running"
         let statusColor = isRunning ? "green" : "#cc0000"
         var s = "<div class='container'><section class='header'>"
         s += "<h2 class='title'>AntennaHead</h2>"
-        s += "<h3 class='title' id='listen_title'>ControlBooth Remote Control</h3>"
-        s += "<p>AntennaHead can be controlled remotely by the ControlBooth app on this Mac.</p>"
-        // data-running is read by controlBoothPoll() (Web/js/antennahead.js)
-        // so it can tell when this fragment's rendered status has gone
-        // stale — e.g. ControlBooth quit after this page loaded — and
-        // reload it, without any push channel from the server.
-        // data-active is read by controlBoothPoll() too, so a pipeline started
-        // or stopped from ControlBooth's own Play/Stop buttons refreshes this
-        // fragment to show the new pipeline name. data-airplay-relay/
-        // data-airplay-receiving ride the same poll/diff so the AirPlay
-        // section below stays live without a second poll loop.
+        s += "<h3 class='title' id='listen_title'>\(page.title)</h3>"
+        // data-running/data-active/data-airplay-* are read by
+        // controlBoothPoll() (Web/js/antennahead.js) so it can tell when this
+        // fragment's rendered status has gone stale — ControlBooth quit, a
+        // pipeline started or stopped from ControlBooth itself, the AirPlay
+        // relay changed — and reload it, without any push channel from the
+        // server. data-page is the page every poll reloads.
         let activePipeline = sdrController?.activeControlBoothPipelineName
-        let airPlayStatus = isRunning ? (try? ControlBoothClient.airPlayStatus()) : nil
-        s += "<p id='controlbooth_status' data-running='\(isRunning)' data-active='\(htmlAttribute(activePipeline ?? ""))' "
-        s += "data-airplay-relay='\(airPlayStatus?.relayEnabled ?? false)' data-airplay-receiving='\(airPlayStatus?.isReceivingAudio ?? false)'>"
-        s += "ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
+        let airPlayStatus = isRunning && page == .airPlay ? (try? ControlBoothClient.airPlayStatus()) : nil
+        s += "<p id='controlbooth_status' data-page='\(page.rawValue)' data-running='\(isRunning)' "
+        s += "data-active='\(htmlAttribute(activePipeline ?? ""))' "
+        if let airPlayStatus {
+            s += "data-airplay-relay='\(airPlayStatus.relayEnabled)' data-airplay-receiving='\(airPlayStatus.isReceivingAudio)' "
+        }
+        s += ">ControlBooth: <strong style='color:\(statusColor)'>\(statusText)</strong></p>"
         if let activePipeline {
             s += "<p id='controlbooth_active'>Now playing: <strong>\(htmlText(activePipeline))</strong></p>"
         }
-        if isRunning {
-            let pipelinesResult = Result { try ControlBoothClient.pipelines() }
-            let pipelines = (try? pipelinesResult.get()) ?? []
-            if case .failure(let error) = pipelinesResult {
-                s += "<p style='color:#cc0000'>\(htmlText(Self.controlBoothUnreachableMessage(error)))</p>"
-            } else if pipelines.isEmpty {
-                s += "<p>No pipelines configured in ControlBooth.</p>"
-            } else {
-                s += "<form class='controlbooth_form' id='controlBoothForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
-                s += "<label for='pipeline_select'>Select Pipeline:</label>"
-                s += "<select name='pipeline_select' class='twelve columns value-prop' title='Select a ControlBooth pipeline to listen to.'>"
-                for p in pipelines {
-                    let selected = (p == activePipeline) ? " selected" : ""
-                    s += "<option value='\(htmlAttribute(p))'\(selected)>\(htmlText(p))</option>"
-                }
-                s += "</select>"
-                s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
-                s += "onclick=\"controlBoothListenButtonClicked(getElementById('controlBoothForm'));\" "
-                s += "title='Start listening to the selected ControlBooth pipeline.'>"
-                s += "</form><br>&nbsp;<br>"
-                s += "<form action='javascript:loadContent(&quot;controlboothstop.html&quot;)'>"
-                s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
-            }
-            s += controlBoothAirPlaySectionHTML(status: airPlayStatus, activePipeline: activePipeline)
-            s += controlBoothRadioSectionHTML(error: radioError)
-            s += controlBoothDsdNeoSectionHTML(activePipeline: activePipeline, error: dsdNeoError)
-        } else {
+        guard isRunning else {
             s += "<form action='javascript:loadContent(&quot;controlboothlaunched.html&quot;)'>"
             s += "<input class='twelve columns button button-primary' type='submit' value='Launch ControlBooth'>"
-            s += "</form><br>&nbsp;<br>"
+            s += "</form><br>&nbsp;<br></section></div>"
+            return s
         }
-        s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('controlbooth.html');\"><br>&nbsp;<br>"
-        s += "</section></div>"
+        switch page {
+        case .menu:
+            s += controlBoothMenuHTML()
+        case .pipelines:
+            s += controlBoothPipelinesHTML(activePipeline: activePipeline)
+        case .airPlay:
+            s += Self.withoutSectionHeading(controlBoothAirPlaySectionHTML(status: airPlayStatus, activePipeline: activePipeline))
+        case .radio:
+            let section = controlBoothRadioSectionHTML(error: radioError)
+            s += section.isEmpty
+                ? "<p>This ControlBooth doesn't have AntennaHead Radio. Update ControlBooth on this Mac.</p>"
+                : Self.withoutSectionHeading(section)
+        case .dsdNeo:
+            let section = controlBoothDsdNeoSectionHTML(activePipeline: activePipeline, error: dsdNeoError)
+            s += section.isEmpty
+                ? "<p>ControlBooth has no dsd-neo Scanner pipeline. Set one up in ControlBooth's dsd-neo Scanner tab.</p>"
+                : Self.withoutSectionHeading(section)
+        }
+        s += "<br><input class='button' type='button' value='Refresh' onclick=\"loadContent('\(page.rawValue)');\">"
+        if page != .menu {
+            s += " <input class='button' type='button' value='ControlBooth Menu' onclick=\"loadContent('controlbooth.html');\">"
+        }
+        s += "<br>&nbsp;<br></section></div>"
         return s
+    }
+
+    /// The four tiles, in the same inlined-SVG style as the Devices page.
+    @MainActor private func controlBoothMenuHTML() -> String {
+        func tile(_ icon: String, _ page: ControlBoothWebPage, _ description: String) -> String {
+            """
+            <div class="six columns value-prop">
+                \(loadSVG(named: icon))
+                <div class="value-prop">
+                    <a class="button button-primary" onclick="loadContent('\(page.rawValue)');">\(page.title)</a>
+                </div>
+                \(description)
+            </div>
+            """
+        }
+        var s = "<div class='value-prop row'>"
+        s += tile("cbradio", .radio, "Music with an announcer, news<br>and weather, on the air")
+        s += tile("cbremote", .pipelines, "Start a ControlBooth pipeline<br>as the audio source")
+        s += "</div><div class='value-prop row'>"
+        s += tile("cbairplay", .airPlay, "Play AirPlay audio sent<br>to ControlBooth")
+        s += tile("cbdsdneo", .dsdNeo, "Follow a P25 trunked system<br>with dsd-neo")
+        s += "</div>"
+        return s
+    }
+
+    /// Pick a pipeline, Listen, Stop.
+    @MainActor private func controlBoothPipelinesHTML(activePipeline: String?) -> String {
+        var s = ""
+        let pipelinesResult = Result { try ControlBoothClient.pipelines() }
+        let pipelines = (try? pipelinesResult.get()) ?? []
+        if case .failure(let error) = pipelinesResult {
+            s += "<p style='color:#cc0000'>\(htmlText(Self.controlBoothUnreachableMessage(error)))</p>"
+        } else if pipelines.isEmpty {
+            s += "<p>No pipelines configured in ControlBooth.</p>"
+        } else {
+            s += "<form class='controlbooth_form' id='controlBoothForm' onsubmit='event.preventDefault(); return false;' method='POST'>"
+            s += "<label for='pipeline_select'>Select Pipeline:</label>"
+            s += "<select name='pipeline_select' class='twelve columns value-prop' title='Select a ControlBooth pipeline to listen to.'>"
+            for p in pipelines {
+                let selected = (p == activePipeline) ? " selected" : ""
+                s += "<option value='\(htmlAttribute(p))'\(selected)>\(htmlText(p))</option>"
+            }
+            s += "</select>"
+            s += "<br><br><input class='twelve columns button button-primary' type='button' value='Listen' "
+            s += "onclick=\"controlBoothListenButtonClicked(getElementById('controlBoothForm'));\" "
+            s += "title='Start listening to the selected ControlBooth pipeline.'>"
+            s += "</form><br>&nbsp;<br>"
+            s += "<form action='javascript:loadContent(&quot;controlboothstop.html&quot;)'>"
+            s += "<input class='twelve columns button' type='submit' value='Stop'></form><br>&nbsp;<br>"
+        }
+        return s
+    }
+
+    /// The section builders start with "<hr><h4>Title</h4>" for the old
+    /// single page; on its own page the title is already the page heading.
+    private static func withoutSectionHeading(_ html: String) -> String {
+        guard html.hasPrefix("<hr><h4"), let end = html.range(of: "</h4>") else { return html }
+        return String(html[end.upperBound...])
     }
 
     /// Name `startControlBoothListening`/`activeControlBoothPipelineName`
@@ -1881,7 +1968,7 @@ final class AntennaHeadHTTPServer {
         } catch {
             failure = "\(error)"
         }
-        return htmlFragmentResponse(controlBoothPageHTML(radioError: failure))
+        return htmlFragmentResponse(controlBoothPageHTML(.radio, radioError: failure))
     }
 
     /// The dsd-neo Scanner section below the AirPlay one: status, Listen/Stop
@@ -2071,7 +2158,7 @@ final class AntennaHeadHTTPServer {
         } catch {
             failure = "\(error)"
         }
-        return htmlFragmentResponse(controlBoothPageHTML(dsdNeoError: failure))
+        return htmlFragmentResponse(controlBoothPageHTML(.dsdNeo, dsdNeoError: failure))
     }
 
     /// Launches the ControlBooth app using the security-scoped bookmark saved

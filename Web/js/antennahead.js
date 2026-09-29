@@ -1972,6 +1972,16 @@ var aacRecorderPollIntervalID = setInterval(aacRecorderPoll, 5000);
 
 // ---- ControlBooth Remote Control (controlbooth.html) --------------------
 //
+// controlbooth.html is a menu of four pages (Remote Control, AntennaHead
+// Radio, AirPlay Receiver, dsd-neo Scanner). Every poll below reloads the
+// page that's showing, named in #controlbooth_status's data-page.
+
+function controlBoothCurrentPage()
+{
+    var statusEl = document.getElementById("controlbooth_status");
+    return (statusEl && statusEl.getAttribute("data-page")) || "controlbooth.html";
+}
+//
 // Polls /api/v1/controlbooth/status — reflects ControlBoothClient
 // .isControlBoothRunning, an NSRunningApplication check that goes false
 // essentially the moment the process exits. ControlBooth also sends
@@ -2002,13 +2012,17 @@ function controlBoothPoll()
                 var renderedRunning = (statusEl.getAttribute("data-running") == "true");
                 var renderedActive = statusEl.getAttribute("data-active") || "";
                 var currentActive = data.activePipelineName || "";
-                var renderedAirPlayRelay = (statusEl.getAttribute("data-airplay-relay") == "true");
-                var renderedAirPlayReceiving = (statusEl.getAttribute("data-airplay-receiving") == "true");
-                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive
-                    || !!data.airPlayRelayEnabled !== renderedAirPlayRelay
-                    || !!data.airPlayReceivingAudio !== renderedAirPlayReceiving)
+                // Only the AirPlay Receiver page carries the AirPlay state.
+                var airPlayChanged = false;
+                if (statusEl.hasAttribute("data-airplay-relay")) {
+                    var renderedAirPlayRelay = (statusEl.getAttribute("data-airplay-relay") == "true");
+                    var renderedAirPlayReceiving = (statusEl.getAttribute("data-airplay-receiving") == "true");
+                    airPlayChanged = !!data.airPlayRelayEnabled !== renderedAirPlayRelay
+                        || !!data.airPlayReceivingAudio !== renderedAirPlayReceiving;
+                }
+                if (!!data.isRunning !== renderedRunning || currentActive !== renderedActive || airPlayChanged)
                 {
-                    loadContent("controlbooth.html");
+                    loadContent(controlBoothCurrentPage());
                 }
             } catch (e) { /* ignore a malformed response */ }
         }
@@ -2037,7 +2051,7 @@ function controlBoothDsdNeoPoll()
             if (data.state !== sectionEl.getAttribute("data-state")
                 || data.mode !== sectionEl.getAttribute("data-mode"))
             {
-                loadContent("controlbooth.html");
+                loadContent(controlBoothCurrentPage());
                 return;
             }
             var statusEl = document.getElementById("dsdneo_status");
@@ -2083,7 +2097,7 @@ function controlBoothRadioPoll()
             if (onAir(data.phase) !== onAir(rendered)
                 || (data.phase === "stopping") !== (rendered === "stopping"))
             {
-                loadContent("controlbooth.html");
+                loadContent(controlBoothCurrentPage());
                 return;
             }
             var statusEl = document.getElementById("radio_status");
