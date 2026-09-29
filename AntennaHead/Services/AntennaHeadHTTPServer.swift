@@ -2508,7 +2508,7 @@ final class AntennaHeadHTTPServer {
         <tr><td><code>&lt;prosody rate="50%"&gt;&hellip;&lt;/prosody&gt;</code> (also <code>"150%"</code>, <code>"slow"</code>, <code>"fast"</code>)</td><td>✅ Speed. 50% took 3.7&nbsp;s where normal took 2.8&nbsp;s.</td></tr>
         <tr><td><code>&lt;break time="1500ms"/&gt;</code></td><td>✅ A pause of that length.</td></tr>
         <tr><td><code>&lt;prosody volume="x-soft"&gt;&hellip;&lt;/prosody&gt;</code></td><td>✅ Volume. <code>x-soft</code> is about a quarter as loud.</td></tr>
-        <tr><td><code>&lt;say-as interpret-as="characters"&gt;KARK&lt;/say-as&gt;</code></td><td>✅ Spells it out letter by letter.</td></tr>
+        <tr><td><code>&lt;say-as interpret-as="characters"&gt;KHDX&lt;/say-as&gt;</code></td><td>✅ Spells it out letter by letter.</td></tr>
         <tr><td><code>&lt;phoneme alphabet="ipa" ph="&hellip;"&gt;word&lt;/phoneme&gt;</code></td><td>✅ Fixes a pronunciation, written in the IPA phonetic alphabet.</td></tr>
         <tr><td><code>&lt;prosody pitch="+40%"&gt;&hellip;&lt;/prosody&gt;</code></td><td>⚠️ Changes the audio only slightly; the pitch barely moves.</td></tr>
         <tr><td><code>&lt;emphasis level="strong"&gt;&hellip;&lt;/emphasis&gt;</code></td><td>❌ Ignored.</td></tr>
