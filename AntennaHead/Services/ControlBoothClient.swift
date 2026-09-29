@@ -24,6 +24,8 @@ import AppKit
 ///   'RdOn'  start radio          AntennaHead Radio goes on the air; it then
 ///                                asks AntennaHead to listen ('AntH' 'Strt')
 ///   'RdOf'  stop radio           off the air; it then sends 'AntH' 'Stop'
+///   'RdSk'  skip radio song      gong, fade, next song (or a waiting segment);
+///                                a no-op unless the status's `canSkip` is true
 ///
 /// Every ControlBooth command is in the `com.dsward.ControlBooth.pipelines`
 /// access group, matched by this app's `com.apple.security.scripting-targets`
@@ -136,6 +138,10 @@ enum ControlBoothClient {
         _ = try send(eventID: "RdOf", directParameter: nil)
     }
 
+    static func skipRadioSong() throws {
+        _ = try send(eventID: "RdSk", directParameter: nil)
+    }
+
     private static func stringList(from reply: NSAppleEventDescriptor) -> [String] {
         guard let list = reply.paramDescriptor(forKeyword: keyDirectObject),
               list.numberOfItems > 0 else {
@@ -232,6 +238,9 @@ struct RadioStationStatus: Decodable, Equatable {
     var lastError: String?
     /// The source name the station listens under in AntennaHead.
     var sourceName: String
+    /// Whether 'RdSk' would do anything now. `nil` from a ControlBooth that
+    /// predates Skip Song.
+    var canSkip: Bool?
 
     var isOnAir: Bool { phase != "stopped" }
 }

@@ -2065,7 +2065,8 @@ var controlBoothDsdNeoPollIntervalID = setInterval(controlBoothDsdNeoPoll, 2000)
 
 // The AntennaHead Radio section of controlbooth.html: reloaded when the
 // station starts or stops (so the right button shows); the status line
-// ("On the Air: Weather") and song are updated in place.
+// ("On the Air: Weather"), song and Skip Song's enabled state are updated
+// in place.
 function controlBoothRadioPoll()
 {
     var sectionEl = document.getElementById("radio_section");
@@ -2089,6 +2090,8 @@ function controlBoothRadioPoll()
             if (statusEl) statusEl.textContent = data.statusText;
             var songEl = document.getElementById("radio_now_playing");
             if (songEl) songEl.textContent = data.nowPlaying ? "Now playing: " + data.nowPlaying : "";
+            var skipEl = document.getElementById("radio_skip");
+            if (skipEl) skipEl.disabled = !data.canSkip;
         } catch (e) { /* ignore a malformed response */ }
     };
     xhttp.open("GET", "/controlboothradiostatus.json", true);

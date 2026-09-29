@@ -1100,7 +1100,7 @@ final class AntennaHeadHTTPServer {
             var body: [String: Any] = ["available": false]
             if ControlBoothClient.isControlBoothRunning, let status = try? ControlBoothClient.radioStatus() {
                 body = ["available": true, "phase": status.phase, "statusText": status.statusText,
-                        "nowPlaying": status.nowPlaying ?? ""]
+                        "nowPlaying": status.nowPlaying ?? "", "canSkip": status.canSkip ?? false]
             }
             return HTTPResponse(status: 200, reason: "OK",
                                 headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
@@ -1178,6 +1178,9 @@ final class AntennaHeadHTTPServer {
 
         case APIEndpoint.controlBoothRadioStop:
             return apiControlBoothRadioResponse(start: false)
+
+        case APIEndpoint.controlBoothRadioSkip:
+            return apiControlBoothRadioSkipResponse()
 
         case APIEndpoint.gqrxStatus:
             return apiGqrxStatusResponse()
@@ -1475,7 +1478,8 @@ final class AntennaHeadHTTPServer {
                                             radioStatusText: radio?.statusText,
                                             radioNowPlaying: radio?.nowPlaying,
                                             radioLastError: radio?.lastError,
-                                            radioSourceName: radio?.sourceName))
+                                            radioSourceName: radio?.sourceName,
+                                            radioCanSkip: radio?.canSkip))
     }
 
     /// The JSON-API equivalent of `/controlboothlaunched.html`. Launching is
@@ -1532,6 +1536,17 @@ final class AntennaHeadHTTPServer {
     @MainActor private func apiControlBoothRadioResponse(start: Bool) -> HTTPResponse {
         do {
             if start { try ControlBoothClient.startRadio() } else { try ControlBoothClient.stopRadio() }
+        } catch {
+            return jsonErrorResponse("\(error)", status: 502)
+        }
+        return apiNowPlayingResponse()
+    }
+
+    /// The JSON-API equivalent of `controlboothradio.html?action=skip`. The
+    /// source doesn't change, so this answers with the current now-playing.
+    @MainActor private func apiControlBoothRadioSkipResponse() -> HTTPResponse {
+        do {
+            try ControlBoothClient.skipRadioSong()
         } catch {
             return jsonErrorResponse("\(error)", status: 502)
         }
@@ -1828,6 +1843,14 @@ final class AntennaHeadHTTPServer {
             s += "<p style='color:#cc0000'>\(htmlText(lastError))</p>"
         }
         if status.isOnAir {
+            if status.canSkip != nil {
+                // Enabled/disabled in place by controlBoothRadioPoll().
+                s += "<input id='radio_skip' class='twelve columns button' type='button' value='Skip Song' "
+                s += "onclick=\"this.disabled = true; loadContent('controlboothradio.html?action=skip');\""
+                s += status.canSkip == true ? "" : " disabled"
+                s += " title='Ring the gong, fade out this song and fade in the next one, or go straight to a news or "
+                s += "weather segment that&#39;s waiting for the song to end.'><br>&nbsp;<br>"
+            }
             s += "<input class='twelve columns button' type='button' value='Stop' "
             s += "onclick=\"loadContent('controlboothradio.html?action=stop');\""
             s += status.phase == "stopping" ? " disabled" : ""
@@ -1852,6 +1875,7 @@ final class AntennaHeadHTTPServer {
             switch queryValue("action", in: requestPath) {
             case "start": try ControlBoothClient.startRadio()
             case "stop": try ControlBoothClient.stopRadio()
+            case "skip": try ControlBoothClient.skipRadioSong()
             default: break
             }
         } catch {
