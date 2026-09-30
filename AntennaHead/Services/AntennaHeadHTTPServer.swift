@@ -4383,9 +4383,15 @@ final class AntennaHeadHTTPServer {
             }
             var items: [String] = [
                 col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner, or to listen to Gqrx.",                label: "Radio",       description: "Favorites, Categories, Tuner, or Gqrx."),
-                col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
-                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input or text to speech."),
             ]
+            // Only shown when ControlBooth integration is enabled in Configuration.
+            if webConfig.controlBoothEnabled {
+                items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to start a ControlBooth pipeline as the audio source.", label: "ControlBooth", description: "Start a ControlBooth pipeline<br>as the audio source"))
+            }
+            items.append(contentsOf: [
+                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input or text to speech."),
+                col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
+            ])
             items.append(contentsOf: [
                 col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
                 col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about AntennaHead.",                                                           label: "Info",     description: "About AntennaHead."),
@@ -4409,8 +4415,7 @@ final class AntennaHeadHTTPServer {
             // "Listen to Gqrx" lives here (moved from the Audio Devices page)
             // since it's another way to listen to the radio, alongside
             // Favorites/Categories/Tuner. The tile only appears when Gqrx
-            // integration is enabled in Configuration, mirroring the
-            // CONTROLBOOTH_TILE gate below.
+            // integration is enabled in Configuration.
             dict["GQRX_TILE"] = webConfig.gqrxEnabled ? """
                     <div class="six columns value-prop">
                         \(loadSVG(named: "gqrx"))
@@ -4424,36 +4429,18 @@ final class AntennaHeadHTTPServer {
             dict["LOCALRADIO_ANIMATION"] = loadSVG(named: "AntennaHead-animation")
         case "devices.html":
             // Tile icons, in the same inlined-SVG style as the top-level menu.
-            // "ControlBooth" reuses the icon it carried on the old top-level hub
-            // (its onclick target is the same in both places); Text-to-Speech
-            // gets its own matching line-art icon. "Select Audio Input" uses its
+            // Text-to-Speech gets its own matching line-art icon. "Select Audio Input" uses its
             // own copy of the hub's phono-jack glyph (`audioinput.svg`) rather
             // than sharing `devices.svg`, because that file bakes in
             // `onclick=loadContent('devices.html')` — correct on the hub, but a
             // same-page no-op here where the tile must open
             // `deviceaudioinput.html`. ("Listen to Gqrx" moved to the Radio page
-            // — it's another way to listen, not an audio device.)
+            // — it's another way to listen, not an audio device; ControlBooth
+            // moved to the top-level menu, second after Radio.)
             dict["AUDIO_INPUT_ICON"]     = loadSVG(named: "audioinput")
             dict["PLAY_AUDIO_FILES_ICON"] = loadSVG(named: "playaudiofiles")
             dict["TEXT_TO_SPEECH_ICON"]  = loadSVG(named: "texttospeech")
             dict["SPEAK_RSS_HEADLINES_ICON"] = loadSVG(named: "rss")
-            // The ControlBooth remote-control page is reached from a tile on the
-            // Devices page (it used to be a top-level hub item). The tile only
-            // appears when ControlBooth integration is enabled in Configuration,
-            // mirroring the old hub gate. Same shape as radio.html's GQRX_TILE:
-            // just the one column, placed as the second tile in an already-open
-            // row (see devices.html) rather than wrapping its own row — a
-            // wrapper here left row 2 column 2 empty and pushed this tile onto
-            // its own row 3 instead.
-            dict["CONTROLBOOTH_TILE"] = webConfig.controlBoothEnabled ? """
-                    <div class="six columns value-prop">
-                        \(loadSVG(named: "controlbooth"))
-                        <div class="value-prop">
-                            <a class="button button-primary" onclick="loadContent('controlbooth.html');">ControlBooth</a>
-                        </div>
-                        Start a ControlBooth pipeline<br>as the audio source
-                    </div>
-                """ : ""
         default:
             break
         }
