@@ -58,7 +58,16 @@ final class LiveAudioServerProcessManager {
 
     /// The LiveAudioServer (streaming/HTTP) process.
     private var serverProcess: Process?
-    private var userInitiatedStop = false
+    /// Every LAS process this manager has launched that hasn't yet exited. A
+    /// restart can overlap the previous instance's exit (the auth-change and
+    /// settings-change notifications each call `start`), so `serverProcess`
+    /// alone can forget a live instance — which then keeps the HTTP port with
+    /// its old settings while its replacement fails to bind. `start`/`stop`
+    /// act on this list instead.
+    private var liveProcesses: [Process] = []
+    /// PIDs we asked to exit, so their termination handlers aren't logged as
+    /// unexpected crashes.
+    private var userStoppedPIDs = Set<Int32>()
     /// Arguments passed to the last successful launch, for display in the Status view.
     private(set) var lastLaunchArgs: [String] = []
     /// Pending async launch; cancelled and replaced on each new `start()` call so
@@ -127,7 +136,7 @@ final class LiveAudioServerProcessManager {
         // Capture any running process before stop() clears the reference, so the
         // async wait below can confirm port 8080/6020 are free before the new
         // instance tries to bind them.
-        let dying = (serverProcess?.isRunning == true) ? serverProcess : nil
+        let dying = liveProcesses.filter { $0.isRunning }
         stop()
 
         currentAuth = auth
@@ -139,8 +148,8 @@ final class LiveAudioServerProcessManager {
         startTask?.cancel()
         startTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
-            if let dying {
-                await Self.waitForExit(dying, timeout: 2.0)
+            for proc in dying {
+                await Self.waitForExit(proc, timeout: 2.0)
                 guard !Task.isCancelled else { return }
             }
             await HelperProcessPreflight.waitForUDPPortFree(self.udpInputPort)
@@ -151,6 +160,15 @@ final class LiveAudioServerProcessManager {
                 await HelperProcessPreflight.waitForTCPPortFree(UInt16(tlsPort))
                 guard !Task.isCancelled else { return }
             }
+            // Safety net: if an earlier instance somehow survived (still holding
+            // the port), take it down before launching, rather than starting a
+            // second copy that can't bind.
+            for stray in self.liveProcesses where stray.isRunning {
+                self.userStoppedPIDs.insert(stray.processIdentifier)
+                stray.terminate()
+                await Self.waitForExit(stray, timeout: 2.0)
+                guard !Task.isCancelled else { return }
+            }
             self.launchServer()
         }
     }
@@ -158,23 +176,21 @@ final class LiveAudioServerProcessManager {
     func stop() {
         startTask?.cancel()
         startTask = nil
-        guard let proc = serverProcess, proc.isRunning else {
-            serverProcess = nil
-            isRunning = false
-            return
-        }
-        userInitiatedStop = true
-        proc.terminate()
         serverProcess = nil
         isRunning = false
-        // Wait for graceful exit off the main thread; SIGKILL after 2 seconds if needed.
-        Task.detached {
-            let deadline = Date().addingTimeInterval(2.0)
-            while proc.isRunning && Date() < deadline {
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            if proc.isRunning {
-                kill(proc.processIdentifier, SIGKILL)
+        // Stop every instance we know about, not just the latest one.
+        for proc in liveProcesses where proc.isRunning {
+            userStoppedPIDs.insert(proc.processIdentifier)
+            proc.terminate()
+            // Wait for graceful exit off the main thread; SIGKILL after 2 seconds if needed.
+            Task.detached {
+                let deadline = Date().addingTimeInterval(2.0)
+                while proc.isRunning && Date() < deadline {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                if proc.isRunning {
+                    kill(proc.processIdentifier, SIGKILL)
+                }
             }
         }
     }
@@ -261,10 +277,14 @@ final class LiveAudioServerProcessManager {
         server.terminationHandler = { [weak self] terminated in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let wasUserInitiated = self.userInitiatedStop
-                self.userInitiatedStop = false
-                self.isRunning = false
-                self.serverProcess = nil
+                let wasUserInitiated = self.userStoppedPIDs.remove(terminated.processIdentifier) != nil
+                self.liveProcesses.removeAll { $0 === terminated }
+                // This handler can run after a newer instance has launched, so
+                // only clear the "current process" state if it's still this one.
+                if self.serverProcess === terminated || self.serverProcess == nil {
+                    self.isRunning = false
+                    self.serverProcess = nil
+                }
                 if !wasUserInitiated {
                     LogStore.shared.log(.error, source: "LiveAudioServerProcessManager",
                         "server exited unexpectedly with status \(terminated.terminationStatus)")
@@ -275,6 +295,7 @@ final class LiveAudioServerProcessManager {
         do {
             try server.run()
             self.serverProcess = server
+            self.liveProcesses.append(server)
             self.isRunning = true
             self.lastError = nil
         } catch {
