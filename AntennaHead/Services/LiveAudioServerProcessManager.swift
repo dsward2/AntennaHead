@@ -234,6 +234,9 @@ final class LiveAudioServerProcessManager {
             "--keep-alive",
             "--filler-mode", "silence",
             "--exit-with-parent",
+            // Slim status page: recording, Now Playing, URLs and stream
+            // details are provided elsewhere in AntennaHead.
+            "--minimal-ui",
             "--rate", "\(Self.audioSampleRate)",
             "--channels", "\(Self.audioChannels)",
             // LAS takes kbps; the setting is stored in bits/sec.
