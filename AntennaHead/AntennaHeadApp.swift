@@ -45,6 +45,15 @@ struct AntennaHeadApp: App {
             CommandGroup(replacing: .appInfo) {
                 AboutWindowCommand()
             }
+            // The default Help item would look for a help book, and there isn't
+            // one; the project website is the documentation.
+            CommandGroup(replacing: .help) {
+                Button("AntennaHead Help") {
+                    if let url = URL(string: "https://antennahead-app.github.io") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .importExport) {
                 ShareImportWindowCommand()
