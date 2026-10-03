@@ -4382,19 +4382,19 @@ final class AntennaHeadHTTPServer {
                 """
             }
             var items: [String] = [
-                col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner, or to listen to Gqrx.",                label: "Radio",       description: "Favorites, Categories, Tuner, or Gqrx."),
+                col(loadSVG(named: "radio"),       onclick: "radio.html",      title: "Click the Radio button to listen to RTL-SDR radio via your Favorites, Categories, and the Tuner, or to listen to Gqrx.",                label: "Radio",       description: "Favorites, Categories, Tuner, or Gqrx"),
             ]
             // Only shown when ControlBooth integration is enabled in Configuration.
             if webConfig.controlBoothEnabled {
                 items.append(col(loadSVG(named: "controlbooth"), onclick: "controlbooth.html", title: "Click the ControlBooth button to start a ControlBooth pipeline as the audio source.", label: "ControlBooth", description: "Start a ControlBooth pipeline<br>as the audio source"))
             }
             items.append(contentsOf: [
-                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input or text to speech."),
-                col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files."),
+                col(loadSVG(named: "devices"),     onclick: "devices.html",    title: "Stream audio from a device connected to the Mac audio input jack or Core Audio.",                                                    label: "Devices",     description: "Audio input or text to speech"),
+                col(loadSVG(named: "recordings"),  onclick: "recordings.html", title: "Click the Recordings button to play back a recorded audio file.",                                                                    label: "Recordings",  description: "Browse and listen to recorded files"),
             ])
             items.append(contentsOf: [
-                col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info."),
-                col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about AntennaHead.",                                                           label: "Info",     description: "About AntennaHead."),
+                col(loadSVG(named: "gear"),  onclick: "settings.html", title: "Click the Settings button to set the AAC streaming rate, and restart the streaming servers.", label: "Settings", description: "Streaming settings and app info"),
+                col(loadSVG(named: "info"),  onclick: "info.html",     title: "More information about AntennaHead.",                                                           label: "Info",     description: "About AntennaHead"),
             ])
             var rows = ""
             var i = 0
