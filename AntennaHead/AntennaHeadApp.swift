@@ -74,6 +74,10 @@ struct AntennaHeadApp: App {
                     NotificationCenter.default.post(name: WebRadioView.reloadNotification, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: .command)
+                Button("Stop Pipeline") {
+                    NotificationCenter.default.post(name: ContentView.stopPipelineNotification, object: nil)
+                }
+                .keyboardShortcut(".", modifiers: .command)
             }
         }
 
