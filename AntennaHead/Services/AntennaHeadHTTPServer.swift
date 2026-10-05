@@ -3418,14 +3418,16 @@ final class AntennaHeadHTTPServer {
     // MARK: Category page tree (category.html and its edit/add/delete routes)
 
     /// `%%SCAN_CATEGORY_BUTTON%%` — a "Scan All Frequencies" button, only when
-    /// the category has scanning enabled. Posts to scannerlistenbuttonclicked.html.
+    /// the category has scanning enabled, followed by its scan squelch level.
+    /// Posts to scannerlistenbuttonclicked.html.
     @MainActor private func scanCategoryButtonHTML(category c: Category) -> String {
         guard c.categoryScanningEnabled == 1, let id = c.id else { return "" }
         var s = "<form id='scannerlistenForm' action='#'>"
         s += "<input type='hidden' name='id' value='\(id)'>"
         s += "<br><input class='twelve columns button button-primary' type='button' value='Scan All Frequencies' "
         s += "onclick=\"scannerListenButtonClicked(scannerlistenForm);\">"
-        s += "</form><br>&nbsp;<br>\n"
+        s += "</form>"
+        s += "<br>squelch level: \(c.scanSquelchLevel)<br>&nbsp;<br>\n"
         return s
     }
 
