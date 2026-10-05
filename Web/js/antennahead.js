@@ -1415,7 +1415,7 @@ function updateStatusDisplay(statusData)
           statusHtml += "<br>";
         }
         statusHtml += "sampling mode: ";
-        statusHtml += sampling_mode;
+        statusHtml += ({0: "Standard", 1: "Direct Sampling (I)", 2: "Direct Sampling (Q)"})[sampling_mode] || sampling_mode;
         statusHtml += "<br>";
         statusHtml += "oversampling: ";
         statusHtml += oversampling;

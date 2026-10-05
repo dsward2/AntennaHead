@@ -3617,6 +3617,15 @@ final class AntennaHeadHTTPServer {
         return agc ? "\(base), AGC on" : base
     }
 
+    nonisolated static func samplingModeLabel(_ mode: Int) -> String {
+        switch mode {
+        case 0: return "Standard"
+        case 1: return "Direct Sampling (I)"
+        case 2: return "Direct Sampling (Q)"
+        default: return "\(mode)"
+        }
+    }
+
     /// "device:" line for the Now Playing views: the RTL-SDR dongle feeding the
     /// active tuning, resolved to its EEPROM serial and USB index at tune time
     /// by `SDRController`. Falls back to the value the favorite stores when
@@ -3629,10 +3638,26 @@ final class AntennaHeadHTTPServer {
         if serial.isEmpty && index < 0 {
             return storedLabel.isEmpty ? "not connected" : "\(storedLabel) (not connected)"
         }
+        return deviceDescription(serial: serial, index: index)
+    }
+
+    /// "serial 00000180, USB index 1" — the wording Now Playing and the
+    /// Favorites view share.
+    nonisolated private func deviceDescription(serial: String, index: Int) -> String {
         var parts: [String] = []
         if !serial.isEmpty { parts.append("serial \(serial)") }
         parts.append(index >= 0 ? "USB index \(index)" : "USB index unknown")
         return parts.joined(separator: ", ")
+    }
+
+    /// Same description for a favorite that isn't on the air, resolving its
+    /// stored "USB Device" value (index or serial) against the connected dongles.
+    @MainActor private func storedDeviceLabel(_ stored: String) -> String {
+        let value = formattedUSBDeviceValue(stored).isEmpty ? "0" : formattedUSBDeviceValue(stored)
+        guard let sdr = sdrController else { return value }
+        let resolved = sdr.resolveActiveDevice(value)
+        if resolved.serial.isEmpty && resolved.index < 0 { return "\(value) (not connected)" }
+        return deviceDescription(serial: resolved.serial, index: resolved.index)
     }
 
     /// `%%VIEW_FAVORITE_NAME%%` + `%%VIEW_FAVORITE_ITEM%%` — ported from
@@ -3659,7 +3684,7 @@ final class AntennaHeadHTTPServer {
         let isOnAir = sdrController?.activeFrequencyID == id && sdrController?.taskMode != .stopped
         let deviceLabel = isOnAir
             ? activeDeviceLabel(stored: f.usbDeviceString)
-            : (formattedUSBDeviceValue(f.usbDeviceString).isEmpty ? "0" : formattedUSBDeviceValue(f.usbDeviceString))
+            : storedDeviceLabel(f.usbDeviceString)
         let channels = isOnAir
             ? (sdrController?.activeChannelCount ?? 1)
             : demodulatedChannelCount(modulation: f.modulation, stereoFlag: f.stereoFlag, sampleRate: f.sampleRate)
@@ -3667,8 +3692,10 @@ final class AntennaHeadHTTPServer {
         s += "<br><br>frequency: \(htmlText(f.formattedFrequency))<br>"
         s += "modulation: \(htmlText(modulation))<br>"
         s += "sample rate: \(f.sampleRate)<br>"
+        s += "sampling mode: \(htmlText(Self.samplingModeLabel(f.samplingMode)))<br>"
+        s += "squelch level: \(f.squelchLevel)<br>"
         s += "device: \(htmlText(deviceLabel))<br>"
-        s += "gain: \(htmlText(gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1)))<br>"
+        s += "tuner gain: \(htmlText(gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1)))<br>"
         s += "channels: \(htmlText(channelsLabel(channels)))<br><br>"
         return (f.stationName, s)
     }
@@ -3807,7 +3834,7 @@ final class AntennaHeadHTTPServer {
         d += row("modulation", f.modulation)
         d += row("sample rate", "\(f.sampleRate)")
         d += row("channels", channelsLabel(sdr.activeChannelCount))
-        d += row("sampling mode", "\(f.samplingMode)")
+        d += row("sampling mode", Self.samplingModeLabel(f.samplingMode))
         d += row("oversampling", "\(f.oversampling)")
         d += row("tuner gain", gainLabel(gain: f.tunerGain, agc: f.tunerAgc == 1))
         d += row("tuner agc", "\(f.tunerAgc)")

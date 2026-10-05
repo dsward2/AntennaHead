@@ -3847,8 +3847,9 @@ final class SDRController {
     /// serial (possibly "") and USB index (-1 when the device isn't connected).
     /// Mirrors librtlsdr's `verbose_device_search`: a single bare digit is a
     /// device index, anything else is treated as a serial. Blocks briefly on
-    /// libusb enumeration; only ever called at tune time (see `startPipeline`).
-    private func resolveActiveDevice(_ value: String) -> (serial: String, index: Int) {
+    /// libusb enumeration; called at tune time (see `startPipeline`) and when the
+    /// Favorites view describes a stored device that isn't on the air.
+    func resolveActiveDevice(_ value: String) -> (serial: String, index: Int) {
         let devices = RTLSDRDeviceList.enumerate()
         for device in devices where !device.serial.isEmpty {
             deviceSerialByIndex[device.index] = device.serial
