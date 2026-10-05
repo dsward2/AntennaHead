@@ -2049,7 +2049,9 @@ function controlBoothDsdNeoPoll()
             var data = JSON.parse(this.responseText);
             if (!data.available) return;   // controlBoothPoll() handles ControlBooth quitting
             if (data.state !== sectionEl.getAttribute("data-state")
-                || data.mode !== sectionEl.getAttribute("data-mode"))
+                || data.mode !== sectionEl.getAttribute("data-mode")
+                || (data.configuration !== undefined
+                    && data.configuration !== sectionEl.getAttribute("data-configuration")))
             {
                 loadContent(controlBoothCurrentPage());
                 return;
@@ -2131,6 +2133,29 @@ function controlBoothDsdNeoApplyMode(form)
     var tg = form.elements["tg"].value;
     loadContent("controlboothdsdneo.html?action=mode&mode=" + encodeURIComponent(mode)
                 + "&tg=" + encodeURIComponent(tg));
+}
+
+// Shows the control channels of the chosen system.
+function controlBoothDsdNeoConfigurationChanged(select)
+{
+    var lists = document.getElementsByClassName("dsdneo_channels");
+    for (var i = 0; i < lists.length; i++)
+    {
+        lists[i].style.display = (lists[i].getAttribute("data-configuration") == select.value) ? "" : "none";
+    }
+}
+
+function controlBoothDsdNeoApplyConfiguration(form)
+{
+    var id = form.elements["id"].value;
+    var hz = "";
+    var lists = document.getElementsByClassName("dsdneo_channels");
+    for (var i = 0; i < lists.length; i++)
+    {
+        if (lists[i].getAttribute("data-configuration") == id) hz = lists[i].value;
+    }
+    loadContent("controlboothdsdneo.html?action=configuration&id=" + encodeURIComponent(id)
+                + "&hz=" + encodeURIComponent(hz));
 }
 
 function controlBoothDsdNeoPolicy(talkgroup, policy)

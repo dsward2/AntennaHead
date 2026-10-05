@@ -1097,7 +1097,8 @@ final class AntennaHeadHTTPServer {
             if ControlBoothClient.isControlBoothRunning, let status = try? ControlBoothClient.dsdNeoStatus() {
                 body = ["available": true, "state": status.state, "mode": status.mode,
                         "statusText": Self.dsdNeoStatusText(status),
-                        "talkgroup": status.isActive ? (status.talkgroup ?? 0) : 0]
+                        "talkgroup": status.isActive ? (status.talkgroup ?? 0) : 0,
+                        "configuration": Self.dsdNeoConfigurationKey(status)]
             }
             return HTTPResponse(status: 200, reason: "OK",
                                 headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
@@ -1193,6 +1194,15 @@ final class AntennaHeadHTTPServer {
 
         case APIEndpoint.controlBoothRadioSkip:
             return apiControlBoothRadioSkipResponse()
+
+        case APIEndpoint.dsdNeoStatus:
+            return apiDsdNeoStatusResponse()
+
+        case APIEndpoint.dsdNeoConfiguration:
+            return apiDsdNeoConfigurationResponse(body: request.body)
+
+        case APIEndpoint.dsdNeoSkip:
+            return apiDsdNeoSkipResponse()
 
         case APIEndpoint.gqrxStatus:
             return apiGqrxStatusResponse()
@@ -1563,6 +1573,53 @@ final class AntennaHeadHTTPServer {
             return jsonErrorResponse("\(error)", status: 502)
         }
         return apiNowPlayingResponse()
+    }
+
+    /// ControlBooth's dsd-neo Scanner for the JSON API. Reports
+    /// `isRunning == false` (rather than an error) when ControlBooth isn't
+    /// running or predates the scanner, like the other ControlBooth status.
+    @MainActor private func apiDsdNeoStatusResponse() -> HTTPResponse {
+        guard ControlBoothClient.isControlBoothRunning,
+              let status = try? ControlBoothClient.dsdNeoStatus() else {
+            return apiEncode(DsdNeoStatus(isRunning: false))
+        }
+        let pipelineName = status.activePipeline ?? status.pipelineNames.first
+        return apiEncode(DsdNeoStatus(
+            isRunning: true, installed: status.installed, configured: status.configured,
+            state: status.state, message: status.message, pipelineName: pipelineName,
+            isListening: pipelineName != nil && sdrController?.activeControlBoothPipelineName == pipelineName,
+            mode: status.mode, talkgroupText: status.talkgroupText, systemID: status.systemID,
+            controlChannelHz: status.controlChannelHz,
+            configurations: (status.configurations ?? []).map { configuration in
+                DsdNeoStatus.Configuration(
+                    id: configuration.id, name: configuration.name,
+                    controlChannels: configuration.controlChannels.map { .init(hz: $0.hz, label: $0.label) },
+                    selectedControlChannelHz: configuration.selectedControlChannelHz)
+            },
+            activeConfigurationID: status.activeConfigurationID))
+    }
+
+    /// Switches the scanner's configuration and control channel, then answers
+    /// with the new status.
+    @MainActor private func apiDsdNeoConfigurationResponse(body: Data) -> HTTPResponse {
+        guard let req = try? JSONDecoder().decode(SetDsdNeoConfigurationRequest.self, from: body) else {
+            return jsonErrorResponse("malformed request body", status: 400)
+        }
+        do {
+            try ControlBoothClient.setDsdNeoConfiguration(id: req.configurationID, controlChannelHz: req.controlChannelHz)
+        } catch {
+            return jsonErrorResponse("\(error)", status: 502)
+        }
+        return apiDsdNeoStatusResponse()
+    }
+
+    @MainActor private func apiDsdNeoSkipResponse() -> HTTPResponse {
+        do {
+            try ControlBoothClient.skipDsdNeoCall()
+        } catch {
+            return jsonErrorResponse("\(error)", status: 502)
+        }
+        return apiDsdNeoStatusResponse()
     }
 
     /// The JSON-API equivalent of `gqrxFormHTML()`'s state.
@@ -1994,7 +2051,8 @@ final class AntennaHeadHTTPServer {
         // fragment when they change; the talkgroup line is updated in place
         // so a reload doesn't clear what's being typed below.
         var s = "<hr><h4 class='title'>dsd-neo Scanner</h4>"
-        s += "<div id='dsdneo_section' data-state='\(htmlAttribute(status.state))' data-mode='\(htmlAttribute(status.mode))'>"
+        s += "<div id='dsdneo_section' data-state='\(htmlAttribute(status.state))' data-mode='\(htmlAttribute(status.mode))' "
+        s += "data-configuration='\(htmlAttribute(Self.dsdNeoConfigurationKey(status)))'>"
         if let error {
             s += "<p style='color:#cc0000'>\(htmlText(error))</p>"
         }
@@ -2032,6 +2090,39 @@ final class AntennaHeadHTTPServer {
             s += "<option value='\(tg.talkgroup)'>\(htmlText(tg.name))</option>"
         }
         s += "</datalist>"
+
+        // Which system to follow, and on which control channel
+        if let configurations = status.configurations, !configurations.isEmpty {
+            s += "<form id='dsdNeoConfigurationForm' onsubmit='event.preventDefault(); return false;'>"
+            s += "<label for='dsdneo_configuration'>System:</label>"
+            s += "<select id='dsdneo_configuration' name='id' class='twelve columns' "
+            s += "onchange=\"controlBoothDsdNeoConfigurationChanged(this);\">"
+            for configuration in configurations {
+                s += "<option value='\(htmlAttribute(configuration.id))'"
+                s += configuration.id == status.activeConfigurationID ? " selected" : ""
+                s += ">\(htmlText(configuration.name))</option>"
+            }
+            s += "</select>"
+            // One channel list per configuration; the one for the chosen
+            // system is shown (controlBoothDsdNeoConfigurationChanged swaps them).
+            s += "<label>Control channel:</label>"
+            for configuration in configurations {
+                let isActive = configuration.id == status.activeConfigurationID
+                s += "<select class='twelve columns dsdneo_channels' data-configuration='\(htmlAttribute(configuration.id))'"
+                s += isActive ? ">" : " style='display:none'>"
+                for channel in configuration.controlChannels {
+                    let title = DsdNeoStatus.ControlChannel(hz: channel.hz, label: channel.label).title
+                    s += "<option value='\(channel.hz)'"
+                    s += channel.hz == configuration.selectedControlChannelHz ? " selected" : ""
+                    s += ">\(htmlText(title))</option>"
+                }
+                s += "</select>"
+            }
+            s += "<input class='twelve columns button' type='button' value='Apply' "
+            s += "onclick=\"controlBoothDsdNeoApplyConfiguration(getElementById('dsdNeoConfigurationForm'));\" "
+            s += "title='Switch the scanner to this system and control channel (a few seconds of silence while dsd-neo restarts).'>"
+            s += "</form><br>&nbsp;<br>"
+        }
 
         // Which calls to follow
         let modes = [("scan", "Scan all talkgroups"), ("allowList", "Always Allow talkgroups only"),
@@ -2109,6 +2200,12 @@ final class AntennaHeadHTTPServer {
         return s
     }
 
+    /// Which configuration and control channel the scanner is set to, for the
+    /// poll to notice a change made elsewhere (ControlBooth, the Watch).
+    nonisolated static func dsdNeoConfigurationKey(_ status: DsdNeoScannerStatus) -> String {
+        "\(status.activeConfigurationID ?? "")/\(status.controlChannelHz)"
+    }
+
     /// The scanner's one-line status, shared by the page and its poll.
     nonisolated static func dsdNeoStatusText(_ status: DsdNeoScannerStatus) -> String {
         var text: String
@@ -2136,6 +2233,13 @@ final class AntennaHeadHTTPServer {
             switch queryValue("action", in: requestPath) {
             case "skip":
                 try ControlBoothClient.skipDsdNeoCall()
+            case "configuration":
+                guard let id = queryValue("id", in: requestPath), !id.isEmpty else {
+                    failure = "Choose a configuration."
+                    break
+                }
+                let hz = queryValue("hz", in: requestPath).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                try ControlBoothClient.setDsdNeoConfiguration(id: id, controlChannelHz: hz)
             case "mode":
                 let mode = queryValue("mode", in: requestPath) ?? "scan"
                 let tg = queryValue("tg", in: requestPath).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
