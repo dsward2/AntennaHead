@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    /// Posted by Commands > Stop Pipeline (a separate scene with no controller access).
+    static let stopPipelineNotification = Notification.Name("ContentView.stopPipeline")
+
     @State private var tlsManager = TLSCertificateManager()
     @State private var authCredentials = HTTPAuthCredentials()
     @State private var httpServer = AntennaHeadHTTPServer()
@@ -105,6 +108,10 @@ struct ContentView: View {
         // it takes effect (LAS encoder args + the web player's advertised type).
         .onReceive(NotificationCenter.default.publisher(for: AntennaHeadHTTPServer.settingsDidChangeNotification)) { _ in
             startServices()
+        }
+        // Commands > Stop Pipeline (⌘.) — same as the Now Playing view's Stop Pipeline button.
+        .onReceive(NotificationCenter.default.publisher(for: Self.stopPipelineNotification)) { _ in
+            sdrController.terminateTasks()
         }
         // FCC Search window's Listen button (separate scene, no controller access).
         .onReceive(NotificationCenter.default.publisher(for: FCCSearchView.listenNotification)) { note in
