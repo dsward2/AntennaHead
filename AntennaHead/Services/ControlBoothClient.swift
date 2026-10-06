@@ -49,6 +49,47 @@ enum ControlBoothClient {
         }
     }
 
+    /// Read-only events the web page and the native UI poll every few seconds.
+    private static let pollingEvents: Set<String> = ["List", "Runs", "ApSt", "DnSt", "RdSt"]
+
+    /// How long polling reads fail fast after a timeout (see `send`).
+    static let timeoutCooldown: TimeInterval = 20
+
+    /// When ControlBooth last failed to answer an event in time, if it hasn't
+    /// answered since. Guarded by `breakerLock`: sends come from the main
+    /// actor and from background queues.
+    nonisolated(unsafe) private static var lastTimeout: Date?
+    private static let breakerLock = NSLock()
+
+    /// Whether a polling read should skip the send: ControlBooth timed out on
+    /// the last call and the cool-down hasn't passed. Every send blocks its
+    /// thread until the reply or the timeout, and most callers are on the main
+    /// actor, so a ControlBooth that is running but not answering (macOS can
+    /// hold an event back while an Automation prompt or a stuck launch is
+    /// pending) would otherwise freeze AntennaHead for the whole timeout on
+    /// every poll.
+    static func shouldSkipPolling(now: Date = Date()) -> Bool {
+        breakerLock.lock()
+        defer { breakerLock.unlock() }
+        guard let lastTimeout else { return false }
+        return now.timeIntervalSince(lastTimeout) < timeoutCooldown
+    }
+
+    static func recordTimeout(at date: Date = Date()) {
+        breakerLock.lock()
+        lastTimeout = date
+        breakerLock.unlock()
+    }
+
+    static func recordSuccess() {
+        breakerLock.lock()
+        lastTimeout = nil
+        breakerLock.unlock()
+    }
+
+    /// `errAETimeout`.
+    private static let timeoutErrorCode = -1712
+
     static var isControlBoothRunning: Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
     }
@@ -165,6 +206,11 @@ enum ControlBoothClient {
         guard isControlBoothRunning else {
             throw ClientError.notRunning
         }
+        if pollingEvents.contains(eventID), shouldSkipPolling() {
+            throw ClientError.eventError(
+                code: timeoutErrorCode,
+                message: "ControlBooth isn't answering. It will be tried again shortly.")
+        }
         let event = NSAppleEventDescriptor.appleEvent(
             withEventClass: fourCC("CBth"),
             eventID: fourCC(eventID),
@@ -178,7 +224,14 @@ enum ControlBoothClient {
         for (keyword, value) in parameters {
             event.setParam(value, forKeyword: keyword)
         }
-        let reply = try event.sendEvent(options: [.waitForReply], timeout: 8)
+        let reply: NSAppleEventDescriptor
+        do {
+            reply = try event.sendEvent(options: [.waitForReply], timeout: 8)
+        } catch {
+            if (error as NSError).code == timeoutErrorCode { recordTimeout() }
+            throw error
+        }
+        recordSuccess()
         if let errorNumber = reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value,
            errorNumber != 0 {
             throw ClientError.eventError(
