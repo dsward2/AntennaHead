@@ -148,6 +148,16 @@ enum ControlBoothClient {
         _ = try send(eventID: "DnMd", directParameter: NSAppleEventDescriptor(string: mode), parameters: parameters)
     }
 
+    /// Sets the scanner to configuration `id` (from the status) and, when
+    /// given, one of its control channels.
+    static func setDsdNeoConfiguration(id: String, controlChannelHz: Int?) throws {
+        var parameters: [FourCharCode: NSAppleEventDescriptor] = [:]
+        if let controlChannelHz {
+            parameters[fourCC("DnCh")] = NSAppleEventDescriptor(int32: Int32(clamping: controlChannelHz))
+        }
+        _ = try send(eventID: "DnCf", directParameter: NSAppleEventDescriptor(string: id), parameters: parameters)
+    }
+
     static func skipDsdNeoCall() throws {
         _ = try send(eventID: "DnSk", directParameter: nil)
     }
@@ -277,6 +287,21 @@ struct DsdNeoScannerStatus: Decodable, Equatable {
     var encryptedLockedOut: [Talkgroup]
     var alwaysAllowed: [Talkgroup]
     var recent: [Talkgroup]
+    /// The saved configurations (AWIN, CWIN, …). `nil` from a ControlBooth
+    /// that predates them.
+    var configurations: [Configuration]?
+    var activeConfigurationID: String?
+
+    struct Configuration: Decodable, Equatable {
+        struct Channel: Decodable, Equatable {
+            var hz: Int
+            var label: String
+        }
+        var id: String
+        var name: String
+        var controlChannels: [Channel]
+        var selectedControlChannelHz: Int
+    }
 
     var isActive: Bool { state == "running" || state == "restarting" }
 }
