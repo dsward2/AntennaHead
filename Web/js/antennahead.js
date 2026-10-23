@@ -1285,6 +1285,7 @@ function periodicUpdate()
         if (this.readyState == 4 && this.status == 200) {
           // response received ok
           updateStatusDisplay(xhttp.response);
+          nowPlayingUsbRefresh();
         }
       };
       xhttp.open("POST", nowPlayingStatusUrl, true);
@@ -1655,6 +1656,48 @@ function nowPlayingUsbText(text)
     return node;
 }
 
+// The section is rendered once with the page, so a port chosen (or a cycle
+// finished) in ControlBooth afterwards would leave stale text and a disabled
+// button; refresh it from usbhubpower.json with the Now Playing status polls.
+var nowPlayingUsbBusy = false;
+var nowPlayingUsbLastRefresh = 0;
+
+function nowPlayingUsbRefresh()
+{
+    var section = document.getElementById("np-usbhub-section");
+    if (!section || nowPlayingUsbBusy) return;
+    var now = Date.now();
+    if (now - nowPlayingUsbLastRefresh < 5000) return;
+    nowPlayingUsbLastRefresh = now;
+    nowPlayingUsbRequest("GET", "usbhubpower.json", function (reply)
+    {
+        var s = reply && reply.available ? reply.status : null;
+        if (!s || nowPlayingUsbBusy) return;
+        var text = document.getElementById("np-usbhub-text");
+        while (text.firstChild) text.removeChild(text.firstChild);
+        if (s.configured)
+        {
+            text.appendChild(document.createTextNode("Power cycle target: "));
+            var strong = document.createElement("strong");
+            strong.textContent = s.target;
+            text.appendChild(strong);
+            if (s.affectedRTLSDRs.length > 0)
+            {
+                text.appendChild(document.createElement("br"));
+                text.appendChild(document.createTextNode("RTL-SDR on it: " + s.affectedRTLSDRs.join(", ")));
+            }
+        }
+        else
+        {
+            text.textContent = "No hub port is chosen. Choose one in ControlBooth\u2019s USB Tree window.";
+        }
+        section.setAttribute("data-target", s.target);
+        section.setAttribute("data-radios", s.affectedRTLSDRs.join(", "));
+        document.getElementById("np-usbhub-result").textContent = s.cycling ? "Power cycling\u2026" : s.message;
+        document.getElementById("np-usbhub-cycle").disabled = !(s.configured && s.uhubctlInstalled && !s.cycling);
+    });
+}
+
 function nowPlayingUsbTree()
 {
     var box = document.getElementById("np-usbhub-tree");
@@ -1709,6 +1752,7 @@ function nowPlayingUsbCycle()
     if (!window.confirm(message)) return;
 
     var result = document.getElementById("np-usbhub-result");
+    nowPlayingUsbBusy = true;
     button.disabled = true;
     result.textContent = "Power cycling\u2026";
     nowPlayingUsbRequest("POST", "usbhubpowercycle.html", function (reply)
@@ -1717,6 +1761,7 @@ function nowPlayingUsbCycle()
         {
             result.textContent = (reply && reply.error) || "ControlBooth didn't answer.";
             button.disabled = false;
+            nowPlayingUsbBusy = false;
             return;
         }
         // The cycle takes several seconds; ask until ControlBooth says it's done.
@@ -1731,6 +1776,7 @@ function nowPlayingUsbCycle()
                 {
                     result.textContent = s.message;
                     button.disabled = false;
+                    nowPlayingUsbBusy = false;
                 }
                 else if (attempts < 30)
                 {
@@ -1740,6 +1786,7 @@ function nowPlayingUsbCycle()
                 {
                     result.textContent = "ControlBooth hasn't reported the result.";
                     button.disabled = false;
+                    nowPlayingUsbBusy = false;
                 }
             });
         };
