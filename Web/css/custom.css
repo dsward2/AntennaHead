@@ -1204,3 +1204,11 @@ svg.lr-animation {
 .speech-markup-help code { white-space: normal; overflow-wrap: anywhere; }
 .speech-markup-help table { table-layout: fixed; }
 .speech-markup-help th:first-child, .speech-markup-help td:first-child { width: 55%; }
+
+/* Now Playing: USB Hub Power section (nowplaying.html) */
+.np-usbhub-section { margin-top: 2rem; }
+.np-usbhub-note { font-size: 0.9em; opacity: 0.8; }
+.np-usbhub-tree { text-align: left; font-size: 0.85em; margin: 0 auto 1rem; max-width: 40rem; overflow-x: auto; }
+.np-usbhub-tree[hidden] { display: none; }
+.np-usbhub-row { white-space: nowrap; }
+.np-usbhub-dim { opacity: 0.45; }

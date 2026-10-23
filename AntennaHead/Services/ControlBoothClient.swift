@@ -50,7 +50,7 @@ enum ControlBoothClient {
     }
 
     /// Read-only events the web page and the native UI poll every few seconds.
-    private static let pollingEvents: Set<String> = ["List", "Runs", "ApSt", "DnSt", "RdSt"]
+    private static let pollingEvents: Set<String> = ["List", "Runs", "ApSt", "DnSt", "RdSt", "UbSt", "UbTr"]
 
     /// How long polling reads fail fast after a timeout (see `send`).
     static let timeoutCooldown: TimeInterval = 20
@@ -162,6 +162,24 @@ enum ControlBoothClient {
         _ = try send(eventID: "DnSk", directParameter: nil)
     }
 
+    /// The USB hub port ControlBooth power cycles when an RTL-SDR wedges, and
+    /// the last cycle's outcome; with `includeTree`, the USB device tree read
+    /// fresh. Throws if ControlBooth doesn't answer or predates the USB hub commands.
+    static func usbHubPowerStatus(includeTree: Bool) throws -> USBHubPowerStatus {
+        let reply = try send(eventID: includeTree ? "UbTr" : "UbSt", directParameter: nil)
+        guard let json = reply.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let status = try? JSONDecoder().decode(USBHubPowerStatus.self, from: Data(json.utf8)) else {
+            throw ClientError.eventError(code: 0, message: "ControlBooth sent an unreadable USB hub status.")
+        }
+        return status
+    }
+
+    /// Starts power cycling the chosen hub port. ControlBooth answers at once;
+    /// the cycle takes several seconds (see `usbHubPowerStatus`).
+    static func powerCycleUSBHub() throws {
+        _ = try send(eventID: "UbPc", directParameter: nil)
+    }
+
     /// `policy` is "lockout", "allow" or "automatic".
     static func setDsdNeoTalkgroupPolicy(_ talkgroup: Int, policy: String) throws {
         _ = try send(eventID: "DnPo", directParameter: NSAppleEventDescriptor(int32: Int32(clamping: talkgroup)),
@@ -259,6 +277,35 @@ enum ControlBoothClient {
     private static let keyDirectObject = fourCC("----")
     private static let keyErrorNumber = fourCC("errn")
     private static let keyErrorString = fourCC("errs")
+}
+
+/// One device in ControlBooth's USB tree (its `USBTreeRow`).
+struct USBTreeRow: Codable, Equatable {
+    var path: String
+    var depth: Int
+    var name: String
+    var usbID: String
+    var serial: String
+    var isHub: Bool
+    var isRTLSDR: Bool
+    var parentPath: String?
+    var port: Int?
+    /// Its hub can switch this port's power.
+    var selectable: Bool
+}
+
+/// The USB hub power cycling state, as ControlBooth's 'UbSt'/'UbTr' replies
+/// describe it (its `USBHubPowerStatus`).
+struct USBHubPowerStatus: Codable, Equatable {
+    var uhubctlInstalled: Bool
+    var enabled: Bool
+    var configured: Bool
+    var target: String
+    var affectedRTLSDRs: [String]
+    var cycling: Bool
+    var message: String
+    var messageIsError: Bool
+    var tree: [USBTreeRow]?
 }
 
 /// ControlBooth's dsd-neo Scanner, as its 'DnSt' reply describes it (ControlBooth's

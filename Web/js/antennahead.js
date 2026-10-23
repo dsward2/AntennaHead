@@ -1632,6 +1632,121 @@ function gqrxQuitApp(restart)
     xhttp.send();
 }
 
+// The Now Playing page's USB Hub Power section (ControlBooth's USB tree and
+// power cycling, via usbhubpower.json / usbhubpowercycle.html).
+function nowPlayingUsbRequest(method, url, done)
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (this.readyState != 4) return;
+        var reply = null;
+        try { reply = JSON.parse(this.responseText); } catch (e) { reply = null; }
+        done(reply);
+    };
+    xhttp.open(method, url, true);
+    xhttp.send();
+}
+
+function nowPlayingUsbText(text)
+{
+    var node = document.createElement("span");
+    node.textContent = text;
+    return node;
+}
+
+function nowPlayingUsbTree()
+{
+    var box = document.getElementById("np-usbhub-tree");
+    var button = document.getElementById("np-usbhub-tree-button");
+    if (!box) return;
+    if (!box.hidden)
+    {
+        box.hidden = true;
+        button.value = "View USB Tree";
+        return;
+    }
+    button.disabled = true;
+    nowPlayingUsbRequest("GET", "usbhubpower.json?tree=1", function (reply)
+    {
+        button.disabled = false;
+        while (box.firstChild) box.removeChild(box.firstChild);
+        var rows = (reply && reply.available && reply.status && reply.status.tree) || null;
+        if (!rows)
+        {
+            box.appendChild(nowPlayingUsbText((reply && reply.error) || "The USB tree isn't available."));
+        }
+        else
+        {
+            for (var i = 0; i < rows.length; i++)
+            {
+                var row = rows[i];
+                var line = document.createElement("div");
+                line.className = "np-usbhub-row" + (row.selectable ? "" : " np-usbhub-dim");
+                line.style.paddingLeft = (row.depth * 1.2) + "em";
+                var label = (row.isRTLSDR ? "\u{1F4FB} " : "") + row.name;
+                if (row.serial) label += "  [" + row.serial + "]";
+                if (row.port) label += "  (" + row.parentPath + " port " + row.port + ")";
+                line.appendChild(nowPlayingUsbText(label));
+                box.appendChild(line);
+            }
+        }
+        box.hidden = false;
+        button.value = "Hide USB Tree";
+    });
+}
+
+function nowPlayingUsbCycle()
+{
+    var section = document.getElementById("np-usbhub-section");
+    var button = document.getElementById("np-usbhub-cycle");
+    if (!section || !button) return;
+    var message = "Power cycle " + section.getAttribute("data-target") + "?\n\n"
+        + "Everything on that port loses power for a few seconds";
+    var radios = section.getAttribute("data-radios");
+    if (radios) message += ", including RTL-SDR " + radios;
+    message += ". Anything using it stops receiving.";
+    if (!window.confirm(message)) return;
+
+    var result = document.getElementById("np-usbhub-result");
+    button.disabled = true;
+    result.textContent = "Power cycling\u2026";
+    nowPlayingUsbRequest("POST", "usbhubpowercycle.html", function (reply)
+    {
+        if (!reply || !reply.ok)
+        {
+            result.textContent = (reply && reply.error) || "ControlBooth didn't answer.";
+            button.disabled = false;
+            return;
+        }
+        // The cycle takes several seconds; ask until ControlBooth says it's done.
+        var attempts = 0;
+        var poll = function ()
+        {
+            nowPlayingUsbRequest("GET", "usbhubpower.json", function (status)
+            {
+                attempts++;
+                var s = status && status.available ? status.status : null;
+                if (s && !s.cycling && s.message)
+                {
+                    result.textContent = s.message;
+                    button.disabled = false;
+                }
+                else if (attempts < 30)
+                {
+                    setTimeout(poll, 2000);
+                }
+                else
+                {
+                    result.textContent = "ControlBooth hasn't reported the result.";
+                    button.disabled = false;
+                }
+            });
+        };
+        setTimeout(poll, 2000);
+    });
+}
+
 function nowPlayingStopPipeline()
 {
     var xhttp = new XMLHttpRequest();
