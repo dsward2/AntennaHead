@@ -971,7 +971,8 @@ final class AntennaHeadHTTPServer {
                                       "NOW_PLAYING_DETAILS": page.details,
                                       "AUDIO_DELAY_CONTROLS": audioDelayControlsHTML(),
                                       "SPATIAL_AUDIO_CONTROLS": spatialAudioControlsHTML(),
-                                      "OPEN_AUDIO_PLAYER_PAGE_BUTTON": Self.openAudioPlayerButtonHTML])
+                                      "OPEN_AUDIO_PLAYER_PAGE_BUTTON": Self.openAudioPlayerButtonHTML,
+                                      "USB_HUB_POWER_SECTION": usbHubPowerSectionHTML()])
 
         case "/api/audio-delay/update":
             return updateAudioDelay(fromBody: request.body)
@@ -999,6 +1000,18 @@ final class AntennaHeadHTTPServer {
             // element keeps playing, so the listener hears that filler.
             sdrController?.terminateTasks()
             return okResponse()
+
+        case "/usbhubpower.json":
+            // The Now Playing page's USB Hub Power section: ControlBooth's chosen
+            // port and last outcome; `tree=1` adds the USB tree, read fresh.
+            return usbHubPowerResponse(includeTree: queryValue("tree", in: request.path) == "1")
+
+        case "/usbhubpowercycle.html":
+            // The section's "Power Cycle USB Hub" button (after a confirm in the
+            // page). ControlBooth answers at once; the page polls usbhubpower.json.
+            var failure: String?
+            do { try ControlBoothClient.powerCycleUSBHub() } catch { failure = "\(error)" }
+            return usbHubPowerJSONResponse(["ok": failure == nil, "error": failure ?? ""])
 
         case "/nowplayingstatus.html":
             return HTTPResponse(status: 200, reason: "OK",
@@ -2227,6 +2240,63 @@ final class AntennaHeadHTTPServer {
     /// `controlboothdsdneo.html?action=skip|mode|policy` — the dsd-neo
     /// section's controls. Answers with the page re-rendered, with
     /// ControlBooth's error (if it refused) in the dsd-neo section.
+    /// `/usbhubpower.json`'s body: `available` is false when ControlBooth isn't
+    /// running or predates the USB hub commands.
+    @MainActor private func usbHubPowerResponse(includeTree: Bool) -> HTTPResponse {
+        guard ControlBoothClient.isControlBoothRunning else {
+            return usbHubPowerJSONResponse(["available": false, "error": "ControlBooth isn't running."])
+        }
+        do {
+            let status = try ControlBoothClient.usbHubPowerStatus(includeTree: includeTree)
+            let data = try JSONEncoder().encode(status)
+            let object = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            return usbHubPowerJSONResponse(["available": true, "status": object])
+        } catch {
+            return usbHubPowerJSONResponse(["available": false, "error": "\(error)"])
+        }
+    }
+
+    nonisolated private func usbHubPowerJSONResponse(_ body: [String: Any]) -> HTTPResponse {
+        HTTPResponse(status: 200, reason: "OK",
+                     headers: ["Content-Type": "application/json", "Cache-Control": "no-cache, no-store"],
+                     body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8))
+    }
+
+    /// `%%USB_HUB_POWER_SECTION%%` for nowplaying.html: empty unless ControlBooth
+    /// is running and understands the USB hub commands. The buttons' behavior
+    /// is `nowPlayingUsbTree()` / `nowPlayingUsbCycle()` in antennahead.js.
+    @MainActor private func usbHubPowerSectionHTML() -> String {
+        guard ControlBoothClient.isControlBoothRunning,
+              let status = try? ControlBoothClient.usbHubPowerStatus(includeTree: false) else { return "" }
+        let canCycle = status.configured && status.uhubctlInstalled && !status.cycling
+        var s = "<section id='np-usbhub-section' class='np-usbhub-section' "
+        s += "data-target='\(htmlAttribute(status.target))' "
+        s += "data-radios='\(htmlAttribute(status.affectedRTLSDRs.joined(separator: ", ")))'>"
+        s += "<h5 class='title'>USB Hub Power</h5>"
+        if status.configured {
+            s += "<p id='np-usbhub-text'>Power cycle target: <strong>\(htmlText(status.target))</strong>"
+            if !status.affectedRTLSDRs.isEmpty {
+                s += "<br>RTL-SDR on it: \(htmlText(status.affectedRTLSDRs.joined(separator: ", ")))"
+            }
+            s += "</p>"
+        } else {
+            s += "<p id='np-usbhub-text'>No hub port is chosen. Choose one in ControlBooth&rsquo;s USB Tree window.</p>"
+        }
+        if !status.uhubctlInstalled {
+            s += "<p class='np-usbhub-note'>uhubctl isn&rsquo;t installed on this Mac, so ports can&rsquo;t be power cycled.</p>"
+        }
+        s += "<p id='np-usbhub-result' class='np-usbhub-note'>\(htmlText(status.message))</p>"
+        s += "<div id='np-usbhub-tree' class='np-usbhub-tree' hidden></div>"
+        s += "<div class='np-pipeline-buttons'>"
+        s += "<input id='np-usbhub-tree-button' class='button' type='button' value='View USB Tree' "
+        s += "onclick=\"nowPlayingUsbTree();\">"
+        s += "<input id='np-usbhub-cycle' class='button' type='button' value='Power Cycle USB Hub&hellip;' "
+        s += "\(canCycle ? "" : "disabled ")title='Switch the chosen hub port off and on, which powers off everything below it.' "
+        s += "onclick=\"nowPlayingUsbCycle();\">"
+        s += "</div></section>"
+        return s
+    }
+
     @MainActor private func controlBoothDsdNeoActionResponse(requestPath: String) -> HTTPResponse {
         var failure: String?
         do {

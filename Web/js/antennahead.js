@@ -1285,6 +1285,7 @@ function periodicUpdate()
         if (this.readyState == 4 && this.status == 200) {
           // response received ok
           updateStatusDisplay(xhttp.response);
+          nowPlayingUsbRefresh();
         }
       };
       xhttp.open("POST", nowPlayingStatusUrl, true);
@@ -1630,6 +1631,167 @@ function gqrxQuitApp(restart)
     };
     xhttp.open("POST", restart ? "restartgqrx.html" : "quitgqrx.html", true);
     xhttp.send();
+}
+
+// The Now Playing page's USB Hub Power section (ControlBooth's USB tree and
+// power cycling, via usbhubpower.json / usbhubpowercycle.html).
+function nowPlayingUsbRequest(method, url, done)
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function ()
+    {
+        if (this.readyState != 4) return;
+        var reply = null;
+        try { reply = JSON.parse(this.responseText); } catch (e) { reply = null; }
+        done(reply);
+    };
+    xhttp.open(method, url, true);
+    xhttp.send();
+}
+
+function nowPlayingUsbText(text)
+{
+    var node = document.createElement("span");
+    node.textContent = text;
+    return node;
+}
+
+// The section is rendered once with the page, so a port chosen (or a cycle
+// finished) in ControlBooth afterwards would leave stale text and a disabled
+// button; refresh it from usbhubpower.json with the Now Playing status polls.
+var nowPlayingUsbBusy = false;
+var nowPlayingUsbLastRefresh = 0;
+
+function nowPlayingUsbRefresh()
+{
+    var section = document.getElementById("np-usbhub-section");
+    if (!section || nowPlayingUsbBusy) return;
+    var now = Date.now();
+    if (now - nowPlayingUsbLastRefresh < 5000) return;
+    nowPlayingUsbLastRefresh = now;
+    nowPlayingUsbRequest("GET", "usbhubpower.json", function (reply)
+    {
+        var s = reply && reply.available ? reply.status : null;
+        if (!s || nowPlayingUsbBusy) return;
+        var text = document.getElementById("np-usbhub-text");
+        while (text.firstChild) text.removeChild(text.firstChild);
+        if (s.configured)
+        {
+            text.appendChild(document.createTextNode("Power cycle target: "));
+            var strong = document.createElement("strong");
+            strong.textContent = s.target;
+            text.appendChild(strong);
+            if (s.affectedRTLSDRs.length > 0)
+            {
+                text.appendChild(document.createElement("br"));
+                text.appendChild(document.createTextNode("RTL-SDR on it: " + s.affectedRTLSDRs.join(", ")));
+            }
+        }
+        else
+        {
+            text.textContent = "No hub port is chosen. Choose one in ControlBooth\u2019s USB Tree window.";
+        }
+        section.setAttribute("data-target", s.target);
+        section.setAttribute("data-radios", s.affectedRTLSDRs.join(", "));
+        document.getElementById("np-usbhub-result").textContent = s.cycling ? "Power cycling\u2026" : s.message;
+        document.getElementById("np-usbhub-cycle").disabled = !(s.configured && s.uhubctlInstalled && !s.cycling);
+    });
+}
+
+function nowPlayingUsbTree()
+{
+    var box = document.getElementById("np-usbhub-tree");
+    var button = document.getElementById("np-usbhub-tree-button");
+    if (!box) return;
+    if (!box.hidden)
+    {
+        box.hidden = true;
+        button.value = "View USB Tree";
+        return;
+    }
+    button.disabled = true;
+    nowPlayingUsbRequest("GET", "usbhubpower.json?tree=1", function (reply)
+    {
+        button.disabled = false;
+        while (box.firstChild) box.removeChild(box.firstChild);
+        var rows = (reply && reply.available && reply.status && reply.status.tree) || null;
+        if (!rows)
+        {
+            box.appendChild(nowPlayingUsbText((reply && reply.error) || "The USB tree isn't available."));
+        }
+        else
+        {
+            for (var i = 0; i < rows.length; i++)
+            {
+                var row = rows[i];
+                var line = document.createElement("div");
+                line.className = "np-usbhub-row" + (row.selectable ? "" : " np-usbhub-dim");
+                line.style.paddingLeft = (row.depth * 1.2) + "em";
+                var label = (row.isRTLSDR ? "\u{1F4FB} " : "") + row.name;
+                if (row.serial) label += "  [" + row.serial + "]";
+                if (row.port) label += "  (" + row.parentPath + " port " + row.port + ")";
+                line.appendChild(nowPlayingUsbText(label));
+                box.appendChild(line);
+            }
+        }
+        box.hidden = false;
+        button.value = "Hide USB Tree";
+    });
+}
+
+function nowPlayingUsbCycle()
+{
+    var section = document.getElementById("np-usbhub-section");
+    var button = document.getElementById("np-usbhub-cycle");
+    if (!section || !button) return;
+    var message = "Power cycle " + section.getAttribute("data-target") + "?\n\n"
+        + "Everything on that port loses power for a few seconds";
+    var radios = section.getAttribute("data-radios");
+    if (radios) message += ", including RTL-SDR " + radios;
+    message += ". Anything using it stops receiving.";
+    if (!window.confirm(message)) return;
+
+    var result = document.getElementById("np-usbhub-result");
+    nowPlayingUsbBusy = true;
+    button.disabled = true;
+    result.textContent = "Power cycling\u2026";
+    nowPlayingUsbRequest("POST", "usbhubpowercycle.html", function (reply)
+    {
+        if (!reply || !reply.ok)
+        {
+            result.textContent = (reply && reply.error) || "ControlBooth didn't answer.";
+            button.disabled = false;
+            nowPlayingUsbBusy = false;
+            return;
+        }
+        // The cycle takes several seconds; ask until ControlBooth says it's done.
+        var attempts = 0;
+        var poll = function ()
+        {
+            nowPlayingUsbRequest("GET", "usbhubpower.json", function (status)
+            {
+                attempts++;
+                var s = status && status.available ? status.status : null;
+                if (s && !s.cycling && s.message)
+                {
+                    result.textContent = s.message;
+                    button.disabled = false;
+                    nowPlayingUsbBusy = false;
+                }
+                else if (attempts < 30)
+                {
+                    setTimeout(poll, 2000);
+                }
+                else
+                {
+                    result.textContent = "ControlBooth hasn't reported the result.";
+                    button.disabled = false;
+                    nowPlayingUsbBusy = false;
+                }
+            });
+        };
+        setTimeout(poll, 2000);
+    });
 }
 
 function nowPlayingStopPipeline()
