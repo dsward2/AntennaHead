@@ -1731,6 +1731,16 @@ function nowPlayingUsbTree()
                 if (row.serial) label += "  [" + row.serial + "]";
                 if (row.port) label += "  (" + row.parentPath + " port " + row.port + ")";
                 line.appendChild(nowPlayingUsbText(label));
+                if (row.isHub && row.switchesPorts !== undefined && row.switchesPorts !== null)
+                {
+                    var badge = document.createElement("span");
+                    badge.className = "np-usbhub-badge" + (row.switchesPorts ? " np-usbhub-ppps" : "");
+                    badge.textContent = row.switchesPorts ? "\u26A1 per-port power" : "no per-port power";
+                    badge.title = row.switchesPorts
+                        ? "uhubctl can switch each port of this hub on its own (ppps)."
+                        : "uhubctl can't switch this hub's ports individually (ganged, or not listed).";
+                    line.appendChild(badge);
+                }
                 box.appendChild(line);
             }
         }

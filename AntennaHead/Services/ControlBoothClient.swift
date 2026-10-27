@@ -292,6 +292,8 @@ struct USBTreeRow: Codable, Equatable {
     var port: Int?
     /// Its hub can switch this port's power.
     var selectable: Bool
+    /// A hub uhubctl can switch per port (`ppps`); nil from an older ControlBooth.
+    var switchesPorts: Bool?
 }
 
 /// The USB hub power cycling state, as ControlBooth's 'UbSt'/'UbTr' replies
