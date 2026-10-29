@@ -174,6 +174,11 @@ enum ControlBoothClient {
         return status
     }
 
+    /// Chooses the device at `path` in the USB tree as the port to power cycle.
+    static func selectUSBHubPort(path: String) throws {
+        _ = try send(eventID: "UbSl", directParameter: NSAppleEventDescriptor(string: path))
+    }
+
     /// Starts power cycling the chosen hub port. ControlBooth answers at once;
     /// the cycle takes several seconds (see `usbHubPowerStatus`).
     static func powerCycleUSBHub() throws {
@@ -308,6 +313,8 @@ struct USBHubPowerStatus: Codable, Equatable {
     var message: String
     var messageIsError: Bool
     var tree: [USBTreeRow]?
+    /// Tree path of the chosen port's device; nil from an older ControlBooth.
+    var selectedPath: String?
 }
 
 /// ControlBooth's dsd-neo Scanner, as its 'DnSt' reply describes it (ControlBooth's

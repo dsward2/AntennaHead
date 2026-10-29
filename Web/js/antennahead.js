@@ -1673,29 +1673,35 @@ function nowPlayingUsbRefresh()
     {
         var s = reply && reply.available ? reply.status : null;
         if (!s || nowPlayingUsbBusy) return;
-        var text = document.getElementById("np-usbhub-text");
-        while (text.firstChild) text.removeChild(text.firstChild);
-        if (s.configured)
-        {
-            text.appendChild(document.createTextNode("Power cycle target: "));
-            var strong = document.createElement("strong");
-            strong.textContent = s.target;
-            text.appendChild(strong);
-            if (s.affectedRTLSDRs.length > 0)
-            {
-                text.appendChild(document.createElement("br"));
-                text.appendChild(document.createTextNode("RTL-SDR on it: " + s.affectedRTLSDRs.join(", ")));
-            }
-        }
-        else
-        {
-            text.textContent = "No hub port is chosen. Choose one in ControlBooth\u2019s USB Tree window.";
-        }
-        section.setAttribute("data-target", s.target);
-        section.setAttribute("data-radios", s.affectedRTLSDRs.join(", "));
-        document.getElementById("np-usbhub-result").textContent = s.cycling ? "Power cycling\u2026" : s.message;
-        document.getElementById("np-usbhub-cycle").disabled = !(s.configured && s.uhubctlInstalled && !s.cycling);
+        nowPlayingUsbApplyStatus(s);
     });
+}
+
+function nowPlayingUsbApplyStatus(s)
+{
+    var section = document.getElementById("np-usbhub-section");
+    var text = document.getElementById("np-usbhub-text");
+    while (text.firstChild) text.removeChild(text.firstChild);
+    if (s.configured)
+    {
+        text.appendChild(document.createTextNode("Power cycle target: "));
+        var strong = document.createElement("strong");
+        strong.textContent = s.target;
+        text.appendChild(strong);
+        if (s.affectedRTLSDRs.length > 0)
+        {
+            text.appendChild(document.createElement("br"));
+            text.appendChild(document.createTextNode("RTL-SDR on it: " + s.affectedRTLSDRs.join(", ")));
+        }
+    }
+    else
+    {
+        text.textContent = "No hub port is chosen. Choose one in the USB tree below.";
+    }
+    section.setAttribute("data-target", s.target);
+    section.setAttribute("data-radios", s.affectedRTLSDRs.join(", "));
+    document.getElementById("np-usbhub-result").textContent = s.cycling ? "Power cycling\u2026" : s.message;
+    document.getElementById("np-usbhub-cycle").disabled = !(s.configured && s.uhubctlInstalled && !s.cycling);
 }
 
 function nowPlayingUsbTree()
@@ -1710,42 +1716,92 @@ function nowPlayingUsbTree()
         return;
     }
     button.disabled = true;
-    nowPlayingUsbRequest("GET", "usbhubpower.json?tree=1", function (reply)
+    nowPlayingUsbLoadTree(function ()
     {
         button.disabled = false;
+        box.hidden = false;
+        button.value = "Hide USB Tree";
+    });
+}
+
+// Fills the tree box from ControlBooth. The chosen port (ControlBooth's
+// default or the user's pick) is marked; clicking another selectable row
+// chooses it as the port to power cycle.
+function nowPlayingUsbLoadTree(done)
+{
+    var box = document.getElementById("np-usbhub-tree");
+    nowPlayingUsbRequest("GET", "usbhubpower.json?tree=1", function (reply)
+    {
         while (box.firstChild) box.removeChild(box.firstChild);
-        var rows = (reply && reply.available && reply.status && reply.status.tree) || null;
+        var status = (reply && reply.available && reply.status) || null;
+        var rows = (status && status.tree) || null;
         if (!rows)
         {
             box.appendChild(nowPlayingUsbText((reply && reply.error) || "The USB tree isn't available."));
         }
         else
         {
+            var hint = document.createElement("div");
+            hint.className = "np-usbhub-note";
+            hint.textContent = "Click a port to choose what to power cycle.";
+            box.appendChild(hint);
             for (var i = 0; i < rows.length; i++)
             {
-                var row = rows[i];
-                var line = document.createElement("div");
-                line.className = "np-usbhub-row" + (row.selectable ? "" : " np-usbhub-dim");
-                line.style.paddingLeft = (row.depth * 1.2) + "em";
-                var label = (row.isRTLSDR ? "\u{1F4FB} " : "") + row.name;
-                if (row.serial) label += "  [" + row.serial + "]";
-                if (row.port) label += "  (" + row.parentPath + " port " + row.port + ")";
-                line.appendChild(nowPlayingUsbText(label));
-                if (row.isHub && row.switchesPorts !== undefined && row.switchesPorts !== null)
-                {
-                    var badge = document.createElement("span");
-                    badge.className = "np-usbhub-badge" + (row.switchesPorts ? " np-usbhub-ppps" : "");
-                    badge.textContent = row.switchesPorts ? "\u26A1 per-port power" : "no per-port power";
-                    badge.title = row.switchesPorts
-                        ? "uhubctl can switch each port of this hub on its own (ppps)."
-                        : "uhubctl can't switch this hub's ports individually (ganged, or not listed).";
-                    line.appendChild(badge);
-                }
-                box.appendChild(line);
+                box.appendChild(nowPlayingUsbRow(rows[i], status.selectedPath));
             }
+            nowPlayingUsbApplyStatus(status);
         }
-        box.hidden = false;
-        button.value = "Hide USB Tree";
+        if (done) done();
+    });
+}
+
+function nowPlayingUsbRow(row, selectedPath)
+{
+    var chosen = !!selectedPath && row.path === selectedPath;
+    var line = document.createElement("div");
+    line.className = "np-usbhub-row" + (row.selectable ? " np-usbhub-pick" : " np-usbhub-dim")
+        + (chosen ? " np-usbhub-chosen" : "");
+    line.style.paddingLeft = (row.depth * 1.2) + "em";
+    line.appendChild(nowPlayingUsbText((chosen ? "\u25C9 " : (row.selectable ? "\u25CB " : "\u2013 "))));
+    var label = (row.isRTLSDR ? "\u{1F4FB} " : "") + row.name;
+    if (row.serial) label += "  [" + row.serial + "]";
+    if (row.port) label += "  (" + row.parentPath + " port " + row.port + ")";
+    line.appendChild(nowPlayingUsbText(label));
+    if (row.isHub && row.switchesPorts !== undefined && row.switchesPorts !== null)
+    {
+        var badge = document.createElement("span");
+        badge.className = "np-usbhub-badge" + (row.switchesPorts ? " np-usbhub-ppps" : "");
+        badge.textContent = row.switchesPorts ? "\u26A1 per-port power" : "no per-port power";
+        badge.title = row.switchesPorts
+            ? "uhubctl can switch each port of this hub on its own (ppps)."
+            : "uhubctl can't switch this hub's ports individually (ganged, or not listed).";
+        line.appendChild(badge);
+    }
+    if (row.selectable)
+    {
+        line.title = "Choose this port to power cycle";
+        line.onclick = function () { nowPlayingUsbSelect(row.path); };
+    }
+    else
+    {
+        line.title = "Its hub can't switch this port's power. Choose the hub above it that can.";
+    }
+    return line;
+}
+
+function nowPlayingUsbSelect(path)
+{
+    var result = document.getElementById("np-usbhub-result");
+    nowPlayingUsbBusy = true;
+    nowPlayingUsbRequest("GET", "usbhubpowerselect.html?path=" + encodeURIComponent(path), function (reply)
+    {
+        nowPlayingUsbBusy = false;
+        if (!reply || !reply.ok)
+        {
+            result.textContent = (reply && reply.error) || "ControlBooth didn't answer.";
+            return;
+        }
+        nowPlayingUsbLoadTree(null);
     });
 }
 

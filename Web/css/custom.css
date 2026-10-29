@@ -1212,5 +1212,8 @@ svg.lr-animation {
 .np-usbhub-tree[hidden] { display: none; }
 .np-usbhub-row { white-space: nowrap; }
 .np-usbhub-dim { opacity: 0.45; }
+.np-usbhub-pick { cursor: pointer; }
+.np-usbhub-pick:hover { background: rgba(128,128,128,0.15); }
+.np-usbhub-chosen { font-weight: bold; }
 .np-usbhub-badge { margin-left: 0.6em; font-size: 0.8em; opacity: 0.7; }
 .np-usbhub-ppps { color: #2e9e4f; opacity: 1; }
