@@ -1006,6 +1006,17 @@ final class AntennaHeadHTTPServer {
             // port and last outcome; `tree=1` adds the USB tree, read fresh.
             return usbHubPowerResponse(includeTree: queryValue("tree", in: request.path) == "1")
 
+        case "/usbhubpowerselect.html":
+            // Clicking a row in the Now Playing page's USB tree: `path` is the
+            // row's tree path. ControlBooth keeps the choice.
+            var failure: String?
+            if let path = queryValue("path", in: request.path), !path.isEmpty {
+                do { try ControlBoothClient.selectUSBHubPort(path: path) } catch { failure = "\(error)" }
+            } else {
+                failure = "No USB device was named."
+            }
+            return usbHubPowerJSONResponse(["ok": failure == nil, "error": failure ?? ""])
+
         case "/usbhubpowercycle.html":
             // The section's "Power Cycle USB Hub" button (after a confirm in the
             // page). ControlBooth answers at once; the page polls usbhubpower.json.
@@ -2280,7 +2291,7 @@ final class AntennaHeadHTTPServer {
             }
             s += "</p>"
         } else {
-            s += "<p id='np-usbhub-text'>No hub port is chosen. Choose one in ControlBooth&rsquo;s USB Tree window.</p>"
+            s += "<p id='np-usbhub-text'>No hub port is chosen. Choose one in the USB tree below.</p>"
         }
         if !status.uhubctlInstalled {
             s += "<p class='np-usbhub-note'>uhubctl isn&rsquo;t installed on this Mac, so ports can&rsquo;t be power cycled.</p>"
